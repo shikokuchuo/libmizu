@@ -1,0 +1,161 @@
+# librei design notes
+
+This file is the design authority for the core.
+`include/rei.h` is the API contract.
+This file holds the invariants that the implementation maintains.
+Code comments reference this file.
+
+## Wire format
+
+Each struct in `include/rei.h` is the wire format.
+Sizes are static-asserted, and alignment is 64 bytes.
+Each shared hot word owns a full cache line, so writes from the producer and the consumer never share a line.
+The layout is fixed: later phases add capability without moving anything.
+`REI_ABI_VERSION` gates mixed builds.
+Peers validate it at attach, before any thread reads or writes a shared atomic.
+Bump it on each wire-format change.
+
+## Statuses, not exceptions
+
+Terminal transport states return `rei_status` values: `REI_FULL`, `REI_TIMEOUT`, `REI_CLOSED`, `REI_PEER_GONE`.
+This keeps hot loops branch-cheap.
+`REI_ERR` is a real error: a portable `rei_errcat` plus a formatted message.
+The record lives on the handle and stays valid until the next call on it.
+Handle-free entry points (regions, prune) use a thread-local slot.
+Each binding maps the four terminal states to its own sentinel or condition values, and `REI_ERR` to its error hierarchy.
+The mapping is per-verb: a full ring on send is a sentinel in R, and a full injection ring at the submit deadline raises.
+
+## Liveness lock is the death verdict
+
+Each process holds an exclusive lock on a file for its full lifetime: an flock on POSIX, LockFileEx on Windows.
+The kernel releases the lock on each exit path.
+The lock is fd-scoped, so PID reuse cannot fake "alive".
+The platform death listeners are wake triggers only: pidfd+epoll on Linux, dispatch sources on macOS, thread-pool waits on Windows.
+The lock probe decides.
+Linux requires kernel >= 5.3 (`pidfd_open`, no fallback): without a listener, the death of the host under a parked peer becomes a permanent hang.
+
+## Parker protocol
+
+Each waiting entity owns one epoch word.
+The platform waiters are in `wait_linux.c` (futex), `wait_macos.c` (`__ulock`), and `wait_win32.c` (WaitOnAddress plus named events).
+Each park site follows the same sequence: snapshot, announce, re-check, sleep-bounded.
+An unpark that sees the announcement bumps the epoch after the snapshot, so the sleep returns immediately.
+The re-check in the caller absorbs spurious wakes.
+This handshake is the only guarantee against lost wakeups.
+No watchdog sits behind it.
+
+On POSIX, each park is timed: an untimed wait restarts silently under SA_RESTART, and a Ctrl-C then surfaces only at the next genuine wake.
+An indefinite park uses `REI_PARK_NOMINAL_MS` and relies on directed unparks.
+
+## Payload framing tiers
+
+A frame is a 16-byte `rei_slot_hdr` plus payload bytes.
+The tiers:
+
+- `NIL`: an immediate empty value.
+  No bytes move.
+- `STR1`: a length-1 string.
+  Bytes and encoding, no serialize.
+- `RAWVEC`: the bare bytes of an attribute-free atomic vector.
+- `RAWSPILL`: the same bytes out of line, in a channel arena chunk or a pool spill region.
+- `INLINE`: a complete serialized stream.
+- `ARENA`: one chunk in the channel spill arena (channel only).
+- `SHM_RAW`: a serialized stream in a spill region.
+  The consumer copies the bytes out before its consumer-done signal, so the region returns to the free list deterministically.
+- `SHM_VEC`: a spill region that holds an REIH/REIS/REIL layout object.
+  The consumer wraps a zero-copy view.
+- `REF`: the `/rei_` identifier of an object already in shared memory.
+
+The core moves opaque frames.
+The tier contents are the binding's.
+
+## The binding seam
+
+The core never sees a language object.
+A binding registers its callbacks at create, attach, or join:
+
+- `stage` and `read`: always.
+- `exec`: on pool workers.
+- `check`: the interrupt poll.
+- `park`: for runtimes with a global lock.
+- `sweep`: the idle cache drop.
+- `drop`: the pin release.
+
+The core copies the function pointers into the handle.
+A hot-path call is one load plus a predicted indirect branch.
+The typedefs in `rei.h` document the full contracts.
+Three of them are load-bearing:
+
+- Staging is transactional.
+  The core mutates no shared state before `stage_fn` returns.
+  The core reclaims an arena chunk allocated mid-stage in FIFO order, like any other chunk.
+  An uncommitted region checkout or pin rolls back at the next verb entry or at destroy.
+  A binding can abandon mid-stage (R's longjmp) and leave the handle consistent.
+- `exec_fn` must not abandon.
+  The binding catches each task condition into the result sink.
+  A worker that lets one escape degrades to worker death plus the reaper verdict.
+  That is the hard-crash semantics, never the path for an ordinary task error.
+- `check` runs at abandon-safe points only, once per spin or park iteration.
+  A nonzero return unwinds the verb as `REI_ERR` with `REI_ERRCAT_INTERRUPTED` and consumes nothing.
+
+## Retain table
+
+Payload lifetime is explicit, not GC-inherited.
+Each handle owns a retain table of `{ region, pin, key, kind }` entries.
+The transport commits an entry at publish.
+It releases the entry at a consumer-done point: collect, slot reuse, the worker keeper sweep, or the channel head-advance reap.
+The region half is core-owned.
+The pin is an opaque binding token, and the core calls the binding's `drop` hook with it at release.
+One uncommitted checkout (region plus pin) rides `fl->staging*`.
+It rolls back at the next verb entry or at teardown, so a mid-stage abandon never leaks.
+
+The free list of the producer recycles retired regions: power-of-two size classes, per-class and total-byte caps, largest-oldest eviction.
+Steady-state spill traffic creates and unlinks no regions.
+An SHM_VEC region recycles only after its zc refcount reaches zero.
+A nonzero region waits in the lent-region ledger.
+Busy paths sweep the ledger with a quota.
+Idle paths and free-list misses sweep it in full.
+
+If the consumer dies, its counts leak.
+The death verdict on the producer then force-reclaims its lent regions.
+REFHELD-flagged regions (their identifiers escaped by reference) leak and unlink instead.
+On a ledger overflow, the entry closes the mapping but keeps the name, so a REF in flight can still resolve.
+The unlink lands at handle teardown.
+
+## Zero-copy views
+
+A layout-eligible object past the floor of the binding stages as SHM_VEC.
+The stage is one layout write into a spill region.
+The consumer wraps the mapped pages as a view instead of copying.
+The cross-process refcount lives in bytes [24-31] of the region header (a rei-owned offset convention).
+The producer stores 1 at stage.
+`rei_shm_open_view` adds 1 at the wrap of the consumer: open implies counted, so add-before-consumer-done is structural.
+The release of the view subtracts 1.
+The consumer maps page 0 read-write (the refcount word) and the rest read-only.
+
+## Crash atomicity
+
+Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge a queue.
+A worker announces its claim (`in_flight_rs`) before it CASes.
+A reaper, serialized by the liveness lock, then fails exactly the tasks that the dead worker claimed.
+
+## Pool mechanics
+
+The pool has per-submitter SPSC injection rings, per-worker Chase-Lev deques, and result slots.
+There is no dispatcher process.
+A worker seeks work in tier order: fairness tick, own deque, random-victim steal, injection scan.
+A nested submit on a worker handle pushes to the deque of that worker.
+A full deque runs the task inline.
+A worker blocked in a nested collect helps (executes or steals) instead of sleeping.
+A task error never crosses as the caught condition itself.
+The ERR publish carries the flattened envelope of the binding, framed so that the publish cannot raise: fail the task, never the worker.
+
+## ABI discipline
+
+Handles are opaque.
+Nothing public passes or returns a struct by value.
+Extensible structs carry a size field.
+Each public operation is a real exported function (`REI_API`).
+Builds use `-fvisibility=hidden`.
+The shared library carries a soname that tracks `REI_VERSION_MAJOR`.
+Two contracts are versioned, both documented in the `rei.h` preamble: the wire-format `REI_ABI_VERSION` and the soname.

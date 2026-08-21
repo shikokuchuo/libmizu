@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  amalgamation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag must name the version the header declares.
+      - name: tag matches REI_VERSION
+        run: |
+          ver=$(awk '/^#define REI_VERSION_(MAJOR|MINOR|PATCH)/{printf "%s%s",s,$3; s="."}' include/rei.h)
+          if [ "v$ver" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match rei.h version v$ver"
+            exit 1
+          fi
+
+      - name: generate the amalgamation
+        run: tools/amalgamate.sh dist
+
+      # The artifact's contract: rei.c + rei.h alone, no defines.
+      - name: smoke test
+        run: |
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Idist -Isrc \
+            tests/unit/test_region.c dist/rei.c -o test_amalg
+          ./test_amalg
+          printf '#include "rei.h"\nint main(void){return rei_version()==0;}\n' \
+            > public_only.c
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Idist \
+            public_only.c dist/rei.c -o public_only
+          ./public_only
+
+      - name: checksums
+        run: cd dist && sha256sum rei.c rei.h > SHA256SUMS.txt
+
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            dist/rei.c dist/rei.h dist/SHA256SUMS.txt

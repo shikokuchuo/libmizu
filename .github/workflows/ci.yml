@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: make
+      - run: make test
+      # The consumer contract: rei.c + rei.h alone, no defines — the
+      # public-only program must link and run, not just compile. The
+      # stamp check guards the bare-file skew case (both files must
+      # carry the identical Version line).
+      - name: amalgamation
+        run: |
+          tools/amalgamate.sh
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+            -I. -Isrc tests/unit/test_region.c rei.c -o test_amalg
+          ./test_amalg
+          printf '#include "rei.h"\nint main(void){return rei_version()==0;}\n' \
+            > public_only.c
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \
+            public_only.c rei.c -o public_only
+          ./public_only
+          cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei.h)
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        san: [address, undefined, thread]
+    steps:
+      - uses: actions/checkout@v7
+      - name: test (${{ matrix.san }})
+        run: |
+          make clean
+          make CFLAGS="-O1 -g -fsanitize=${{ matrix.san }} -fno-omit-frame-pointer" \
+               LDFLAGS="-fsanitize=${{ matrix.san }}" test
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: tools\build-win.bat test
+
+  # The R package builds the vendored core with Rtools (MinGW-w64 gcc,
+  # UCRT) — this leg guards that toolchain. `make test` links only the
+  # static lib, so no Makefile MINGW case is needed.
+  windows-mingw:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: make mingw-w64-ucrt-x86_64-gcc
+      - run: make test
