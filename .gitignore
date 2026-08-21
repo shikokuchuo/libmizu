@@ -1,0 +1,9 @@
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+.DS_Store
+.posit/
+dev/
