@@ -15,8 +15,8 @@ void rei_binding_init(rei_binding *b) {
   b->size = (uint32_t) sizeof(*b);
 }
 
-/* Defaults mirror the R binding's public defaults; max_workers has none
-   (0 = the caller must set it). */
+/* The opts defaults; max_workers has none (0 = the caller must set
+   it). */
 void rei_channel_opts_init(rei_channel_opts *opts) {
   memset(opts, 0, sizeof(*opts));
   opts->size = (uint32_t) sizeof(*opts);

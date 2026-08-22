@@ -13,7 +13,7 @@
  *     Operations Research, 50, 6 (2002), 1073-1075.
  *
  * The kernel ships in the core so a future rei_map can derive per-element
- * streams; the R package's map rides it today. */
+ * streams. */
 
 #include "internal.h"
 
@@ -44,8 +44,8 @@ static void mat_vec_mod(const unsigned long long A[3][3],
   }
 }
 
-/* One 2^127-step stream jump in place over a 6-word CMRG state, stored as
-   R stores it: signed ints holding values in [0, m). */
+/* One 2^127-step stream jump in place over a 6-word CMRG state, held as
+   signed ints with values in [0, m). */
 void rei_rng_jump(int *seed) {
   unsigned long long v1[3] = { (unsigned int) seed[0], (unsigned int) seed[1],
                                (unsigned int) seed[2] };

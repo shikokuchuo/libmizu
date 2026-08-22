@@ -24,9 +24,11 @@ jobs:
       - name: amalgamation
         run: |
           tools/amalgamate.sh
-          cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
-            -I. -Isrc tests/unit/test_region.c rei.c -o test_amalg
-          ./test_amalg
+          for t in tests/unit/*.c; do
+            cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+              -I. -Isrc "$t" rei.c -o test_amalg
+            ./test_amalg
+          done
           printf '#include "rei.h"\nint main(void){return rei_version()==0;}\n' \
             > public_only.c
           cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \

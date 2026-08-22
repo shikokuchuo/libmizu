@@ -56,3 +56,8 @@ long rei_self_pid(void) {
   return (long) getpid();
 #endif
 }
+
+rei_death_watch *rei_death_watch_start(long pid, _Atomic int *flag,
+                                       const rei_parker *pk) {
+  return rei_death_watch_start2(pid, flag, pk, NULL, NULL);
+}

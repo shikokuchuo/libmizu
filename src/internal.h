@@ -5,7 +5,7 @@
    library; the amalgamation folds it in.
 
    Consumers: the core's own TUs, and first-party bindings' internal TUs
-   from the vendored tree (R's test-hook wrappers and map.c).
+   from the vendored tree (test-hook wrappers, map support).
 
    Macros and static inline are fine here (no FFI to reach them). */
 
@@ -79,6 +79,10 @@ rei_shm *rei_shm_open_ro_heap(const char *name);
 /* Host-side teardown of a created region: releases the SHM name (POSIX:
    unlink) / creator handle (Windows) without touching the mapping. */
 void rei_shm_host_release(rei_shm *shm);
+/* The survivor-unlink half of a control region's teardown (spill.c):
+   releases the name / creator handle, keeping the mapping (the death
+   watch and parkers reference it until the handle's release). */
+void rei_region_unlink(rei_shm *shm);
 
 /* Category + remediation text for an REI_ERRCAT (fills the handle /
    thread-local error slot). */
@@ -283,7 +287,7 @@ const char *rei_preamble_validate(const void *region, size_t region_size,
    keeper-drop wake is pure cost: the immediate kinds, or a self-contained
    codec stream inline (payload byte 0 is the codec magic — an INLINE
    stream is never empty). Core-only: the core owns the wake gate. */
-#define REI_CODEC_MAGIC 0x53u   /* 'S'; R's binary/xdr streams are 'B'/'X' */
+#define REI_CODEC_MAGIC 0x53u   /* 'S'; native binary/xdr streams are 'B'/'X' */
 
 static inline REI_MAYBE_UNUSED int rei_keeperless(uint32_t kind,
                                  const unsigned char *payload) {
@@ -292,11 +296,11 @@ static inline REI_MAYBE_UNUSED int rei_keeperless(uint32_t kind,
     (kind == REI_KIND_INLINE && payload[0] == REI_CODEC_MAGIC);
 }
 
-/* The R binding's staging-policy floors (used by its stage_fn, not the
+/* Staging-policy floors for a binding's stage_fn (not used by the
    core): SHM_VEC escalates only past max(inline budget, REI_ZC_FLOOR);
    the channel's raw floor is higher (the arena copy has no region
    machinery to amortize) and lifts entirely under the churn signal.
-   Other languages' bindings pick their own. */
+   Bindings pick their own. */
 #define REI_ZC_FLOOR     ((size_t) 32768)
 #define REI_ZC_FLOOR_RAW ((size_t) (256 << 10))
 
@@ -339,7 +343,7 @@ typedef struct rei_spill_fl_s {
      abandonment path. */
   rei_shm *staging;
   void    *staging_pin;
-  uint8_t  staging_kind;              /* REI_KEEP_SPILL / REI_KEEP_ZC */
+  uint8_t  staging_kind;              /* REI_KEEP_SPILL / _ZC / _PIN */
   /* set when a spill pop misses with lent regions outstanding (the sweep
      just proved consumer-side views outlive their traffic): the signal
      for the binding's copy-tier fallback; cleared when a ledger sweep or
@@ -351,7 +355,7 @@ typedef struct rei_spill_fl_s {
 
 /* Per-slot retain table entry — the explicit successor of a GC keeper.
    Staging always copies, so the only retained objects are the regions a
-   staged payload references plus the binding's opaque pin (R: the staged
+   staged payload references plus the binding's opaque pin (the staged
    object, whose serialized stream may carry hook-emitted identifiers).
    kind: SPILL — the region surrenders to the free list at release; ZC —
    the producer-loan refcount sub, then free list or lent ledger by key;
@@ -390,6 +394,9 @@ rei_shm *rei_spill_region_get(rei_spill_fl *fl, size_t n);
    byte caps (evicting largest-oldest), or close + unlink it in place
    when it doesn't fit. */
 void rei_spill_fl_insert(rei_spill_fl *fl, rei_shm *shm);
+/* The producer-loan release for a ZC retain entry: refcount sub, then
+   free list on 0 or the lent-region ledger otherwise. */
+void rei_zc_release(rei_spill_fl *fl, rei_shm *shm, int32_t key);
 /* Move zero-count ledger entries to the free list, up to quota
    (REI_LEDGER_MAX = full sweep). */
 void rei_ledger_sweep(rei_spill_fl *fl, uint32_t quota);
@@ -434,12 +441,17 @@ static inline REI_MAYBE_UNUSED _Atomic uint32_t *rei_zc_flags_(void *base) {
 
 /* Every handle embeds this header as its first member, so an
    rei_channel or rei_pool pointer converts to rei_handle for the
-   callback seam. The full struct definitions live with their TUs. */
+   callback seam. The full struct definitions live with their TUs.
+   htype dispatches the handle-kind-specific staging services
+   (rei_stage_arena_alloc / rei_stage_reap are channel-only). */
+enum { REI_HTYPE_CHANNEL = 1, REI_HTYPE_POOL = 2 };
+
 struct rei_handle_s {
   rei_binding binding;          /* copied in at create/attach: one load +
                                    a predicted indirect branch per call */
   rei_errcat errcat;            /* verb error slot — valid until the next */
   char errmsg[256];             /*   call on this handle */
+  uint8_t htype;                /* REI_HTYPE_*; 0 = unset */
   rei_spill_fl fl;              /* producer free list + lent-region ledger */
   rei_open_cache oc;            /* consumer SHM_RAW mapping cache */
 };
@@ -452,7 +464,7 @@ static inline REI_MAYBE_UNUSED void rei_park_bracket(const rei_binding *b, int e
   if (b->park != NULL) b->park(b->ctx, entering);
 }
 
-// Map support (pool.c; the R-only map rides these) --------------------------------------
+// Map support (pool.c; the bindings' map rides these) ---------------------------------
 
 /* The opaque pool-signal trio a map runner loads relaxed once per batch
    transition: the help_wanted doorbell, the pool's shared shutdown word,
@@ -473,7 +485,7 @@ int rei_pool_deque_pull(rei_pool *, uint32_t n);
 // RNG jump kernel (rng_jump.c) -----------------------------------------------------------
 
 /* One 2^127-step L'Ecuyer-CMRG stream jump in place over a 6-word state.
-   Internal until a map API exists (rei_map stays R-only in v1). */
+   Internal until a map API exists (the map is binding-side in v1). */
 void rei_rng_jump(int *seed);
 
 // Init / fini -----------------------------------------------------------------------------

@@ -210,8 +210,8 @@ static int rei_shm_os_open(const char *name, int flags, mode_t mode) {
 
 /* Per-user registry dir "<temp>/rei", resolved once and cached. Builds
    the path but never creates it (rei_log_append's job), so resolving for
-   a release or reap leaves no empty dir behind. $TMPDIR first, matching
-   R's Sys.getenv("TMPDIR"); NULL if unresolvable. */
+   a release or reap leaves no empty dir behind. $TMPDIR first; NULL if
+   unresolvable. */
 static const char *rei_log_dir(void) {
   static char dir[PATH_MAX];
   static int resolved = 0;            /* 0 = untried, 1 = valid, -1 = failed */

@@ -23,7 +23,7 @@ This keeps hot loops branch-cheap.
 The record lives on the handle and stays valid until the next call on it.
 Handle-free entry points (regions, prune) use a thread-local slot.
 Each binding maps the four terminal states to its own sentinel or condition values, and `REI_ERR` to its error hierarchy.
-The mapping is per-verb: a full ring on send is a sentinel in R, and a full injection ring at the submit deadline raises.
+The mapping is per-verb: a full ring on send is a sentinel value for the binding, and a full injection ring at the submit deadline raises.
 
 ## Liveness lock is the death verdict
 
@@ -90,7 +90,7 @@ Three of them are load-bearing:
   The core mutates no shared state before `stage_fn` returns.
   The core reclaims an arena chunk allocated mid-stage in FIFO order, like any other chunk.
   An uncommitted region checkout or pin rolls back at the next verb entry or at destroy.
-  A binding can abandon mid-stage (R's longjmp) and leave the handle consistent.
+  A binding can abandon mid-stage (a longjmp) and leave the handle consistent.
 - `exec_fn` must not abandon.
   The binding catches each task condition into the result sink.
   A worker that lets one escape degrades to worker death plus the reaper verdict.

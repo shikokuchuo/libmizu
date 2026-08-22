@@ -22,7 +22,7 @@
      transport states (FULL/TIMEOUT/CLOSED/PEER_GONE) are values, not
      errors; REI_ERR comes with a category + message (see Errors).
    - Timeouts are milliseconds as a double: < 0 indefinite, 0 polls.
-     (Bindings convert: R's public verbs take seconds.)
+     (Bindings convert from their own units.)
    - Callback threading: exec runs on the worker's own thread;
      death-watch callbacks run on OS listener threads; stage/read/drop
      and the check/park hooks run on the verb-calling thread.
@@ -150,8 +150,8 @@ typedef struct rei_preamble_s {
 REI_STATIC_ASSERT(sizeof(rei_preamble) == 64, "rei_preamble is the wire format");
 
 /* The drop's first byte is a wire-format tag, so a foreign child can
-   dispatch on it: REI_DROP_R — an R serialize stream (the homogeneous
-   format); REI_DROP_SOURCE — UTF-8 source text in the peer's language,
+   dispatch on it: REI_DROP_R — a native serialize stream (the
+   homogeneous format); REI_DROP_SOURCE — UTF-8 source text in the peer's language,
    the cross-language lingua franca. The core treats the drop as opaque
    bytes; the tag is a binding convention. */
 #define REI_DROP_R       0x52u   /* 'R' */
@@ -195,7 +195,7 @@ REI_STATIC_ASSERT(sizeof(rei_preamble) == 64, "rei_preamble is the wire format")
    type tag | exact used bytes << 8) — the consumer wraps a zero-copy
    view. REF: the /rei_ identifier of an object already in shm. NIL:
    immediate empty value — no bytes move. STR1: a length-1 string (bytes
-   in the payload, aux the encoding; REI_STR1_NA marks the NA string). */
+   in the payload, aux the encoding; REI_STR1_NA marks the missing string). */
 typedef enum rei_kind_e {
   REI_KIND_INLINE = 0,
   REI_KIND_ARENA,
@@ -218,13 +218,12 @@ typedef struct rei_slot_hdr_s {
 
 REI_STATIC_ASSERT(sizeof(rei_slot_hdr) == 16, "rei_slot_hdr is the wire format");
 
-/* Wire type tags: R's SEXPTYPE numbering, fixed by the wire format (RAWVEC
-   aux, REI* layout headers). Bindings in other languages map their own
-   element types onto these. */
+/* Wire type tags, fixed by the wire format (RAWVEC aux, REI* layout
+   headers). Bindings map their own element types onto these. */
 typedef enum rei_type_e {
-  REI_TYPE_LGL = 10,         /* int32 logical; NA is INT_MIN */
-  REI_TYPE_INT = 13,         /* int32; NA is INT_MIN */
-  REI_TYPE_REAL = 14,        /* float64; NA is a specific NaN payload */
+  REI_TYPE_LGL = 10,         /* int32 logical; INT_MIN is the missing sentinel */
+  REI_TYPE_INT = 13,         /* int32; INT_MIN is the missing sentinel */
+  REI_TYPE_REAL = 14,        /* float64; a specific NaN payload is the sentinel */
   REI_TYPE_CPLX = 15,        /* interleaved float64 re/im */
   REI_TYPE_STR = 16,         /* string vector (REIS layout) */
   REI_TYPE_VEC = 19,         /* list tree (REIL layout) */
@@ -385,14 +384,17 @@ typedef enum rei_park_state_e { REI_WPK_RUNNING = 0, REI_WPK_IDLE,
    stage: frame obj as (hdr, payload) — payload capacity inline_max.
      Spill/arena/retain via the rei_stage_* services on the handle.
      Returns 0 on success, nonzero on staging failure (the verb fails as
-     REI_ERR / REI_ERRCAT_STAGE). May also not return (R's longjmp):
+     REI_ERR / REI_ERRCAT_STAGE). May also not return (a binding's
+     longjmp):
      staging is transactional — the core mutates no shared state before
      stage returns, a mid-stage arena chunk is FIFO-reclaimed like any
      other, and an uncommitted region checkout or pin rolls back at the
      next verb entry or at destroy. An abandoned stage leaves the handle
      consistent.
    read: produce the binding's object for a received frame; the return
-     value goes to the verb's caller, opaque to the core. payload is
+     value goes to the verb's caller, opaque to the core. May also not
+     return (a binding's longjmp): invocation points leave the handle
+     consistent and nothing consumed. payload is
      always a dereferenceable byte range: the transport resolves its
      arena-referencing kinds (ARENA, channel RAWSPILL) to their byte
      range before the call, bounds-checked against the arena, passing
@@ -418,7 +420,7 @@ typedef enum rei_park_state_e { REI_WPK_RUNNING = 0, REI_WPK_IDLE,
      continue, nonzero to abandon: the verb unwinds as REI_ERR with
      REI_ERRCAT_INTERRUPTED, consuming nothing (a recv interrupted
      mid-wait has claimed no slot; a collect interrupted while parked
-     has consumed no result). The hook may also not return (R's
+     has consumed no result). The hook may also not return (a binding's
      longjmp) — invocation points are chosen so an abandoned wait leaves
      the handle consistent. Verb-calling thread only, never death-watch
      or reaper threads. NULL for plain-C consumers: the poll skips at
@@ -430,19 +432,18 @@ typedef enum rei_park_state_e { REI_WPK_RUNNING = 0, REI_WPK_IDLE,
      GIL through collect (nested-collect help reenters exec_fn); this
      hook drops it for each bounded sleep so other threads in the worker
      process run while the worker parks. Verb-calling thread only. NULL
-     for R (no global lock), plain-C consumers, and submitter handles
-     (which release around the whole verb instead).
+     for runtimes without a global lock, plain-C consumers, and
+     submitter handles (which release around the whole verb instead).
    sweep: idle hook, invoked when a pool worker goes idle or departs
      (the core's keeper-table sweep points): drop binding-side caches.
-     NULL for bindings without per-handle caches (the R binding drops
-     its map-context cache here).
+     NULL for bindings without per-handle caches.
    drop: pin-release hook, invoked when a retained staging entry is
      released — at the consumer-done points (collect, slot reuse, the
      worker keeper sweep), on a cancelled publish, on a staging
      rollback, and at handle teardown. `pin` is the opaque token the
      stager registered with rei_stage_pin. Fires only on the
      handle-owning thread. NULL when the binding never pins.
-   ctx: opaque to the core (R: the handle's prot chain). */
+   ctx: opaque to the core. */
 
 typedef int (*rei_stage_fn)(void *obj, rei_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,
@@ -481,7 +482,7 @@ typedef struct rei_binding_s {
   rei_park_fn  park;    /* around-park lock release; usually NULL */
   rei_sweep_fn sweep;   /* idle cache drop; usually NULL */
   rei_drop_fn  drop;    /* pin release; NULL when the binding never pins */
-  void        *ctx;     /* opaque to the core (R: the handle's prot chain) */
+  void        *ctx;     /* opaque to the core */
 } rei_binding;
 
 /* Zero and size-stamp a binding struct. Call before filling the fn pointers. */
@@ -503,7 +504,7 @@ REI_API void rei_binding_init(rei_binding *);
      and lends to the ledger while views are outstanding. `region` must
      be the current checkout.
    - pin: attach an opaque token to the staging entry, handed to the
-     drop hook at the entry's release (R preserves the staged object,
+     drop hook at the entry's release (a binding pins the staged object,
      whose serialized stream may carry hook-emitted identifiers).
    - reap: the channel's pre-spill consumer-done reap, so a checkout
      sees the freshest surrenders. A no-op on pool handles. */
@@ -542,6 +543,31 @@ REI_API int rei_result_publish(rei_result_sink *, void *value);
 REI_API int rei_result_publish_err(rei_result_sink *, void *flattened,
                                    uint32_t inline_n);
 REI_API void rei_result_publish_died(rei_result_sink *);
+
+// The built-in bytes binding -----------------------------------------------------
+
+/* A byte buffer. Send: the consumer fills {data, len} and passes its
+   address as the verb's obj. Recv: the binding returns a malloc'd
+   rei_bytes (data rides the same allocation); release with
+   rei_bytes_free — an export, not documented free(), so a shared-library
+   build never crosses allocator domains. Fixed layout, never extended. */
+typedef struct rei_bytes_s {
+  void *data;
+  size_t len;
+} rei_bytes;
+
+/* Fill `binding` with the bytes binding: stage/read only — exec, check,
+   park, sweep, drop are NULL (a bytes handle is a channel peer or a pool
+   submitter, never a worker). Stage rides the INLINE/ARENA/SHM_RAW tiers
+   exactly as a serialize stream does; read copies out before
+   consumer-done. The copy tiers of a foreign peer (RAWVEC/RAWSPILL/STR1)
+   read as their bare bytes; the view tiers (SHM_VEC/REF) fail the read —
+   they are binding-owned by design. Pool collects surface non-OK
+   outcomes only as the verb's rei_status — the binding builds no error
+   object. This is the FFI zero-callback path, the reference stager for
+   binding authors, and the C test tiers' stager. */
+REI_API void rei_binding_bytes(rei_binding *);
+REI_API void rei_bytes_free(rei_bytes *);
 
 // Regions (rei_shm) ----------------------------------------------------------------
 
@@ -615,7 +641,7 @@ REI_API rei_status rei_channel_attach(rei_channel **out, const char *token,
                                       const rei_binding *);
 /* The peer bootstrap payload staged at create (the preamble's drop):
    borrowed bytes, valid until destroy. The peer's binding must consume
-   them (R: unserialize the expression) before ready_set — the host holds
+   them (e.g. unserialize the expression) before ready_set — the host holds
    everything they reference alive exactly until ready. */
 REI_API void rei_channel_drop(const rei_channel *, const uint8_t **bytes,
                               uint64_t *n);
@@ -663,6 +689,7 @@ REI_API rei_status rei_channel_recv_batch(rei_channel *, void **objs,
    rei_shm_reap backstop the rest. */
 REI_API rei_status rei_channel_close(rei_channel *, double timeout_ms);
 REI_API rei_status rei_channel_close_signal(rei_channel *);
+/* Logically a read; the probe can run survivor cleanup internally. */
 REI_API int rei_channel_alive(const rei_channel *);
 REI_API void rei_channel_destroy(rei_channel *);
 
@@ -679,7 +706,9 @@ typedef struct rei_channel_info_s {
   uint64_t tx_sent, tx_published, tx_consumed, rx_consumed, rx_published;
   uint64_t fl_entries, fl_hits;                 /* process-local */
   uint64_t open_hits, open_misses;              /* process-local */
-  uint64_t ledger_entries, zc_open_hits, zc_open_misses;  /* process-local */
+  uint64_t ledger_entries;                      /* process-local */
+  uint64_t zc_open_hits, zc_open_misses;        /* binding-owned view cache;
+                                                   the core fills 0 */
 } rei_channel_info;
 
 REI_API rei_status rei_channel_info_get(const rei_channel *,
@@ -768,7 +797,7 @@ REI_API int rei_pool_step(rei_pool *, double timeout_ms);
 /* submit stages task_obj via the binding's stage_fn and fills *out.
    Submission blocks only on injection-ring space (back-pressure is
    per-submitter): REI_FULL when the ring is still full at the deadline
-   (0 polls; R raises its submit-timeout error here). Result-slot
+   (0 polls; a binding raises its submit-timeout error here). Result-slot
    exhaustion and a stopped pool / dead owner raise instead: REI_ERR
    with REI_ERRCAT_EXHAUSTED / REI_ERRCAT_STOPPED. On a worker handle a
    submit is nested: it pushes onto the worker's own deque (a full deque
@@ -786,14 +815,14 @@ REI_API rei_status rei_pool_submit_batch(rei_pool *, void **objs, size_t n,
 /* collect waits for the task's terminal state and sets *value_out to
    the read_fn's product — including for non-OK outcomes, where
    ctx.outcome (REI_RS_ERR / REI_RS_CANCEL / REI_RS_DIED) lets the
-   read_fn build the binding's error object (R re-raises it: the task's
+   read_fn build the binding's error object (a binding re-raises it: the task's
    own condition, the cancellation, or the worker-death error).
    REI_TIMEOUT consumes nothing. A task is collected exactly once: the
    slot is released as the value is produced. Valid on worker handles
    too — a nested collect helps (executes/steals) instead of sleeping,
    so exec_fn reenters from inside collect; on submitter handles
-   (exec == NULL) the wait simply parks. (R's collect(task) omits the
-   pool argument: the binding's task handle carries the pool reference.)
+   (exec == NULL) the wait simply parks. (A binding's collect may omit
+   the pool argument: its task handle carries the pool reference.)
    collect_any returns the first terminal handle (*index_out, 0-based;
    ties among already-terminal handles break to the earliest position);
    the reported handle is consumed, the rest stay collectible.
@@ -846,7 +875,7 @@ REI_API rei_status rei_pool_stop(rei_pool *, double timeout_ms);
 
 /* Snapshots. status reads shm-resident wire state; dump adds
    handle-local counters (free list, open caches, collect parks) — the
-   cold-path introspection API behind the R binding's dump output.
+   cold-path introspection API behind a binding's dump output.
    Per-slot arrays are indexed by slot; only the first n_workers /
    n_submitters entries are valid. The per-slot worker states are what a
    resize scans for free slots. All borrowed; valid until the next call. */

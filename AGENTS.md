@@ -86,6 +86,8 @@ these.
 
 ## Status
 
-Region layer, parker, liveness lock, and death listeners are complete and
-tested. Channel and pool transports are in progress. License: MIT
+Region layer, parker, liveness lock, death listeners, the
+spill/ledger/zc machinery (`src/spill.c`), the channel transport
+(`src/channel.c`), and the built-in bytes binding (`src/bytes.c`) are
+complete and tested. The pool transport is next. License: MIT
 (`LICENSE.note` holds third-party RngStreams attribution).
