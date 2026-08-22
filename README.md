@@ -21,6 +21,10 @@ The Makefile is the only build system:
 make                    # librei.a + the shared library
 make test               # the unit tier (in-process, deterministic)
 make test-integration   # the integration tier (forked child processes)
+make test-soak          # the soak tier (minutes-long contention runs; nightly)
+make test-fuzz          # libFuzzer bursts on the wire parsers (clang)
+make bench              # the benchmark suite (report-only)
+make coverage           # llvm-cov report over the unit tier (report-only)
 make install            # honors PREFIX (/usr/local) and DESTDIR
 ```
 
@@ -79,6 +83,8 @@ It reads the bootstrap payload with `rei_channel_drop()` and signals `rei_channe
 Pre-release.
 The public header pins the API.
 The channel and pool transports are complete and tested.
+The test tiers are: unit, integration, soak, and fuzz bursts.
+Benchmark records live in `bench/notes.md`.
 
 ## License
 

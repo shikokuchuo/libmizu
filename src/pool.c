@@ -204,8 +204,8 @@ static int deque_nonempty(rei_wk_slot *w) {
     atomic_load_explicit(&w->deque_bottom, memory_order_acquire);
 }
 
-static const char *pool_hdr_validate(const void *region, size_t region_size,
-                                     rei_pool_hdr *out) {
+const char *rei_pool_hdr_validate(const void *region, size_t region_size,
+                                  rei_pool_hdr *out) {
   if (region_size < 64)
     return "region is smaller than a pool header";
   rei_pool_hdr h;
@@ -781,12 +781,10 @@ void rei_pool_destroy(rei_pool *p) {
    slot on failure. */
 static rei_pool *pool_open_common(const char *token, const rei_binding *b,
                                   int keeper_len_is_rs) {
-  for (const char *q = token; *q != '\0'; q++)
-    if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f') ||
-          *q == '_')) {
-      rei_err_record_tls(REI_ERRCAT_OTHER, "malformed region-name suffix");
-      return NULL;
-    }
+  if (!rei_token_valid(token)) {
+    rei_err_record_tls(REI_ERRCAT_OTHER, "malformed region-name suffix");
+    return NULL;
+  }
   char name[REI_NAME_MAX];
   int nn = snprintf(name, sizeof(name), "%s%s", REI_PREFIX_LITERAL, token);
   if (nn <= 0 || (size_t) nn >= sizeof(name)) {
@@ -814,7 +812,7 @@ static rei_pool *pool_open_common(const char *token, const rei_binding *b,
   p->collect_budget_ns = REI_COLLECT_SPIN_BUDGET_NS;
 
   /* validate before touching any other field */
-  const char *err = pool_hdr_validate(p->shm.addr, p->shm.size, &p->hdr);
+  const char *err = rei_pool_hdr_validate(p->shm.addr, p->shm.size, &p->hdr);
   if (err != NULL) {
     rei_err_record(&p->h, REI_ERRCAT_OTHER, "invalid pool region: %s", err);
     pool_failed(p, 0);

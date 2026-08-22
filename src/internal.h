@@ -280,6 +280,13 @@ int rei_live_ident(intptr_t h, uint64_t *dev, uint64_t *ino);
 void rei_preamble_write(void *region, const rei_preamble *p);
 const char *rei_preamble_validate(const void *region, size_t region_size,
                                   rei_preamble *out);
+/* The join-token charset check shared by the channel and pool attach
+   paths ("<pid hex>_<counter hex>"; NULL and empty are malformed). */
+int rei_token_valid(const char *token);
+/* The pool header's magic + version + layout check (pool.c), the attach
+   path's counterpart of rei_preamble_validate. */
+const char *rei_pool_hdr_validate(const void *region, size_t region_size,
+                                  rei_pool_hdr *out);
 
 // Payload-policy constants and helpers --------------------------------------------
 

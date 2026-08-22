@@ -23,25 +23,33 @@
 double rei_now(void) {
 #ifdef _WIN32
   /* QueryPerformanceCounter, not GetTickCount64: µs-scale batch timing
-     is blind at ~15.6 ms tick granularity. QPF is constant after boot,
-     so a racing double-init writes identical values. */
-  static LARGE_INTEGER freq;
+     is blind at ~15.6 ms tick granularity. QPF is constant after boot;
+     the atomic makes a racing double-init defined (identical values). */
+  static _Atomic int64_t freq;
+  int64_t f = atomic_load_explicit(&freq, memory_order_relaxed);
+  if (f == 0) {
+    LARGE_INTEGER li;
+    QueryPerformanceFrequency(&li);
+    f = li.QuadPart;
+    atomic_store_explicit(&freq, f, memory_order_relaxed);
+  }
   LARGE_INTEGER count;
-  if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&count);
-  return (double) count.QuadPart / (double) freq.QuadPart;
+  return (double) count.QuadPart / (double) f;
 #elif defined(__APPLE__)
   /* Call the commpage export directly: CLOCK_MONOTONIC wraps
      mach_absolute_time in several libsystem frames, and in profiles the
-     wrapper is the cost. The timebase is constant after boot, so a
-     racing double-init writes identical values. */
-  static double tick_ns;
-  if (tick_ns == 0) {
+     wrapper is the cost. The timebase is constant after boot; the atomic
+     makes a racing double-init defined (identical values). */
+  static _Atomic double tick_ns;
+  double t = atomic_load_explicit(&tick_ns, memory_order_relaxed);
+  if (t == 0) {
     mach_timebase_info_data_t tb;
     mach_timebase_info(&tb);
-    tick_ns = (double) tb.numer / (double) tb.denom;
+    t = (double) tb.numer / (double) tb.denom;
+    atomic_store_explicit(&tick_ns, t, memory_order_relaxed);
   }
-  return (double) mach_absolute_time() * tick_ns / 1e9;
+  return (double) mach_absolute_time() * t / 1e9;
 #else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

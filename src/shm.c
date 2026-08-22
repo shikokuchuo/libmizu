@@ -49,18 +49,24 @@ static int rei_err_classify(long code) {
 }
 
 static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
-  static unsigned int counter;
-  static int seeded;
-  if (!seeded) {
+  static _Atomic unsigned int counter;   /* 0 = unseeded; seeded once */
+  if (atomic_load_explicit(&counter, memory_order_relaxed) == 0) {
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
-    counter = rei_counter_seed((uint64_t) t.QuadPart ^
-                                ((uint64_t) pid << 40) ^
-                                (uint64_t) (uintptr_t) &counter);
-    seeded = 1;
+    unsigned int seed = rei_counter_seed((uint64_t) t.QuadPart ^
+                                          ((uint64_t) pid << 40) ^
+                                          (uint64_t) (uintptr_t) &counter);
+    if (seed == 0) seed = 1;             /* 0 is the unseeded sentinel */
+    /* a losing CAS just means another thread's seed won */
+    unsigned int expect = 0;
+    (void) atomic_compare_exchange_strong_explicit(&counter, &expect, seed,
+                                                   memory_order_relaxed,
+                                                   memory_order_relaxed);
   }
+  unsigned int c = atomic_fetch_add_explicit(&counter, 1,
+                                             memory_order_relaxed);
   int n = snprintf(name, size, REI_PREFIX_LITERAL "%lx_%x",
-                   (unsigned long) pid, counter++);
+                   (unsigned long) pid, c);
   return (n > 0 && (size_t) n < size) ? (size_t) n : 0;
 }
 
@@ -202,109 +208,130 @@ static int rei_shm_os_open(const char *name, int flags, mode_t mode) {
 
 /* macOS has no enumerable SHM namespace (no /dev/shm), so rei keeps its
    own registry for reaping: one append-only log per process, "rei_<pid>"
-   under a per-user dir, listing every region the process created — a
-   single write() per region. The reaper reads a dead PID's log, unlinks
-   the regions it names, then removes the log. Single-writer per process,
-   so no locking. All log ops are best-effort — failure forfeits only
+   under a per-user dir, holding the counter of every region the process
+   creates as a 4-byte record (the pid comes from the filename). The
+   reaper reads a dead PID's log, unlinks each reconstructed name, then
+   removes the log. One write() per region on a cached O_APPEND fd — the
+   kernel serializes concurrent appends per record, so no locking. A
+   live-region counter truncates the log in place at zero crossings past
+   a small floor, so the file stays near peak concurrency rather than
+   lifetime creates. All log ops are best-effort — failure forfeits only
    reapability. */
 
-/* Per-user registry dir "<temp>/rei", resolved once and cached. Builds
-   the path but never creates it (rei_log_append's job), so resolving for
-   a release or reap leaves no empty dir behind. $TMPDIR first; NULL if
-   unresolvable. */
-static const char *rei_log_dir(void) {
-  static char dir[PATH_MAX];
-  static int resolved = 0;            /* 0 = untried, 1 = valid, -1 = failed */
-  if (resolved) return resolved > 0 ? dir : NULL;
-  resolved = -1;
-
+/* Per-user registry dir "<temp>/rei", resolved fresh each call (read-
+   through: tests point TMPDIR at a scratch dir). Builds the path but
+   never creates it (rei_log_append's job), so resolving for a reap
+   leaves no empty dir behind. $TMPDIR first; -1 if unresolvable. */
+static int rei_log_dir(char *out, size_t size) {
   char base[PATH_MAX];
   const char *tmp = getenv("TMPDIR");
   if (tmp != NULL && tmp[0] != '\0') {
     int bn = snprintf(base, sizeof(base), "%s", tmp);
-    if (bn <= 0 || (size_t) bn >= sizeof(base)) return NULL;
+    if (bn <= 0 || (size_t) bn >= sizeof(base)) return -1;
   } else {
     size_t len = confstr(_CS_DARWIN_USER_TEMP_DIR, base, sizeof(base));
     if (len == 0 || len > sizeof(base)) {
       int bn = snprintf(base, sizeof(base), "%s", "/tmp");
-      if (bn <= 0 || (size_t) bn >= sizeof(base)) return NULL;
+      if (bn <= 0 || (size_t) bn >= sizeof(base)) return -1;
     }
   }
 
   size_t bl = strlen(base);
   while (bl > 1 && base[bl - 1] == '/') base[--bl] = '\0';   /* avoid "//rei" */
 
-  int n = snprintf(dir, sizeof(dir), "%s/rei", base);
-  if (n <= 0 || (size_t) n >= sizeof(dir)) return NULL;
-  resolved = 1;
-  return dir;
+  int n = snprintf(out, size, "%s/rei", base);
+  return (n > 0 && (size_t) n < size) ? 0 : -1;
 }
 
-/* This process's log path "<dir>/rei_<pid>". The reaper parses the PID back out
-   of the name (rei_<pidhex>, no trailing counter) to test the creator's death. */
-static int rei_log_path(char *out, size_t outsize) {
-  const char *dir = rei_log_dir();
-  if (dir == NULL) return -1;
-  int n = snprintf(out, outsize, "%s/%s%x",
-                   dir, &REI_PREFIX_LITERAL[1], (unsigned) getpid());
-  return (n > 0 && (size_t) n < outsize) ? 0 : -1;
-}
+/* This process's log fd, opened on first append and cached for the
+   process's lifetime — never closed, so a thread using a loaded value
+   can never write to a reused fd. A forked child sees the pid mismatch
+   and opens its own log, leaking the inherited fd (closing it could
+   race a sibling thread's write). The release/acquire pairing on
+   rei_log_pid orders the fd reset before the pid change becomes
+   visible. */
+static _Atomic int   rei_log_fd  = -1;
+static _Atomic pid_t rei_log_pid = 0;        /* pid that opened rei_log_fd */
 
-/* Process-global log state. rei_log_live counts regions whose teardown still
-   owes a release; the log is pruned when it returns to zero. */
-static int   rei_log_fd   = -1;
-static pid_t rei_log_pid  = -1;        /* pid that opened rei_log_fd */
-static long  rei_log_live = 0;
+/* Truncate the log at a zero crossing only once it holds this many
+   records: below the floor the file is at most 1 KB and the ftruncate
+   costs more than the hygiene is worth (a create+destroy loop would
+   otherwise pay it every cycle). */
+#define REI_LOG_TRUNC_MIN 256
 
-/* Drop state inherited across a fork: the fd is the parent's, so close (never
-   unlink) it and let the child open its own log on its next append. */
-static void rei_log_fork_guard(void) {
-  pid_t pid = getpid();
-  if (rei_log_pid == pid) return;
-  if (rei_log_fd >= 0) close(rei_log_fd);
-  rei_log_fd = -1;
-  rei_log_live = 0;
-  rei_log_pid = pid;
-}
+/* Created-minus-torn-down region count, driving the zero-crossing
+   truncate, and the records written since the last truncate. Neither is
+   reset after a fork: the inherited values are a conservative floor
+   (teardowns of the parent's regions are pid-guarded out), so a child
+   can only ever truncate its own log. */
+static _Atomic long rei_log_live  = 0;
+static _Atomic long rei_log_dirty = 0;
 
-/* Record a created region, opening the log on first use. The live count
-   increments unconditionally, staying balanced against rei_log_release
-   even when logging itself fails (which only forfeits reapability). */
+/* Record a created region: its name's counter as one 4-byte record
+   (native endianness — the log is read on the same host), opening the
+   log on first use. The count increments unconditionally, staying
+   balanced against rei_log_release even when logging itself fails. */
 static void rei_log_append(const char *name) {
-  rei_log_fork_guard();
-  if (rei_log_fd < 0) {
-    char path[PATH_MAX];
-    if (rei_log_path(path, sizeof(path)) == 0) {
-      int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0600);
-      if (fd < 0 && errno == ENOENT) {     /* dir absent: create it and retry */
-        const char *dir = rei_log_dir();
-        if (dir != NULL) mkdir(dir, 0700);
-        fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0600);
-      }
-      rei_log_fd = fd;
+  atomic_fetch_add_explicit(&rei_log_live, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&rei_log_dirty, 1, memory_order_relaxed);
+
+  const char *us = strrchr(name, '_');
+  if (us == NULL) return;
+  uint32_t rec = (uint32_t) strtoul(us + 1, NULL, 16);
+
+  pid_t pid = getpid();
+  int fd = -1;
+  if (atomic_load_explicit(&rei_log_pid, memory_order_acquire) == pid)
+    fd = atomic_load_explicit(&rei_log_fd, memory_order_relaxed);
+  else {                                     /* first append, or post-fork */
+    atomic_store_explicit(&rei_log_fd, -1, memory_order_relaxed);
+    atomic_store_explicit(&rei_log_pid, pid, memory_order_release);
+  }
+  if (fd < 0) {
+    char dir[PATH_MAX], path[PATH_MAX];
+    if (rei_log_dir(dir, sizeof(dir)) != 0) return;
+    int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
+                     &REI_PREFIX_LITERAL[1], (unsigned) pid);
+    if (n <= 0 || (size_t) n >= sizeof(path)) return;
+    int nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
+    if (nfd < 0 && errno == ENOENT) {   /* dir absent: create it and retry */
+      mkdir(dir, 0700);
+      nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
+    }
+    if (nfd < 0) return;
+    int expect = -1;
+    if (atomic_compare_exchange_strong_explicit(&rei_log_fd, &expect, nfd,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+      fd = nfd;
+    } else {
+      close(nfd);                          /* another thread's open won */
+      fd = expect;
     }
   }
-  if (rei_log_fd >= 0) {
-    char line[REI_NAME_MAX + 1];
-    int n = snprintf(line, sizeof(line), "%s\n", name);
-    if (n > 0 && (size_t) n < sizeof(line)) {
-      ssize_t w = write(rei_log_fd, line, (size_t) n);
-      (void) w;
-    }
-  }
-  rei_log_live++;
+  ssize_t w = write(fd, &rec, sizeof(rec));   /* O_APPEND: whole records */
+  (void) w;
 }
 
-/* One of our regions was torn down; prune the log (and dir) when none remain. */
+/* One of our regions was torn down. At a zero crossing the log holds
+   only stale records, so truncate it in place once past the floor — the
+   fd is never closed, and O_APPEND continues from the new end. A create
+   racing the truncate can lose its record: a microseconds-wide
+   best-effort forfeiture. */
 static void rei_log_release(void) {
-  if (rei_log_pid != getpid()) return;   /* finalizer for a pre-fork region */
-  if (rei_log_live > 0) rei_log_live--;
-  if (rei_log_live > 0) return;
-  if (rei_log_fd >= 0) { close(rei_log_fd); rei_log_fd = -1; }
-  char path[PATH_MAX];
-  if (rei_log_path(path, sizeof(path)) == 0) unlink(path);
-  const char *dir = rei_log_dir();
-  if (dir != NULL) rmdir(dir);            /* prune the dir once empty */
+  if (atomic_fetch_sub_explicit(&rei_log_live, 1, memory_order_relaxed) != 1)
+    return;
+  if (atomic_load_explicit(&rei_log_pid, memory_order_relaxed) != getpid())
+    return;                                  /* pre-fork state: not our log */
+  int fd = atomic_load_explicit(&rei_log_fd, memory_order_relaxed);
+  if (fd < 0) return;
+  if (atomic_load_explicit(&rei_log_dirty, memory_order_relaxed) <
+      REI_LOG_TRUNC_MIN)
+    return;
+  ftruncate(fd, 0);
+  /* Appends racing the reset leave dirty low: the next truncate is
+     merely delayed — the conservative direction. */
+  atomic_store_explicit(&rei_log_dirty, 0, memory_order_relaxed);
 }
 
 #endif /* __APPLE__ */
@@ -349,17 +376,22 @@ static int rei_reap_unlink(const char *name,
 }
 
 #ifdef __APPLE__
-/* Read a dead process's log and unlink every region it names. */
-static int rei_reap_log(const char *path,
-                         char ***list, size_t *cap, size_t *count) {
-  FILE *f = fopen(path, "r");
+/* Read a dead process's log and unlink every region it names: 4-byte
+   counter records, each reconstructed with the pid from the log's
+   filename. A tail short of a record is a crash-torn write: fread
+   declines it. */
+static int rei_reap_log(const char *path, unsigned long pid,
+                        char ***list, size_t *cap, size_t *count) {
+  FILE *f = fopen(path, "rb");
   if (f == NULL) return 0;
-  char line[REI_NAME_MAX + 2];
+  uint32_t rec;
   int rc = 0;
-  while (fgets(line, sizeof(line), f) != NULL) {
-    size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') line[--len] = '\0';  /* fgets: one '\n' */
-    if (len > 0 && rei_reap_unlink(line, list, cap, count) != 0) {
+  while (fread(&rec, sizeof(rec), 1, f) == 1) {
+    char name[REI_NAME_MAX];
+    int n = snprintf(name, sizeof(name), "%s%lx_%x",
+                     REI_PREFIX_LITERAL, pid, (unsigned int) rec);
+    if (n <= 0 || (size_t) n >= sizeof(name)) continue;
+    if (rei_reap_unlink(name, list, cap, count) != 0) {
       rc = -1;                                   /* OOM */
       break;
     }
@@ -371,7 +403,7 @@ static int rei_reap_log(const char *path,
 
 /* Reap orphans of dead creators. Linux scans /dev/shm, where each entry
    is a region name; macOS scans the registry dir, where each entry is a
-   per-process log (rei_<pid>) whose lines name that process's regions.
+   per-process log (rei_<pid>) whose records name that process's regions.
    Either way the PID embedded in "rei_<pid>..." drives the liveness test.
    Returns the removed names as a malloc'd array of *n malloc'd strings
    (caller frees each, then the array); NULL / *n == 0 if none. */
@@ -405,9 +437,9 @@ char **rei_shm_reap(int *n) {
   }
   closedir(dir);
 #else /* __APPLE__ */
-  const char *scan = rei_log_dir();          /* rei's per-process logs */
-  if (scan == NULL) return NULL;
-  DIR *dir = opendir(scan);
+  char scan[PATH_MAX];
+  if (rei_log_dir(scan, sizeof(scan)) != 0) return NULL;
+  DIR *dir = opendir(scan);                      /* rei's per-process logs */
   if (dir == NULL) return NULL;                  /* no logs: nothing to reap */
 
   struct dirent *ent;
@@ -424,7 +456,7 @@ char **rei_shm_reap(int *n) {
     char path[PATH_MAX];
     int pn = snprintf(path, sizeof(path), "%s/%s", scan, fname);
     if (pn <= 0 || (size_t) pn >= sizeof(path)) continue;
-    if (rei_reap_log(path, &list, &cap, &count) != 0)
+    if (rei_reap_log(path, (unsigned long) pid, &list, &cap, &count) != 0)
       break;                          /* OOM: leave the log for a later retry */
     unlink(path);                                /* drop the dead process's log */
   }
@@ -446,18 +478,24 @@ char **rei_shm_reap(int *n) {
 #endif /* __linux__ || __APPLE__ */
 
 static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
-  static unsigned int counter;
-  static int seeded;
-  if (!seeded) {
+  static _Atomic unsigned int counter;   /* 0 = unseeded; seeded once */
+  if (atomic_load_explicit(&counter, memory_order_relaxed) == 0) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    counter = rei_counter_seed(((uint64_t) ts.tv_sec << 32) ^
-                                (uint64_t) ts.tv_nsec ^
-                                ((uint64_t) pid << 40) ^
-                                (uint64_t) (uintptr_t) &counter);
-    seeded = 1;
+    unsigned int seed = rei_counter_seed(((uint64_t) ts.tv_sec << 32) ^
+                                          (uint64_t) ts.tv_nsec ^
+                                          ((uint64_t) pid << 40) ^
+                                          (uint64_t) (uintptr_t) &counter);
+    if (seed == 0) seed = 1;             /* 0 is the unseeded sentinel */
+    /* a losing CAS just means another thread's seed won */
+    unsigned int expect = 0;
+    (void) atomic_compare_exchange_strong_explicit(&counter, &expect, seed,
+                                                   memory_order_relaxed,
+                                                   memory_order_relaxed);
   }
-  int n = snprintf(name, size, REI_PREFIX_LITERAL "%x_%x", pid, counter++);
+  unsigned int c = atomic_fetch_add_explicit(&counter, 1,
+                                             memory_order_relaxed);
+  int n = snprintf(name, size, REI_PREFIX_LITERAL "%x_%x", pid, c);
   return (n > 0 && (size_t) n < size) ? (size_t) n : 0;
 }
 
@@ -468,7 +506,7 @@ static int rei_create_fail(int fd, const char *name, int code) {
   close(fd);
   rei_shm_os_unlink(name);
 #ifdef __APPLE__
-  rei_log_release();              /* undo the append done before this failure */
+  rei_log_release();  /* balance the append's count; the record goes stale */
 #endif
   return rei_err_classify(code);
 }
@@ -572,7 +610,14 @@ int rei_shm_open_stack(rei_shm *shm, const char *name) {
 
 void rei_shm_close_stack(rei_shm *shm, int unlink) {
   if (shm->addr != NULL) munmap(shm->addr, shm->size);
-  if (unlink) rei_shm_os_unlink(shm->name);
+  if (unlink) {
+    rei_shm_os_unlink(shm->name);
+#ifdef __APPLE__
+    /* Creator-only: opened regions carry pid 0 and were never logged
+       here. */
+    if (shm->pid == (unsigned int) getpid()) rei_log_release();
+#endif
+  }
   shm->addr = NULL;
 }
 
@@ -648,11 +693,12 @@ void rei_shm_host_release(rei_shm *shm) {
 #ifdef _WIN32
   if (shm->handle != NULL) CloseHandle(shm->handle);
 #else
-  if (shm->name[0] != '\0' && shm->pid == (unsigned int) getpid())
+  if (shm->name[0] != '\0' && shm->pid == (unsigned int) getpid()) {
     rei_shm_os_unlink(shm->name);
 #ifdef __APPLE__
-  rei_log_release();              /* balance the create-time append */
+    rei_log_release();
 #endif
+  }
 #endif
 }
 

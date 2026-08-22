@@ -28,6 +28,13 @@ they vendor/compile these sources into their own modules.
 - `tests/unit/` — in-process, deterministic tier (one binary per `.c` file).
 - `tests/integration/` — real fork/spawn children; compiles against `rei.h`
   only, as the API's compile-time contract check.
+- `tests/soak/` — minutes-long forked contention runs (nightly, not per-PR;
+  `REI_SOAK_SECONDS` overrides the duration).
+- `tests/fuzz/` — libFuzzer harnesses for the wire parsers a crashed peer
+  can leave torn (preamble, pool header, REF/SHM_RAW identifier); built
+  with clang, run as fixed-seed ASan+UBSan bursts.
+- `bench/` — report-only microbenchmarks (no timing asserts); records are
+  appended to `bench/notes.md` with the commit SHA.
 - `tools/amalgamate.sh` — generates the two-file distribution `rei.c` + `rei.h`.
 - `tools/build-win.bat` — Windows build (clang-cl).
 - `dev/` — scratch copies of headers.
@@ -40,6 +47,10 @@ The Makefile is the only build system (on Unix):
 make                  # librei.a + shared library
 make test             # unit tier (per-PR)
 make test-integration # fork/spawn tier
+make test-soak        # soak tier (nightly; SOAK_SECONDS / REI_SOAK_SECONDS)
+make test-fuzz        # fuzz bursts (clang; FUZZ_CC/FUZZ_SAN/FUZZ_RUNS/FUZZ_SEED)
+make bench            # benchmark suite (report-only)
+make coverage         # llvm-cov report over the unit tier (report-only)
 make install          # honors PREFIX (/usr/local) and DESTDIR
 tools/amalgamate.sh   # writes rei.c + rei.h
 ```
@@ -78,9 +89,11 @@ these.
 ## CI
 
 - `.github/workflows/ci.yml` — matrix: ubuntu-latest, ubuntu-24.04-arm,
-  macos-latest, macos-15-intel. Runs `make`, `make test`, and the
-  amalgamation smoke test (compiles unit tests against `rei.c`, then links
-  and runs a public-only program against `rei.c`/`rei.h` with no defines).
+  macos-latest, macos-15-intel. Runs `make`, `make test`,
+  `make test-integration`, and the amalgamation smoke test (compiles unit
+  tests against `rei.c`, then links and runs a public-only program against
+  `rei.c`/`rei.h` with no defines). A fuzz leg runs the fixed-seed bursts
+  on ubuntu; sanitizer legs cover ASan/UBSan/TSan on the unit tier.
 - `.github/workflows/release.yml` — on `v*` tags: checks tag matches
   `REI_VERSION`, generates the amalgamation for the release.
 
@@ -91,6 +104,10 @@ spill/ledger/zc machinery (`src/spill.c`), the channel transport
 (`src/channel.c`), the built-in bytes binding (`src/bytes.c`), and the
 pool transport (`src/pool.c` — the full verb surface including the
 vectored collects, introspection, map support, and armed death watches)
-are complete and tested: `tests/unit/test_pool.c` (in-process) and
-`tests/integration/test_pool.c` (forked children) are both green.
+are complete and tested. All four test tiers are green: unit
+(`tests/unit/`), integration (`tests/integration/`), soak
+(`tests/soak/` — full-duplex channel and multi-worker pool contention),
+and the fuzz bursts (`tests/fuzz/`). The bench suite (`bench/`) has its
+first records in `bench/notes.md`. Concurrent region creation from
+threads is a supported consumer pattern (`tests/unit/test_registry.c`).
 License: MIT (`LICENSE.note` holds third-party RngStreams attribution).

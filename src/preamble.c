@@ -63,3 +63,15 @@ const char *rei_preamble_validate(const void *region, size_t region_size,
   if (out != NULL) *out = p;
   return NULL;
 }
+
+/* The join token is the region name past the namespace prefix:
+   "<pid hex>_<counter hex>". Validate the charset before it is
+   snprintf'd into a shm name — NULL and empty are malformed. */
+int rei_token_valid(const char *token) {
+  if (token == NULL || *token == '\0') return 0;
+  for (const char *q = token; *q != '\0'; q++)
+    if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f') ||
+          *q == '_'))
+      return 0;
+  return 1;
+}

@@ -168,10 +168,14 @@ static size_t rei_live_dir_trim(char *buf, size_t n) {
 const char *rei_live_dir(void) {
   /* The override is read-through (tests set it per-call) and copied out:
      a later setenv can invalidate the getenv pointer. Oversized values
-     return truncated for the callers' length guard to reject. */
-  static char ovr[1024];
-  static char def[1024];
-  static int resolved = 0;            /* 0 = untried, 1 = valid, -1 = failed */
+     return truncated for the callers' length guard to reject. Buffers
+     are thread-local: threaded consumers create control regions
+     concurrently, and the returned pointer must stay valid until the
+     caller copies it out. */
+  static _Thread_local char ovr[1024];
+  static _Thread_local char def[1024];
+  static _Thread_local int resolved = 0;  /* 0 = untried, 1 = valid, -1 = failed */
+  const char *out;
 
   const char *env = getenv(REI_LIVENESS_DIR_ENV);
   if (env != NULL && env[0] != '\0') {
@@ -179,11 +183,13 @@ const char *rei_live_dir(void) {
     if (n >= sizeof(ovr)) n = sizeof(ovr) - 1;
     memcpy(ovr, env, n);
     rei_live_dir_trim(ovr, n);
-    return ovr;
+    out = ovr;
+  } else {
+    if (resolved == 0) {
+      resolved = rei_live_dir_default(def, sizeof(def)) == 0 ? 1 : -1;
+      if (resolved > 0) rei_live_dir_trim(def, strlen(def));
+    }
+    out = resolved > 0 ? def : NULL;
   }
-  if (resolved == 0) {
-    resolved = rei_live_dir_default(def, sizeof(def)) == 0 ? 1 : -1;
-    if (resolved > 0) rei_live_dir_trim(def, strlen(def));
-  }
-  return resolved > 0 ? def : NULL;
+  return out;
 }

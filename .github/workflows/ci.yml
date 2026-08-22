@@ -37,6 +37,14 @@ jobs:
           ./public_only
           cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei.h)
 
+  # libFuzzer bursts: fixed seed + fixed run count, so deterministic.
+  # ASan+UBSan catch what the torn-byte parsers would otherwise hide.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make test-fuzz
+
   sanitizers:
     runs-on: ubuntu-latest
     strategy:

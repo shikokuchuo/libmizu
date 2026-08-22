@@ -58,11 +58,22 @@ TEST_UNIT_SRC := $(wildcard tests/unit/*.c)
 TEST_UNIT_BIN := $(TEST_UNIT_SRC:.c=)
 TEST_INT_SRC  := $(wildcard tests/integration/*.c)
 TEST_INT_BIN  := $(TEST_INT_SRC:.c=)
+TEST_SOAK_SRC := $(wildcard tests/soak/*.c)
+TEST_SOAK_BIN := $(TEST_SOAK_SRC:.c=)
 BENCH_SRC     := $(wildcard bench/*.c)
 BENCH_BIN     := $(BENCH_SRC:.c=)
 
-.PHONY: all static shared test test-unit test-integration test-soak bench \
-        install uninstall clean amalgamation
+# The fuzz tier builds with clang's libFuzzer + ASan + UBSan and runs as
+# short fixed-seed bursts (deterministic given seed and run count).
+FUZZ_SRC  := $(wildcard tests/fuzz/*.c)
+FUZZ_BIN  := $(FUZZ_SRC:.c=)
+FUZZ_CC   ?= clang
+FUZZ_SAN  ?= -fsanitize=fuzzer,address,undefined
+FUZZ_RUNS ?= 100000
+FUZZ_SEED ?= 1
+
+.PHONY: all static shared test test-unit test-integration test-soak \
+        test-fuzz bench coverage install uninstall clean amalgamation
 
 all: static shared
 
@@ -100,11 +111,64 @@ test-unit: $(TEST_UNIT_BIN)
 test-integration: $(TEST_INT_BIN)
 	@for t in $(TEST_INT_BIN); do echo "== $$t"; ./$$t || exit 1; done
 
-test-soak: $(TEST_INT_BIN)
-	@echo "no soak tier yet"
+# Soak: minutes-long contention runs (nightly, not per-PR). Duration in
+# seconds per binary; REI_SOAK_SECONDS overrides.
+SOAK_SECONDS ?= 120
 
-bench: $(STATIC)
-	@echo "no bench suite yet"
+tests/soak/%: tests/soak/%.c $(STATIC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(STATIC) $(LDLIBS)
+
+test-soak: $(TEST_SOAK_BIN)
+	@for t in $(TEST_SOAK_BIN); do \
+	  echo "== $$t"; \
+	  REI_SOAK_SECONDS=$${REI_SOAK_SECONDS:-$(SOAK_SECONDS)} ./$$t || exit 1; \
+	done
+
+# Fuzz: libFuzzer harnesses for the parsers a crashed peer can leave
+# torn (preamble validate, pool header, REF/SHM_RAW identifier). The
+# library sources compile into each binary — the static lib's objects
+# carry no sanitizer instrumentation.
+tests/fuzz/%: tests/fuzz/%.c $(SRC)
+	$(FUZZ_CC) -Iinclude -Isrc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+	  -g -O1 $(FUZZ_SAN) -fno-omit-frame-pointer \
+	  -o $@ $< $(SRC) $(LDLIBS)
+
+test-fuzz: $(FUZZ_BIN)
+	@for f in $(FUZZ_BIN); do \
+	  echo "== $$f"; \
+	  ./$$f -runs=$(FUZZ_RUNS) -seed=$(FUZZ_SEED) -max_len=4096 || exit 1; \
+	done
+
+# Bench: report-only microbenchmarks (no timing asserts — runner
+# variance). Records are appended to bench/notes.md with the commit SHA.
+bench/%: bench/%.c $(STATIC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(STATIC) $(LDLIBS)
+
+bench: $(BENCH_BIN)
+	@for b in $(BENCH_BIN); do echo "== $$b"; ./$$b || exit 1; done
+
+# Coverage: llvm-cov over the unit tier, report-only (line-coverage
+# targets mislead on lock-free paths). Needs clang + the LLVM tools
+# (via xcrun on macOS).
+ifeq ($(UNAME),Darwin)
+  LLVM_PROFDATA ?= xcrun llvm-profdata
+  LLVM_COV      ?= xcrun llvm-cov
+else
+  LLVM_PROFDATA ?= llvm-profdata
+  LLVM_COV      ?= llvm-cov
+endif
+
+coverage:
+	$(MAKE) clean
+	LLVM_PROFILE_FILE="rei-%p.profraw" $(MAKE) CC=clang \
+	  CFLAGS="-O1 -g -fprofile-instr-generate -fcoverage-mapping" \
+	  LDFLAGS="-fprofile-instr-generate" test-unit
+	$(LLVM_PROFDATA) merge -sparse rei-*.profraw -o rei.profdata
+	$(LLVM_COV) report $(firstword $(TEST_UNIT_BIN)) \
+	  $(addprefix -object ,$(filter-out $(firstword $(TEST_UNIT_BIN)),$(TEST_UNIT_BIN))) \
+	  -instr-profile=rei.profdata
+	rm -f rei-*.profraw rei.profdata
+	$(MAKE) clean   # leave no instrumented objects behind
 
 # The amalgamation smoke test: generate rei.c + rei.h. CI compiles the
 # unit tests against rei.c, then links and runs a public-only program
@@ -132,5 +196,5 @@ uninstall:
 
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
-	      $(BENCH_BIN)
-	rm -rf rei.c rei.h
+	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN)
+	rm -rf rei.c rei.h rei-*.profraw rei.profdata

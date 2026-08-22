@@ -17,5 +17,10 @@ tests/unit/*
 !tests/unit/*.c
 tests/integration/*
 !tests/integration/*.c
+tests/soak/*
+!tests/soak/*.c
+tests/fuzz/*
+!tests/fuzz/*.c
 bench/*
 !bench/*.c
+!bench/notes.md

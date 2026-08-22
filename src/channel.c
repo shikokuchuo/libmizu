@@ -835,15 +835,10 @@ rei_status rei_channel_attach(rei_channel **out, const char *token,
                        "a channel binding needs stage and read callbacks");
     return REI_ERR;
   }
-  if (token == NULL || *token == '\0') {
+  if (!rei_token_valid(token)) {
     rei_err_record_tls(REI_ERRCAT_OTHER, "malformed join token");
     return REI_ERR;
   }
-  for (const char *q = token; *q != '\0'; q++)
-    if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f') || *q == '_')) {
-      rei_err_record_tls(REI_ERRCAT_OTHER, "malformed join token");
-      return REI_ERR;
-    }
   char name[REI_NAME_MAX];
   int nn = snprintf(name, sizeof(name), "%s%s", REI_PREFIX_LITERAL, token);
   if (nn <= 0 || (size_t) nn >= sizeof(name)) {
