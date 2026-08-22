@@ -18,9 +18,10 @@ Linux needs kernel >= 5.3 (`pidfd_open`, no fallback).
 The Makefile is the only build system:
 
 ```sh
-make            # librei.a + the shared library
-make test       # the unit tier (in-process, deterministic)
-make install    # honors PREFIX (/usr/local) and DESTDIR
+make                    # librei.a + the shared library
+make test               # the unit tier (in-process, deterministic)
+make test-integration   # the integration tier (forked child processes)
+make install            # honors PREFIX (/usr/local) and DESTDIR
 ```
 
 On Windows, run `tools\build-win.bat` instead.
@@ -77,8 +78,7 @@ It reads the bootstrap payload with `rei_channel_drop()` and signals `rei_channe
 
 Pre-release.
 The public header pins the API.
-The channel and pool transports are in progress.
-The region layer, parker, liveness lock, and death listeners are complete and tested.
+The channel and pool transports are complete and tested.
 
 ## License
 

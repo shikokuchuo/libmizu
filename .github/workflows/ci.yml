@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: make
       - run: make test
+      - run: make test-integration
       # The consumer contract: rei.c + rei.h alone, no defines — the
       # public-only program must link and run, not just compile. The
       # stamp check guards the bare-file skew case (both files must

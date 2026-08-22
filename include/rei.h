@@ -537,8 +537,9 @@ REI_API rei_shm *rei_read_region(rei_read_ctx *, const uint8_t *name,
    construction wherever a classed condition fits the slot, so the
    publish cannot fail: a task error fails the task, never the worker.
    publish_died is the status-only terminal for a task whose out-of-line
-   payload vanished with its dead enqueuer. The publish pair return
-   nonzero when the publish CAS won. */
+   payload vanished with its dead enqueuer. The publish pair return 1 when
+   the publish CAS won, 0 when a cancel beat it, and -1 on infrastructure
+   failure (recorded on the handle — the worker cannot continue). */
 REI_API int rei_result_publish(rei_result_sink *, void *value);
 REI_API int rei_result_publish_err(rei_result_sink *, void *flattened,
                                    uint32_t inline_n);
@@ -737,7 +738,7 @@ REI_API void rei_pool_opts_init(rei_pool_opts *);
    sequence. Core-filled at submit; bindings store and pass back by
    pointer. All-zero is the invalid value. */
 typedef struct rei_task_s {
-  uint64_t seq;         /* slot sequence at submit (REI_TASK_SEQ_BITS wide) */
+  uint64_t seq;         /* the slot's sequence at submit (full 64-bit) */
   uint32_t rs_index;    /* global result-slot index */
   uint32_t reserved;    /* zero */
 } rei_task;
@@ -788,7 +789,10 @@ REI_API rei_status rei_pool_retire(rei_pool *, uint32_t slot);
 /* One claim at a time, for deterministic in-process harnesses (the
    pool_pair/pool_step discipline). Returns REI_STEP_TASK after a task,
    REI_STEP_IDLE on timeout, REI_STEP_SHUTDOWN on shutdown or owner
-   death, REI_STEP_RETIRED on a retire request. */
+   death, REI_STEP_RETIRED on a retire request. An exec_fn infrastructure
+   failure (its nonzero return) or an interrupt abandon records the error
+   on the handle and returns REI_STEP_SHUTDOWN — the worker cannot
+   continue; rei_pool_errcat distinguishes it from a real shutdown. */
 typedef enum rei_step_result_e { REI_STEP_IDLE = 0, REI_STEP_TASK = 1,
                                  REI_STEP_SHUTDOWN = -1,
                                  REI_STEP_RETIRED = -2 } rei_step_result;
@@ -890,7 +894,7 @@ typedef struct rei_pool_status_s {
   uint8_t sub_state[64];                   /* REI_SUB_* */
   int64_t deque_depth[REI_MAX_WORKERS];    /* bottom - top */
   uint64_t parked_mask;                    /* one bit per worker slot */
-  uint32_t tasks_by_state[6];              /* PENDING..DIED occupancy */
+  uint32_t tasks_by_state[6];              /* occupancy indexed by REI_RS_* */
   uint32_t inj_queued[64];                 /* unclaimed injection entries */
   int32_t shutdown;
 } rei_pool_status;
@@ -906,20 +910,48 @@ typedef struct rei_worker_stat_s {
   int32_t in_flight_rs;
 } rei_worker_stat;
 
+typedef struct rei_sub_stat_s {
+  int32_t status;                   /* REI_SUB_* */
+  int64_t pid;
+  uint32_t rs_start, rs_count;      /* the static result-slot partition */
+  uint64_t injected, claimed;       /* ring tail / head, monotonic from 0 */
+  uint64_t spills, spill_reuse;     /* SHM_RAW-class staging counters */
+  int32_t ready;                    /* its inj_ready bit */
+  int32_t full_waiter;              /* its full_waiters bit */
+} rei_sub_stat;
+
 typedef struct rei_pool_dump_s {
   uint32_t size;
   rei_pool_status status;
   uint32_t n_workers;                 /* <= REI_MAX_WORKERS */
   rei_worker_stat workers[REI_MAX_WORKERS];
+  uint32_t n_submitters;              /* <= 64 */
+  rei_sub_stat submitters[64];
   uint64_t fl_entries, fl_bytes, fl_hits;       /* handle-local */
   uint64_t open_hits, open_misses;              /* handle-local */
   uint64_t collect_parks;                       /* handle-local */
+  uint64_t ledger_entries;                      /* handle-local */
   int32_t help_wanted;
 } rei_pool_dump;
+
+/* One non-FREE result-slot row (a dump's task table). */
+typedef struct rei_rs_row_s {
+  uint32_t slot;
+  int32_t status;                   /* REI_RS_* */
+  uint64_t sequence;
+  int32_t worker_slot;
+  int32_t waiter_slot;
+} rei_rs_row;
 
 REI_API rei_status rei_pool_status_get(const rei_pool *,
                                        rei_pool_status *out);
 REI_API rei_status rei_pool_dump_get(const rei_pool *, rei_pool_dump *out);
+/* The dump's task table, paged by the caller: fills up to cap rows in
+   slot order (non-FREE slots only) and sets *n_out to the total non-FREE
+   count, so a short buffer is answered by a second call with a bigger
+   one. States can move mid-fill — a cold-path snapshot, like dump. */
+REI_API rei_status rei_pool_tasks_get(const rei_pool *, rei_rs_row *out,
+                                      uint32_t cap, uint32_t *n_out);
 
 REI_API rei_errcat rei_pool_errcat(const rei_pool *);
 REI_API const char *rei_pool_error(const rei_pool *);

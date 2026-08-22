@@ -476,11 +476,59 @@ typedef struct rei_pool_sig_s {
   _Atomic int      *owner_dead;
 } rei_pool_sig;
 
+/* A malloc'd copy of the signal trio (the caller frees). NULL on
+   failure. */
 rei_pool_sig *rei_pool_signals(rei_pool *);
 /* One doorbell help beat (claims a map runner and re-homes it onto the
-   helper's own deque) and the test-harness injection pull. */
+   helper's own deque) and the test-harness injection pull. help_once
+   returns 1 when it claimed, 0 when not, -1 on an exec_fn
+   infrastructure failure (recorded on the handle). */
 int rei_pool_help_once(rei_pool *);
 int rei_pool_deque_pull(rei_pool *, uint32_t n);
+/* A map's batch-sizing inputs: claims the worker's nested-submitter slot
+   when unclaimed (as a first nested submit does), then reports the
+   caller's FREE result slots, the injection cap, and the entry inline
+   budget. Only this process allocates from its own subrange, so the
+   FREE count can only grow under it. Returns -1 on a claim failure (the
+   handle error slot holds it). */
+int rei_pool_map_caps(rei_pool *, uint32_t *free_rs, uint32_t *inj_cap,
+                      uint32_t *inline_entry);
+/* The map runner's submit: rei_pool_submit plus the entry flags
+   (REI_ENTRY_RUNNER marks a map's join ticket — a doorbell help beat
+   re-homes it onto the helper's own deque instead of executing it). */
+rei_status rei_pool_submit_flags(rei_pool *, void *task_obj,
+                                 uint16_t flags, rei_task *out,
+                                 double timeout_ms);
+
+// The result sink and the unwind path (pool.c) ----------------------------------
+
+/* The result-sink struct (opaque in rei.h): the core fills it from a
+   claimed entry and hands it to exec_fn; the binding passes it back to
+   the publish verbs. payload/inline_max expose the slot's frame buffer
+   so the binding frames its ERR envelope inline. */
+struct rei_result_sink_s {
+  rei_pool     *p;
+  rei_rs_hdr   *rs;
+  unsigned char *payload;   /* rs + sizeof(rei_rs_hdr): the frame buffer */
+  uint32_t      rs_index;
+  uint32_t      inline_max; /* the slot's payload capacity */
+  uint16_t      sub_slot;   /* the task's submitter (zc keying, probes) */
+  uint64_t      seq;        /* rs->sequence at claim */
+  uint64_t      task_id;
+};
+
+/* The eval-in-flight marker a binding sets around its catching = 0 task
+   eval only (R: around Rf_eval, never the decode), so its unwind path
+   can tell a task error from infrastructure failure. The core heals it
+   at worker step/run entry. */
+void rei_pool_eval_mark(rei_pool *, int in_flight);
+/* The unwind path for a binding whose catching = 0 exec abandons (R's
+   longjmp): when the eval marker says a task eval was in flight, clears
+   it and mints that task's sink (from the identity the core saved at
+   execute) for the err publish. Returns 1 then; 0 when the abandonment
+   came from outside any task eval — infrastructure failure, the worker
+   goes down. */
+int rei_pool_unwind_sink(rei_pool *, rei_result_sink *out);
 
 // RNG jump kernel (rng_jump.c) -----------------------------------------------------------
 

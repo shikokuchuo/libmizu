@@ -88,6 +88,9 @@ these.
 
 Region layer, parker, liveness lock, death listeners, the
 spill/ledger/zc machinery (`src/spill.c`), the channel transport
-(`src/channel.c`), and the built-in bytes binding (`src/bytes.c`) are
-complete and tested. The pool transport is next. License: MIT
-(`LICENSE.note` holds third-party RngStreams attribution).
+(`src/channel.c`), the built-in bytes binding (`src/bytes.c`), and the
+pool transport (`src/pool.c` — the full verb surface including the
+vectored collects, introspection, map support, and armed death watches)
+are complete and tested: `tests/unit/test_pool.c` (in-process) and
+`tests/integration/test_pool.c` (forked children) are both green.
+License: MIT (`LICENSE.note` holds third-party RngStreams attribution).
