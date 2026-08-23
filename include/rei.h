@@ -734,14 +734,31 @@ typedef struct rei_pool_opts_s {
 
 REI_API void rei_pool_opts_init(rei_pool_opts *);
 
-/* A task handle: a fixed-size value identifying one result slot at one
-   sequence. Core-filled at submit; bindings store and pass back by
-   pointer. All-zero is the invalid value. */
+/* A task handle: an 8-byte value identifying one result slot at one
+   sequence — 40-bit sequence in the low bits, 24-bit result-slot index
+   in the high (result_slots is capped at 2^24 at create). Core-filled
+   at submit; bindings store and pass back by pointer. The 8-byte size
+   lets a binding pack the whole handle into an external-pointer address
+   (zero heap traffic per task). All-zero is the invalid value. */
 typedef struct rei_task_s {
-  uint64_t seq;         /* the slot's sequence at submit (full 64-bit) */
-  uint32_t rs_index;    /* global result-slot index */
-  uint32_t reserved;    /* zero */
+  uint64_t word;
 } rei_task;
+
+#define REI_TASK_SEQ_BITS 40
+#define REI_TASK_SEQ_MAX ((UINT64_C(1) << REI_TASK_SEQ_BITS) - 1)
+
+static inline uint64_t rei_task_seq(const rei_task *t) {
+  return t->word & REI_TASK_SEQ_MAX;
+}
+static inline uint32_t rei_task_rs_index(const rei_task *t) {
+  return (uint32_t) (t->word >> REI_TASK_SEQ_BITS);
+}
+static inline rei_task rei_task_make(uint64_t seq, uint32_t rs_index) {
+  rei_task t;
+  t.word = (seq & REI_TASK_SEQ_MAX) |
+           ((uint64_t) rs_index << REI_TASK_SEQ_BITS);
+  return t;
+}
 
 /* create: controller side. token as the channel's. ready_wait covers the
    given worker slots (startup handshake). destroy releases the handle. */

@@ -803,9 +803,9 @@ static void test_introspection(void) {
   uint32_t nrows = 0;
   assert(rei_pool_tasks_get(ctrl, rows, 8, &nrows) == REI_OK);
   assert(nrows == 2);
-  assert(rows[0].slot == t1.rs_index && rows[0].status == REI_RS_OK);
-  assert(rows[0].sequence == t1.seq);
-  assert(rows[1].slot == t2.rs_index && rows[1].status == REI_RS_PENDING);
+  assert(rows[0].slot == rei_task_rs_index(&t1) && rows[0].status == REI_RS_OK);
+  assert(rows[0].sequence == rei_task_seq(&t1));
+  assert(rows[1].slot == rei_task_rs_index(&t2) && rows[1].status == REI_RS_PENDING);
   uint32_t nrows2 = 0;
   assert(rei_pool_tasks_get(ctrl, rows, 1, &nrows2) == REI_OK);
   assert(nrows2 == 2);   /* the total, not the fill count */

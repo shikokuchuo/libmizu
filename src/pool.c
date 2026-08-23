@@ -1252,9 +1252,10 @@ static rei_status pool_ring_space_wait(rei_pool *p, _Atomic int64_t *head,
   }
 }
 
-/* Handle-vs-slot sequence check. */
+/* Handle-vs-slot sequence check (the handle carries the low 40 bits). */
 static int pool_seq_match(rei_rs_hdr *rs, uint64_t seq) {
-  return atomic_load_explicit(&rs->sequence, memory_order_relaxed) == seq;
+  return (atomic_load_explicit(&rs->sequence, memory_order_relaxed) &
+          REI_TASK_SEQ_MAX) == seq;
 }
 
 static void pool_unpark_result_waiter(rei_pool *p, rei_rs_hdr *rs) {
@@ -1332,10 +1333,9 @@ static rei_status pool_alloc_rs(rei_pool *p, rei_keeper *keepers,
 /* The handle carries the sequence about to be installed at commit, so
    until the bump it is simply stale. */
 static void pool_mint_task(rei_pool *p, uint32_t rs_index, rei_task *out) {
-  out->seq = atomic_load_explicit(&pool_rs(p, rs_index)->sequence,
-                                  memory_order_relaxed) + 1;
-  out->rs_index = rs_index;
-  out->reserved = 0;
+  uint64_t seq = atomic_load_explicit(&pool_rs(p, rs_index)->sequence,
+                                      memory_order_relaxed) + 1;
+  *out = rei_task_make(seq, rs_index);
 }
 
 /* Commit point: commit the staged keeper, install the sequence, and open
@@ -2909,7 +2909,7 @@ rei_status rei_pool_collect(rei_pool *p, const rei_task *t,
                             void **value_out, double timeout_ms) {
   if (value_out != NULL) *value_out = NULL;
   if (pool_get(p) == NULL) return REI_ERR;
-  if (t == NULL || t->rs_index >= p->hdr.result_slots) {
+  if (t == NULL || rei_task_rs_index(t) >= p->hdr.result_slots) {
     rei_err_record(&p->h, REI_ERRCAT_OTHER, "invalid task handle");
     return REI_ERR;
   }
@@ -2917,13 +2917,13 @@ rei_status rei_pool_collect(rei_pool *p, const rei_task *t,
     rei_err_record(&p->h, REI_ERRCAT_OTHER, "not a submitter's task handle");
     return REI_ERR;
   }
-  rei_rs_hdr *rs = pool_rs(p, t->rs_index);
+  rei_rs_hdr *rs = pool_rs(p, rei_task_rs_index(t));
   double deadline = -1;
   double t_wait = -1;
 
   int32_t st;
   for (;;) {
-    if (!pool_seq_match(rs, t->seq)) {
+    if (!pool_seq_match(rs, rei_task_seq(t))) {
       rei_err_record(&p->h, REI_ERRCAT_OTHER,
                      "task handle already collected or invalidated");
       return REI_ERR;
@@ -3030,7 +3030,7 @@ rei_status rei_pool_collect(rei_pool *p, const rei_task *t,
     }
   }
 
-  void *v = pool_rs_claim(p, rs, t->rs_index, st);
+  void *v = pool_rs_claim(p, rs, rei_task_rs_index(t), st);
   if (v == NULL) return REI_ERR;
   if (value_out != NULL) *value_out = v;
   return REI_OK;
@@ -3092,13 +3092,13 @@ static rei_status pool_collect_resolve(rei_pool *p, const rei_task *tasks,
     return REI_ERR;
   }
   for (size_t i = 0; i < n; i++) {
-    if (tasks[i].rs_index >= p->hdr.result_slots) {
+    if (rei_task_rs_index(&tasks[i]) >= p->hdr.result_slots) {
       rei_err_record(&p->h, REI_ERRCAT_OTHER, "invalid task handle");
       free(rss);
       return REI_ERR;
     }
-    rei_rs_hdr *rs = pool_rs(p, tasks[i].rs_index);
-    if (!pool_seq_match(rs, tasks[i].seq)) {
+    rei_rs_hdr *rs = pool_rs(p, rei_task_rs_index(&tasks[i]));
+    if (!pool_seq_match(rs, rei_task_seq(&tasks[i]))) {
       rei_err_record(&p->h, REI_ERRCAT_OTHER,
                      "task handle already collected or invalidated");
       free(rss);
@@ -3242,7 +3242,7 @@ rei_status rei_pool_collect_any(rei_pool *p, const rei_task *tasks,
 
   pool_any_unannounce(rss, n);
   *index_out = found;
-  void *v = pool_rs_claim(p, rss[found], tasks[found].rs_index, st);
+  void *v = pool_rs_claim(p, rss[found], rei_task_rs_index(&tasks[found]), st);
   free(rss);
   if (v == NULL) return REI_ERR;   /* the index still reports */
   if (value_out != NULL) *value_out = v;
@@ -3383,7 +3383,7 @@ rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
   rei_status rc = REI_OK;
   for (size_t i = 0; i < n; i++) {
     int32_t st = atomic_load_explicit(&rss[i]->status, memory_order_acquire);
-    void *v = pool_rs_claim(p, rss[i], tasks[i].rs_index, st);
+    void *v = pool_rs_claim(p, rss[i], rei_task_rs_index(&tasks[i]), st);
     if (v == NULL) {
       err = i;   /* the read failure (slot i unconsumed when retryable) */
       rc = REI_ERR;
@@ -3410,9 +3410,9 @@ int rei_pool_cancel(rei_pool *p, const rei_task *t) {
   if (p == NULL || p->released || t == NULL || p->base == NULL ||
       p->self_pid != rei_self_pid())
     return 0;
-  if (t->rs_index >= p->hdr.result_slots) return 0;
-  rei_rs_hdr *rs = pool_rs(p, t->rs_index);
-  if (!pool_seq_match(rs, t->seq)) return 0;
+  if (rei_task_rs_index(t) >= p->hdr.result_slots) return 0;
+  rei_rs_hdr *rs = pool_rs(p, rei_task_rs_index(t));
+  if (!pool_seq_match(rs, rei_task_seq(t))) return 0;
   int32_t expected = REI_RS_PENDING;
   if (atomic_compare_exchange_strong_explicit(&rs->status, &expected,
                                               REI_RS_CANCEL,
@@ -3433,9 +3433,9 @@ int rei_pool_task_release(rei_pool *p, const rei_task *t) {
   if (p == NULL || p->released || t == NULL || p->base == NULL ||
       p->self_pid != rei_self_pid())
     return 0;
-  if (t->rs_index >= p->hdr.result_slots) return 0;
-  rei_rs_hdr *rs = pool_rs(p, t->rs_index);
-  if (!pool_seq_match(rs, t->seq)) return 0;
+  if (rei_task_rs_index(t) >= p->hdr.result_slots) return 0;
+  rei_rs_hdr *rs = pool_rs(p, rei_task_rs_index(t));
+  if (!pool_seq_match(rs, rei_task_seq(t))) return 0;
   for (;;) {
     int32_t st = atomic_load_explicit(&rs->status, memory_order_acquire);
     if (st == REI_RS_PENDING) {
@@ -3472,9 +3472,9 @@ int rei_pool_task_state(rei_pool *p, const rei_task *t) {
   if (p == NULL || p->released || t == NULL || p->base == NULL ||
       p->self_pid != rei_self_pid())
     return REI_RS_FREE;
-  if (t->rs_index >= p->hdr.result_slots) return REI_RS_FREE;
-  rei_rs_hdr *rs = pool_rs(p, t->rs_index);
-  if (!pool_seq_match(rs, t->seq)) return REI_RS_FREE;
+  if (rei_task_rs_index(t) >= p->hdr.result_slots) return REI_RS_FREE;
+  rei_rs_hdr *rs = pool_rs(p, rei_task_rs_index(t));
+  if (!pool_seq_match(rs, rei_task_seq(t))) return REI_RS_FREE;
   return atomic_load_explicit(&rs->status, memory_order_acquire);
 }
 
