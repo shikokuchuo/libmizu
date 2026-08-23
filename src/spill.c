@@ -10,6 +10,9 @@
    stream may carry hook-emitted identifiers). */
 
 #include <stdlib.h>
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 #include "internal.h"
 
 // Region teardown ------------------------------------------------------------
@@ -85,6 +88,16 @@ void rei_spill_fl_insert(rei_spill_fl *fl, rei_shm *shm) {
   fl->stamp[slot] = ++fl->tick;
   fl->total += size;
   fl->n++;
+#if defined(__linux__) && defined(MADV_COLLAPSE)
+  /* Collapse a proved-reusable region to huge pages (Linux >= 6.1): on
+     stock Linux shmem THP is off, so the create-time MADV_HUGEPAGE is
+     inert and a reused region would stay on 4 KiB pages forever. At
+     insert — not create — so only regions that completed a consumer-done
+     cycle pay; under zc churn lent regions never reach here. Idempotent
+     and benign on failure. */
+  if (size >= ((size_t) 2 << 20))
+    (void) madvise(shm->addr, size, MADV_COLLAPSE);
+#endif
 }
 
 /* Smallest entry with size >= n, removed from the list. A miss runs a
