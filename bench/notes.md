@@ -39,3 +39,28 @@ Reference points from the R package on the same host (2026-08-19/20
 records): channel round trip 1.50 us, pool 1.0 us/task — the C floor is
 ~0.4 us for both, so the seam carve cost the hot path nothing measurable
 through the R boundary either.
+
+## 2026-08-23: no-regression re-run
+
+Apple M4 Pro, macOS 26.6.1, arm64. Code: `753e619` (main). Full re-run
+green: unit, integration, soak (10 s), fuzz (100k runs x 3 harnesses,
+fuzzer+UBSan — the local Homebrew-ASan startup-hang caveat stands),
+ASan+UBSan and TSan over unit + soak + bench, the amalgamation smoke,
+rei.h under C++17. The shared lib exports 76 `rei_*` symbols (75 +
+`rei_pool_task_release`).
+
+- `channel_roundtrip_NIL`: 0.42 us (n=50k)
+- `channel_roundtrip_64B`: 0.42 us (n=50k)
+- `channel_roundtrip_64KiB`: 4.33 us (n=10k; ARENA tier)
+- `channel_roundtrip_1MiB`: 50.46 us (n=3k; SHM_RAW spill tier)
+- `channel_batch_64B`: 43.6 Mmsg/s (1M msgs, batches of 32)
+- `parker_wake`: 16.96 us (n=2k)
+- `spill_fresh_1MiB`: 10.70 us per create+close (n=300)
+- `spill_recycle_1MiB`: 0.03 us per free-list pop+insert (n=100k)
+- `pool_submit_collect_NIL`: 0.38 us (n=20k)
+- `pool_submit_collect_4KiB`: 1.04 us (n=10k)
+- `pool_steal_w1`: 10.1M; `w2`: 11.4M; `w4`: 5.7M tasks/s
+
+All within the 2026-08-22 first-record bands — no core regression from
+the `cb845d5`..`753e619` changes (the attach message alignment,
+`rei_pool_task_release`, the exit-time registry-log teardown).

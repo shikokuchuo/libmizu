@@ -57,6 +57,14 @@ tools/amalgamate.sh   # writes rei.c + rei.h
 
 Compile flags: `-std=c11 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden`.
 
+Local caveats on this Mac: the fuzz tier needs Homebrew LLVM —
+`FUZZ_CC=/opt/homebrew/opt/llvm/bin/clang` (Xcode clang lacks the
+libFuzzer runtime) and `FUZZ_SAN="-fsanitize=fuzzer,undefined"` (Homebrew
+LLVM's ASan hangs at process startup here; CI runs the full trio).
+Sanitizer overrides via CFLAGS/LDFLAGS cover unit + soak + bench; the
+integration rule compiles plain against `rei.h` only by design (the
+consumer contract check), so it takes no sanitizer flags.
+
 Defines: none for static/vendored/amalgamated builds (`REI_API` empty);
 `REI_SHARED` when building/using the shared library; also `REI_BUILDING` when
 compiling the library itself on Windows. The Makefile and build-win.bat set
@@ -103,11 +111,14 @@ Region layer, parker, liveness lock, death listeners, the
 spill/ledger/zc machinery (`src/spill.c`), the channel transport
 (`src/channel.c`), the built-in bytes binding (`src/bytes.c`), and the
 pool transport (`src/pool.c` — the full verb surface including the
-vectored collects, introspection, map support, and armed death watches)
-are complete and tested. All four test tiers are green: unit
+vectored collects, introspection, map support, armed death watches, and
+`rei_pool_task_release`, the finalizer release for uncollected task
+handles) are complete and tested. All four test tiers are green: unit
 (`tests/unit/`), integration (`tests/integration/`), soak
 (`tests/soak/` — full-duplex channel and multi-worker pool contention),
-and the fuzz bursts (`tests/fuzz/`). The bench suite (`bench/`) has its
-first records in `bench/notes.md`. Concurrent region creation from
+and the fuzz bursts (`tests/fuzz/`). The bench suite's records live in
+`bench/notes.md` (the 2026-08-23 entry is a full no-regression re-run:
+all tiers, sanitizers, fuzz, and the amalgamation smoke green).
+Concurrent region creation from
 threads is a supported consumer pattern (`tests/unit/test_registry.c`).
 License: MIT (`LICENSE.note` holds third-party RngStreams attribution).
