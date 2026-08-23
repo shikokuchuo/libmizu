@@ -316,7 +316,20 @@ static void test_cancel(void) {
   rei_task t2 = submit_bytes(ctrl, "y", 1);
   assert(rei_pool_step(wk, 0) == REI_STEP_TASK);
   assert(rei_pool_cancel(ctrl, &t2) == 0);   /* too late: completed */
+  assert(rei_pool_task_state(ctrl, &t2) == REI_RS_OK);  /* left collectible */
   collect_bytes(ctrl, &t2, "y", 1);
+
+  /* the finalizer release: a terminal, uncollected slot is freed (0 —
+     released, not cancelled) so the result never lingers until reuse */
+  rei_task t3 = submit_bytes(ctrl, "z", 1);
+  assert(rei_pool_step(wk, 0) == REI_STEP_TASK);
+  assert(rei_pool_task_state(ctrl, &t3) == REI_RS_OK);
+  assert(rei_pool_task_release(ctrl, &t3) == 0);
+  assert(rei_pool_task_state(ctrl, &t3) == REI_RS_FREE);
+  /* a pending task is cancelled through the same verb */
+  rei_task t4 = submit_bytes(ctrl, "w", 1);
+  assert(rei_pool_task_release(ctrl, &t4) == 1);
+  assert(rei_pool_task_state(ctrl, &t4) == REI_RS_CANCEL);
   pool_end();
   puts("ok cancel");
 }

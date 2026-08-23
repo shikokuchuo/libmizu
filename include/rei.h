@@ -863,9 +863,17 @@ REI_API rei_status rei_pool_set_trace(rei_pool *, rei_trace_fn, void *ctx);
    skipped; an executing one runs to completion and its result is
    dropped. Returns 1 when this call cancelled the task, 0 when too
    late (completed, already cancelled, pool gone) — every edge folds
-   into 0, there is no error path. Also the finalizer release for an
-   uncollected handle: safe in any task state. */
+   into 0, there is no error path. A completed slot is left collectible;
+   releasing a handle that will never be collected is
+   rei_pool_task_release. */
 REI_API int rei_pool_cancel(rei_pool *, const rei_task *);
+/* The finalizer release for a task handle that was never collected: a
+   still-pending task is cancelled (as rei_pool_cancel); a completed
+   (OK/ERR/DIED) slot is freed, letting the producing worker's keeper
+   sweep drop what the result retained. Returns 1 only when this call
+   cancelled a pending task. Total, no error path: a stale handle, a
+   released pool, or a forked child answers 0. */
+REI_API int rei_pool_task_release(rei_pool *, const rei_task *);
 /* REI_RS_* of a task (informational, racy against slot reuse). */
 REI_API int rei_pool_task_state(rei_pool *, const rei_task *);
 /* Orderly shutdown, controller only: broadcasts shutdown, wakes every

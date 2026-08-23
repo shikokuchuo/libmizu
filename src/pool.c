@@ -3392,7 +3392,9 @@ rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
 /* Advisory and discard-only, never preemptive: a task already executing
    runs to completion and its result is dropped by the worker's failed
    publish CAS. Total — cancel runs from binding unwind paths, so a stale
-   handle, a closed pool, or a forked child answers 0 instead of raising. */
+   handle, a closed pool, or a forked child answers 0 instead of raising.
+   A completed slot is left collectible; releasing a handle that will
+   never be collected is rei_pool_task_release. */
 int rei_pool_cancel(rei_pool *p, const rei_task *t) {
   if (p == NULL || p->released || t == NULL || p->base == NULL ||
       p->self_pid != rei_self_pid())
@@ -3409,6 +3411,46 @@ int rei_pool_cancel(rei_pool *p, const rei_task *t) {
     return 1;
   }
   return 0;
+}
+
+/* The finalizer release for a handle that was never collected: a pending
+   task is cancelled as rei_pool_cancel does; a terminal OK/ERR/DIED slot
+   is freed, so the producing worker's keeper sweep drops what the result
+   retained and the slot never lingers until reuse. Same totality as
+   cancel — a binding's GC finalizer runs it without a live error path. */
+int rei_pool_task_release(rei_pool *p, const rei_task *t) {
+  if (p == NULL || p->released || t == NULL || p->base == NULL ||
+      p->self_pid != rei_self_pid())
+    return 0;
+  if (t->rs_index >= p->hdr.result_slots) return 0;
+  rei_rs_hdr *rs = pool_rs(p, t->rs_index);
+  if (!pool_seq_match(rs, t->seq)) return 0;
+  for (;;) {
+    int32_t st = atomic_load_explicit(&rs->status, memory_order_acquire);
+    if (st == REI_RS_PENDING) {
+      int32_t expected = REI_RS_PENDING;
+      if (atomic_compare_exchange_strong_explicit(&rs->status, &expected,
+                                                  REI_RS_CANCEL,
+                                                  memory_order_seq_cst,
+                                                  memory_order_relaxed)) {
+        pool_unpark_result_waiter(p, rs);
+        return 1;
+      }
+    } else if (st == REI_RS_OK || st == REI_RS_ERR || st == REI_RS_DIED) {
+      int32_t w = atomic_load_explicit(&rs->worker_slot,
+                                       memory_order_acquire);
+      int32_t expected = st;
+      if (atomic_compare_exchange_strong_explicit(&rs->status, &expected,
+                                                  REI_RS_FREE,
+                                                  memory_order_seq_cst,
+                                                  memory_order_relaxed)) {
+        pool_unpark_keeper_drop(p, w);
+        return 0;
+      }
+    } else {
+      return 0;            /* CANCEL or FREE: another party owns the slot */
+    }
+  }
 }
 
 /* Non-consuming state probe: two single reads, racy against slot reuse
