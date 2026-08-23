@@ -816,6 +816,16 @@ REI_API rei_status rei_pool_submit_batch(rei_pool *, void **objs, size_t n,
                                          rei_task *out, size_t *n_out,
                                          double timeout_ms);
 
+/* The supply-callback form of submit_batch: the binding produces task
+   object i on demand, so it can stage through one reusable wire object
+   instead of pre-building n of them. Same per-task semantics and wake
+   cadence as the array form (which is a thin adapter over this). */
+typedef void *(*rei_obj_supply)(void *ctx, size_t i);
+REI_API rei_status rei_pool_submit_batch_fn(rei_pool *, rei_obj_supply,
+                                            void *ctx, size_t n,
+                                            rei_task *out, size_t *n_out,
+                                            double timeout_ms);
+
 /* collect waits for the task's terminal state and sets *value_out to
    the read_fn's product — including for non-OK outcomes, where
    ctx.outcome (REI_RS_ERR / REI_RS_CANCEL / REI_RS_DIED) lets the

@@ -1501,12 +1501,13 @@ rei_status rei_pool_submit(rei_pool *p, void *task_obj, rei_task *out,
    deadline mid-burst ends the batch early (REI_OK, *n_out < n); fatal
    outcomes raise, with the tasks already submitted staying valid and
    collectible. */
-rei_status rei_pool_submit_batch(rei_pool *p, void **objs, size_t n,
-                                 rei_task *out, size_t *n_out,
-                                 double timeout_ms) {
+rei_status rei_pool_submit_batch_fn(rei_pool *p, rei_obj_supply supply,
+                                    void *ctx, size_t n,
+                                    rei_task *out, size_t *n_out,
+                                    double timeout_ms) {
   *n_out = 0;
   if (pool_get(p) == NULL) return REI_ERR;
-  if (n > 0 && (objs == NULL || out == NULL)) {
+  if (n > 0 && (supply == NULL || out == NULL)) {
     rei_err_record(&p->h, REI_ERRCAT_OTHER,
                    "expected task objects and handle out-params");
     return REI_ERR;
@@ -1523,7 +1524,7 @@ rei_status rei_pool_submit_batch(rei_pool *p, void **objs, size_t n,
 
   if (p->role == REI_ROLE_WORKER) {
     for (size_t i = 0; i < n; i++) {
-      if (pool_submit_nested(p, objs[i], 0, &out[i]) != 0)
+      if (pool_submit_nested(p, supply(ctx, i), 0, &out[i]) != 0)
         return REI_ERR;
       *n_out = i + 1;
     }
@@ -1549,7 +1550,7 @@ rei_status rei_pool_submit_batch(rei_pool *p, void **objs, size_t n,
       *n_out = done;
       return st;
     }
-    st = pool_submit1(p, p->keepers, ring, objs[i], 0, &out[i]);
+    st = pool_submit1(p, p->keepers, ring, supply(ctx, i), 0, &out[i]);
     if (st != REI_OK) {
       *n_out = done;
       return st;
@@ -1567,6 +1568,18 @@ rei_status rei_pool_submit_batch(rei_pool *p, void **objs, size_t n,
 
   *n_out = done;
   return REI_OK;
+}
+
+/* The array form over the supply core. */
+static void *pool_batch_array_supply(void *ctx, size_t i) {
+  return ((void **) ctx)[i];
+}
+
+rei_status rei_pool_submit_batch(rei_pool *p, void **objs, size_t n,
+                                 rei_task *out, size_t *n_out,
+                                 double timeout_ms) {
+  return rei_pool_submit_batch_fn(p, pool_batch_array_supply, objs, n, out,
+                                  n_out, timeout_ms);
 }
 
 // Worker step ----------------------------------------------------------------------------
