@@ -550,6 +550,7 @@ rei_status rei_pool_create(rei_pool **out, const rei_pool_opts *opts,
   }
   p->h.htype = REI_HTYPE_POOL;
   p->h.binding = *b;
+  rei_read_tmpl_init(&p->h);
   p->role = REI_ROLE_CONTROLLER;
   p->self_pid = rei_self_pid();
   p->wk_slot = -1;
@@ -805,6 +806,7 @@ static rei_pool *pool_open_common(const char *token, const rei_binding *b,
   }
   p->h.htype = REI_HTYPE_POOL;
   p->h.binding = *b;
+  rei_read_tmpl_init(&p->h);
   p->self_pid = rei_self_pid();
   p->wk_slot = -1;
   p->sub_slot = -1;
@@ -2804,14 +2806,10 @@ static void pool_collect_learn(rei_pool *p, double t_wait,
    handle's error slot filled on failure. */
 static void *pool_read_outcome(rei_pool *p, rei_rs_hdr *rs, int32_t st,
                                int32_t died_slot, int64_t died_pid) {
-  rei_read_ctx ctx;
-  memset(&ctx, 0, sizeof(ctx));
-  ctx.size = (uint32_t) sizeof(ctx);
+  rei_read_ctx ctx = p->h.read_tmpl;
   ctx.outcome = st;
   ctx.died_slot = died_slot;
   ctx.died_pid = died_pid;
-  ctx.handle = &p->h;
-  ctx.binding_ctx = p->h.binding.ctx;
   rei_slot_hdr nil_hdr = { REI_KIND_NIL, 0, 0 };
   const rei_slot_hdr *hdr = st == REI_RS_OK || st == REI_RS_ERR ?
     &rs->ph : &nil_hdr;

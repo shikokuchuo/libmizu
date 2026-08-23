@@ -474,13 +474,8 @@ static rei_status chan_read(rei_channel *c, const unsigned char *sl,
     limit = c->inline_max;
   }
 
-  rei_read_ctx ctx;
-  memset(&ctx, 0, sizeof(ctx));
-  ctx.size = (uint32_t) sizeof(ctx);
+  rei_read_ctx ctx = c->h.read_tmpl;
   ctx.outcome = REI_RS_OK;
-  ctx.died_slot = -1;
-  ctx.handle = &c->h;
-  ctx.binding_ctx = c->h.binding.ctx;
 
   void *obj = c->h.binding.read(hdr, bytes, limit, &ctx);
   if (obj == NULL) {
@@ -704,6 +699,7 @@ rei_status rei_channel_create(rei_channel **out,
   }
   c->h.htype = REI_HTYPE_CHANNEL;
   c->h.binding = *b;
+  rei_read_tmpl_init(&c->h);
   c->side = REI_ENTITY_HOST;
   c->wait_budget_ns = REI_SPIN_BUDGET_NS;
 
@@ -859,6 +855,7 @@ rei_status rei_channel_attach(rei_channel **out, const char *token,
   }
   c->h.htype = REI_HTYPE_CHANNEL;
   c->h.binding = *b;
+  rei_read_tmpl_init(&c->h);
   c->side = REI_ENTITY_PEER;
   c->wait_budget_ns = REI_SPIN_BUDGET_NS;
 

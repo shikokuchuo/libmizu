@@ -477,7 +477,23 @@ struct rei_handle_s {
   uint8_t htype;                /* REI_HTYPE_*; 0 = unset */
   rei_spill_fl fl;              /* producer free list + lent-region ledger */
   rei_open_cache oc;            /* consumer SHM_RAW mapping cache */
+  rei_read_ctx read_tmpl;       /* per-read ctx template: size/handle/
+                                   binding_ctx set once at create/attach;
+                                   each read copies it and fills only the
+                                   outcome fields. Handles are
+                                   single-threaded per side, so a
+                                   handle-owned mutable ctx is safe. */
 };
+
+/* Initialize the handle's read-ctx template once the binding is in
+   (create/attach/join). */
+static inline REI_MAYBE_UNUSED void rei_read_tmpl_init(rei_handle *h) {
+  memset(&h->read_tmpl, 0, sizeof(h->read_tmpl));
+  h->read_tmpl.size = (uint32_t) sizeof(h->read_tmpl);
+  h->read_tmpl.died_slot = -1;
+  h->read_tmpl.handle = h;
+  h->read_tmpl.binding_ctx = h->binding.ctx;
+}
 
 static inline REI_MAYBE_UNUSED int rei_check_interrupt(const rei_binding *b) {
   return b->check != NULL ? b->check(b->ctx) : 0;
