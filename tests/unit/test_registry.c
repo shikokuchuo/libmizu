@@ -87,12 +87,23 @@ int main(void) {
   rei_shm_close(one, 1);
   assert(log_size(logpath) == 4);
 
-  /* Tidy the scratch dir (in production the reaper owns log removal). */
-  assert(unlink(logpath) == 0);
+  /* The exit/unload teardown is a no-op while a region is live... */
+  rei_shm *two = NULL;
+  assert(rei_shm_create(&two, 4096) == REI_OK);
+  rei_log_teardown();
+  assert(log_size(logpath) == 8);
+
+  /* ...and removes the log and prunes the dir once the last region
+     comes down (in production the reaper owns dead processes' logs). */
+  rei_shm_close(two, 1);
+  rei_log_teardown();
+  assert(log_size(logpath) == -1);
   char regdir[PATH_MAX];
   int rn = snprintf(regdir, sizeof(regdir), "%s/rei", scratch);
   assert(rn > 0 && (size_t) rn < sizeof(regdir));
-  assert(rmdir(regdir) == 0);
+  struct stat st;
+  assert(stat(regdir, &st) != 0);
+
   assert(rmdir(scratch) == 0);
 
   puts("test_registry: ok");

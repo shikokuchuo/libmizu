@@ -334,6 +334,30 @@ static void rei_log_release(void) {
   atomic_store_explicit(&rei_log_dirty, 0, memory_order_relaxed);
 }
 
+/* Exit/unload hook, registered as a library destructor: with every
+   created region torn down the log holds only stale records, so unlink
+   it and prune the dir — a clean process leaves no registry residue and
+   the reaper's job shrinks to crashed processes. A region that outlives
+   its creator keeps the count nonzero and the log in place for the
+   reaper; the pid guard keeps a forked child that never opened its own
+   log from removing the parent's. The fd is never closed, only
+   forgotten: an append racing exit writes to the unlinked inode — the
+   same microseconds-wide forfeiture as a create racing the truncate. */
+__attribute__((destructor)) void rei_log_teardown(void) {
+  if (atomic_load_explicit(&rei_log_live, memory_order_relaxed) != 0)
+    return;
+  if (atomic_load_explicit(&rei_log_pid, memory_order_relaxed) != getpid())
+    return;
+  char dir[PATH_MAX], path[PATH_MAX];
+  if (rei_log_dir(dir, sizeof(dir)) != 0) return;
+  int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
+                   &REI_PREFIX_LITERAL[1], (unsigned) getpid());
+  if (n <= 0 || (size_t) n >= sizeof(path)) return;
+  unlink(path);
+  rmdir(dir);            /* succeeds once the last process's log is gone */
+  atomic_store_explicit(&rei_log_fd, -1, memory_order_relaxed);
+}
+
 #endif /* __APPLE__ */
 
 static int rei_shm_os_unlink(const char *name) {

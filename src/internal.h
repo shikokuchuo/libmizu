@@ -66,6 +66,12 @@ rei_shm *rei_shm_open_rw_heap(const char *name, int populate);
    name. The public rei_shm_close wraps this + free. */
 void rei_shm_close_stack(rei_shm *shm, int unlink);
 
+/* macOS registry-log exit/unload hook (shm.c; defined under __APPLE__
+   only): removes this process's log and prunes the registry dir once
+   every created region is torn down. Registered as a library
+   destructor; declared here for the unit tier. */
+void rei_log_teardown(void);
+
 /* Control-region create: pre-faulted on every platform, so slot walks
    never zero-fill-fault on the hot path. Payload regions use the plain
    create — written in full at stage time. */
