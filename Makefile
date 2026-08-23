@@ -43,7 +43,7 @@ else ifneq (,$(filter MINGW% UCRT% CLANG%,$(UNAME)))
   SYMLINKS :=
 else
   # -fPIC: the one object set serves both libs; x86_64 ld refuses
-  # non-PIC (TLS slot in err.c) in the shared link. Not MinGW: PE is
+  # non-PIC (TLS slot in err_tls.c) in the shared link. Not MinGW: PE is
   # always PIC and gcc warns on the flag.
   CFLAGS   += -fPIC
   CPPFLAGS += -DREI_SHARED

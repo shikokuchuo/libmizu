@@ -23,7 +23,7 @@ rem misfires -Wpre-c11-compat on C11 constructs even with the standard
 rem set; /W4 maps to clang's -Wall -Wextra.
 set CFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -D_CRT_SECURE_NO_WARNINGS
 set DLLFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -DREI_SHARED -DREI_BUILDING -D_CRT_SECURE_NO_WARNINGS
-set SOURCES=src\api.c src\bytes.c src\channel.c src\err.c src\liveness.c src\parker.c src\pool.c src\preamble.c src\rng_jump.c src\shm.c src\shm_rw.c src\spill.c src\tune.c src\wait_linux.c src\wait_macos.c src\wait_win32.c
+set SOURCES=src\api.c src\bytes.c src\channel.c src\err.c src\err_tls.c src\liveness.c src\parker.c src\pool.c src\preamble.c src\rng_jump.c src\shm.c src\shm_rw.c src\spill.c src\tune.c src\wait_linux.c src\wait_macos.c src\wait_win32.c
 
 rem Every TU is platform-guarded internally; a foreign platform's file
 rem compiles empty.
