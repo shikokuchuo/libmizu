@@ -836,13 +836,13 @@ rei_status rei_channel_attach(rei_channel **out, const char *token,
     return REI_ERR;
   }
   if (!rei_token_valid(token)) {
-    rei_err_record_tls(REI_ERRCAT_OTHER, "malformed join token");
+    rei_err_record_tls(REI_ERRCAT_OTHER, "malformed region-name suffix");
     return REI_ERR;
   }
   char name[REI_NAME_MAX];
   int nn = snprintf(name, sizeof(name), "%s%s", REI_PREFIX_LITERAL, token);
   if (nn <= 0 || (size_t) nn >= sizeof(name)) {
-    rei_err_record_tls(REI_ERRCAT_OTHER, "malformed join token");
+    rei_err_record_tls(REI_ERRCAT_OTHER, "malformed region-name suffix");
     return REI_ERR;
   }
 
