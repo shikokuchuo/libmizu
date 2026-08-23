@@ -13,11 +13,13 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #elif defined(__APPLE__)
-#include <mach/mach_time.h>
-#include <unistd.h>
+#  include <mach/mach_time.h>
+#  include <pthread.h>
+#  include <unistd.h>
 #else
-#include <time.h>
-#include <unistd.h>
+#  include <pthread.h>
+#  include <time.h>
+#  include <unistd.h>
 #endif
 
 double rei_now(void) {
@@ -57,11 +59,36 @@ double rei_now(void) {
 #endif
 }
 
+#ifndef _WIN32
+static _Atomic long rei_pid_cache;
+
+static void rei_pid_child(void) {
+  atomic_store_explicit(&rei_pid_cache, 0, memory_order_relaxed);
+}
+
+static void rei_pid_atefork(void) {
+  pthread_atfork(NULL, NULL, rei_pid_child);
+}
+#endif
+
 long rei_self_pid(void) {
 #ifdef _WIN32
   return (long) GetCurrentProcessId();
 #else
-  return (long) getpid();
+  /* getpid is a real syscall (glibc dropped its cache in 2.25) and the
+     fork guards call it per verb — several us per pool round trip on
+     Linux. Cache it; a pthread_atfork child handler zeroes the cache so
+     a forked child re-reads. fork() through the libc wrapper runs the
+     handlers (R's fork does); a raw-clone child is out of scope, as it
+     is for every atfork guard in the process. */
+  static pthread_once_t pid_once = PTHREAD_ONCE_INIT;
+  long pid = atomic_load_explicit(&rei_pid_cache, memory_order_relaxed);
+  if (pid == 0) {
+    pthread_once(&pid_once, rei_pid_atefork);
+    pid = (long) getpid();
+    atomic_store_explicit(&rei_pid_cache, pid, memory_order_relaxed);
+  }
+  return pid;
 #endif
 }
 
