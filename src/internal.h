@@ -90,17 +90,27 @@ void rei_shm_host_release(rei_shm *shm);
    watch and parkers reference it until the handle's release). */
 void rei_region_unlink(rei_shm *shm);
 
+/* Cold annotation for the error recorders: they sit on every hot verb's
+   failure branches, and as returning variadic functions they otherwise
+   force the compiler to treat those branches as live (register pressure,
+   worse layout, blown inline budgets). */
+#if defined(_MSC_VER)
+#  define REI_COLD
+#else
+#  define REI_COLD __attribute__((cold))
+#endif
+
 /* Category + remediation text for an REI_ERRCAT (fills the handle /
    thread-local error slot). */
-void rei_err_describe(rei_errcat, const char **summary, const char **hint);
+REI_COLD void rei_err_describe(rei_errcat, const char **summary, const char **hint);
 
 // Errors ---------------------------------------------------------------------------
 
 /* The handle error slot lives in rei_handle_s; handle-free entry points
    (regions, prune) use a thread-local slot. Both are printf-formatted
    records, valid until the next call on the same handle / thread. */
-void rei_err_record(rei_handle *h, rei_errcat cat, const char *fmt, ...);
-void rei_err_record_tls(rei_errcat cat, const char *fmt, ...);
+REI_COLD void rei_err_record(rei_handle *h, rei_errcat cat, const char *fmt, ...);
+REI_COLD void rei_err_record_tls(rei_errcat cat, const char *fmt, ...);
 
 // Time ----------------------------------------------------------------------------
 

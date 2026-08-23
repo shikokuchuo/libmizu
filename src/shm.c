@@ -652,7 +652,7 @@ void rei_shm_close_stack(rei_shm *shm, int unlink) {
 /* Map a failure category to a summary plus an actionable remediation
    hint ("" where the summary suffices); the caller composes its error
    message from these. */
-void rei_err_describe(rei_errcat category, const char **summary,
+REI_COLD void rei_err_describe(rei_errcat category, const char **summary,
                       const char **hint) {
   *hint = "";
   switch (category) {

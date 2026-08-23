@@ -9,10 +9,18 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+/* Local copy of internal.h's cold annotation (this TU vendors with the
+   region layer and cannot include internal.h). */
+#if defined(_MSC_VER)
+#  define REI_COLD
+#else
+#  define REI_COLD __attribute__((cold))
+#endif
+
 static _Thread_local rei_errcat tls_cat = REI_ERRCAT_NONE;
 static _Thread_local char tls_msg[256];
 
-void rei_err_record_tls(rei_errcat cat, const char *fmt, ...) {
+REI_COLD void rei_err_record_tls(rei_errcat cat, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(tls_msg, sizeof(tls_msg), fmt, ap);

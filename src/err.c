@@ -9,7 +9,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-void rei_err_record(rei_handle *h, rei_errcat cat, const char *fmt, ...) {
+REI_COLD void rei_err_record(rei_handle *h, rei_errcat cat, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(h->errmsg, sizeof(h->errmsg), fmt, ap);
