@@ -1,0 +1,14 @@
+* text=auto
+
+# Windows build script needs CRLF to run reliably under cmd.exe.
+*.bat text eol=crlf
+
+# Keep release archives (git archive / GitHub tarballs) to what a
+# consumer needs to build and install.
+.gitattributes export-ignore
+.gitignore export-ignore
+.posit/ export-ignore
+.github/ export-ignore
+bench/ export-ignore
+dev/ export-ignore
+tests/ export-ignore

@@ -11,7 +11,7 @@ The surface is FFI-safe: every public operation is an exported function, with no
 The library also distributes as a two-file amalgamation: `rei.c` and `rei.h`.
 
 librei needs a C11 compiler and a 64-bit platform: the wire formats depend on lock-free 64-bit atomics.
-Linux needs kernel >= 5.3 (`pidfd_open`, no fallback).
+On Linux, kernel 5.3 or later is required.
 
 ## Building
 
@@ -25,7 +25,10 @@ make test-soak          # the soak tier (minutes-long contention runs; nightly)
 make test-fuzz          # libFuzzer bursts on the wire parsers (clang)
 make bench              # the benchmark suite (report-only)
 make coverage           # llvm-cov report over the unit tier (report-only)
-make install            # honors PREFIX (/usr/local) and DESTDIR
+make tidy               # clang-tidy over the library sources (report-only;
+                        # TIDY overrides the binary)
+make install            # honors PREFIX (/usr/local) and DESTDIR;
+                        # also installs librei.pc for pkg-config
 ```
 
 On Windows, run `tools\build-win.bat` instead.
@@ -78,13 +81,25 @@ It reads the bootstrap payload with `rei_channel_drop()` and signals `rei_channe
 [`include/rei.h`](include/rei.h) documents the full contract for each declaration: ownership, threading, and the `rei_status` values that each verb returns.
 [`DESIGN.md`](DESIGN.md) gives the invariants.
 
+## Performance
+
+Representative figures from the C bench suite (`make bench`), measured on an Apple M4 Pro (macOS, arm64).
+
+| Benchmark | Best observed |
+| --- | --- |
+| Channel round trip (nil / 64 B payload) | 0.3–0.4 µs |
+| Channel round trip (64 KiB, arena tier) | 4.0 µs |
+| Channel round trip (1 MiB, spill tier) | 50 µs |
+| Channel batch throughput (64 B, batches of 32) | 44 M msgs/s |
+| Pool submit + collect (nil payload) | 0.4 µs |
+| Pool submit + collect (4 KiB payload) | 1.0 µs |
+| Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
+
+The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](bench/notes.md).
+
 ## Status
 
 Pre-release.
-The public header pins the API.
-The channel and pool transports are complete and tested.
-The test tiers are: unit, integration, soak, and fuzz bursts.
-Benchmark records live in `bench/notes.md`.
 
 ## License
 

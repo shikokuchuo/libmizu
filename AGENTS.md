@@ -2,8 +2,12 @@
 
 C library for lock-free shared-memory IPC: SPSC channels and work-stealing
 task pools behind a language-agnostic, FFI-safe C ABI. Pre-release (v0.1.0).
-First-party bindings live in separate repos: `rei` (R) and `pyrei` (Python);
-they vendor/compile these sources into their own modules.
+First-class bindings live in sibling repos: `rei` (R)
+and `pyrei` (Python); they vendor/compile these sources into their own
+packages. The channel
+and pool transports plus the built-in bytes binding are complete and
+tested. License: MIT (`LICENSE.note` holds third-party RngStreams
+attribution).
 
 ## Requirements
 
@@ -21,8 +25,18 @@ they vendor/compile these sources into their own modules.
   reference it.
 - `src/` — implementation. Every TU is platform-guarded internally, so all
   sources compile on every platform (a foreign platform's file is empty).
+  Main pieces: region layer, parker (`parker.c`), liveness lock, death
+  listeners, spill/ledger/zc machinery (`spill.c`), channel transport
+  (`channel.c`), bytes binding (`bytes.c`), pool transport (`pool.c` —
+  full verb surface: vectored collects, introspection, map support, armed
+  death watches, `rei_pool_task_release`, `rei_pool_submit_batch_fn`).
   Platform waiters: `wait_linux.c` (futex), `wait_macos.c` (`__ulock`),
   `wait_win32.c` (WaitOnAddress + named events).
+  Performance notes: the parker caches the self pid with an atfork reset;
+  channel/pool reads start from a per-handle read-ctx template; the error
+  recorders are marked cold; reused spill regions collapse to huge pages
+  at free-list insert (Linux THP), so only regions that completed a
+  consumer-done cycle pay for it.
 - `src/internal.h` — internals; unit tests may include it, integration tests
   must not.
 - `tests/unit/` — in-process, deterministic tier (one binary per `.c` file).
@@ -35,6 +49,11 @@ they vendor/compile these sources into their own modules.
   with clang, run as fixed-seed ASan+UBSan bursts.
 - `bench/` — report-only microbenchmarks (no timing asserts); records are
   appended to `bench/notes.md` with the commit SHA.
+- `librei.pc.in` — pkg-config template; `make install` sed-substitutes it
+  into `$(PREFIX)/lib/pkgconfig/librei.pc`.
+- `.clang-tidy` / `.clang-format` / `.editorconfig` — diagnostics and style
+  configs. clang-format matches the existing style but the tree isn't fully
+  conformant; use it for new code, no whole-tree reformat, no CI gate.
 - `tools/amalgamate.sh` — generates the two-file distribution `rei.c` + `rei.h`.
 - `tools/build-win.bat` — Windows build (clang-cl).
 - `dev/` — scratch copies of headers.
@@ -51,6 +70,11 @@ make test-soak        # soak tier (nightly; SOAK_SECONDS / REI_SOAK_SECONDS)
 make test-fuzz        # fuzz bursts (clang; FUZZ_CC/FUZZ_SAN/FUZZ_RUNS/FUZZ_SEED)
 make bench            # benchmark suite (report-only)
 make coverage         # llvm-cov report over the unit tier (report-only)
+make tidy             # clang-tidy over src/ (report-only; TIDY overrides the
+                      # binary, e.g. TIDY=/opt/homebrew/opt/llvm/bin/clang-tidy).
+                      # Run this after changing src/.
+make compile_commands.json  # clangd compilation database (gitignored;
+                            # regenerates when the Makefile changes)
 make install          # honors PREFIX (/usr/local) and DESTDIR
 tools/amalgamate.sh   # writes rei.c + rei.h
 ```
@@ -79,8 +103,11 @@ these.
   `REI_TIMEOUT`, `REI_CLOSED`, `REI_PEER_GONE`), not errors. `REI_ERR` is a
   real error with a portable `rei_errcat` category plus message on the handle.
 - Structs in `rei.h` are the wire format: sizes static-asserted, 64-byte
-  alignment, one shared hot word per cache line. `REI_ABI_VERSION` gates
-  mixed builds; bump it on any wire-format change.
+  alignment, one shared hot word per cache line. `rei_task` packs into 8
+  bytes. `REI_ABI_VERSION` gates mixed builds; bump it on any
+  wire-format change.
+- Concurrent region creation from threads is a supported consumer pattern
+  (`tests/unit/test_registry.c`).
 - The core moves opaque frames and never sees a language object; bindings
   register callbacks (`stage`, `read`, `exec`, `check`, `park`, `sweep`,
   `drop`) at create/attach/join. Staging is transactional — a binding may
@@ -104,21 +131,3 @@ these.
   on ubuntu; sanitizer legs cover ASan/UBSan/TSan on the unit tier.
 - `.github/workflows/release.yml` — on `v*` tags: checks tag matches
   `REI_VERSION`, generates the amalgamation for the release.
-
-## Status
-
-Region layer, parker, liveness lock, death listeners, the
-spill/ledger/zc machinery (`src/spill.c`), the channel transport
-(`src/channel.c`), the built-in bytes binding (`src/bytes.c`), and the
-pool transport (`src/pool.c` — the full verb surface including the
-vectored collects, introspection, map support, armed death watches, and
-`rei_pool_task_release`, the finalizer release for uncollected task
-handles) are complete and tested. All four test tiers are green: unit
-(`tests/unit/`), integration (`tests/integration/`), soak
-(`tests/soak/` — full-duplex channel and multi-worker pool contention),
-and the fuzz bursts (`tests/fuzz/`). The bench suite's records live in
-`bench/notes.md` (the 2026-08-23 entry is a full no-regression re-run:
-all tiers, sanitizers, fuzz, and the amalgamation smoke green).
-Concurrent region creation from
-threads is a supported consumer pattern (`tests/unit/test_registry.c`).
-License: MIT (`LICENSE.note` holds third-party RngStreams attribution).

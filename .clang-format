@@ -1,0 +1,13 @@
+# librei style: LLVM base, 2-space indent, 80 columns, attached braces.
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
+BreakBeforeBraces: Attach
+IndentPPDirectives: AfterHash
+PointerAlignment: Left
+SpaceBeforeParens: ControlStatements
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: Never

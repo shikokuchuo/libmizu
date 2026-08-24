@@ -11,6 +11,7 @@ DESTDIR ?=
 VERSION_MAJOR := 0
 VERSION_MINOR := 1
 VERSION_PATCH := 0
+VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 
 CPPFLAGS += -Iinclude -Isrc
 CFLAGS   ?= -O2
@@ -36,11 +37,13 @@ ifeq ($(UNAME),Darwin)
   SONAME_FLAG := -Wl,-install_name,$(PREFIX)/lib/librei.$(VERSION_MAJOR).dylib
   SHARED_LD := -dynamiclib $(SONAME_FLAG)
   SYMLINKS := librei.dylib
+  PC_LIBS_PRIVATE :=
 else ifneq (,$(filter MINGW% UCRT% CLANG%,$(UNAME)))
   # MSYS2/MinGW (the R package's Rtools toolchain): static lib + test
   # tiers only — the Windows DLL is tools/build-win.bat's job (clang-cl).
   SHARED  :=
   SYMLINKS :=
+  PC_LIBS_PRIVATE :=
 else
   # -fPIC: the one object set serves both libs; x86_64 ld refuses
   # non-PIC (TLS slot in err_tls.c) in the shared link. Not MinGW: PE is
@@ -52,6 +55,7 @@ else
   SHARED_LD := -shared $(SONAME_FLAG)
   SYMLINKS := librei.so.$(VERSION_MAJOR) librei.so
   LDLIBS += -pthread
+  PC_LIBS_PRIVATE := -pthread
 endif
 
 TEST_UNIT_SRC := $(wildcard tests/unit/*.c)
@@ -73,7 +77,7 @@ FUZZ_RUNS ?= 100000
 FUZZ_SEED ?= 1
 
 .PHONY: all static shared test test-unit test-integration test-soak \
-        test-fuzz bench coverage install uninstall clean amalgamation
+        test-fuzz bench coverage install uninstall clean amalgamation tidy
 
 all: static shared
 
@@ -179,9 +183,14 @@ amalgamation:
 	tools/amalgamate.sh
 
 install: all
-	mkdir -p $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
+	mkdir -p $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib \
+	         $(DESTDIR)$(PREFIX)/lib/pkgconfig
 	cp include/rei.h $(DESTDIR)$(PREFIX)/include/rei.h
 	cp $(STATIC) $(DESTDIR)$(PREFIX)/lib/$(STATIC)
+	sed -e 's|@PREFIX@|$(PREFIX)|g' \
+	    -e 's|@VERSION@|$(VERSION)|g' \
+	    -e 's|@LIBS_PRIVATE@|$(PC_LIBS_PRIVATE)|g' \
+	    librei.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/librei.pc
 ifneq ($(SHARED),)
 	cp $(SHARED) $(DESTDIR)$(PREFIX)/lib/$(SHARED)
 	@for l in $(SYMLINKS); do \
@@ -191,10 +200,31 @@ endif
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/include/rei.h
+	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/librei.pc
 	rm -f $(DESTDIR)$(PREFIX)/lib/$(STATIC) \
 	      $(DESTDIR)$(PREFIX)/lib/$(SHARED) $(SYMLINKS:%=$(DESTDIR)$(PREFIX)/lib/%)
+
+# Compilation database for clangd (which then picks up .clang-tidy and
+# .clang-format automatically). Regenerate after flag changes.
+compile_commands.json: Makefile
+	@rm -f $@.tmp
+	@echo '[' >> $@.tmp
+	@for s in $(SRC); do \
+	  printf '  {"directory": "%s", "file": "%s", "command": "%s"},\n' \
+	    "$(CURDIR)" "$$s" \
+	    "$(CC) $(CPPFLAGS) $(CFLAGS) -c $$s -o $${s%.c}.o" >> $@.tmp; \
+	done
+	@sed -i.bak '$$ s/,$$//' $@.tmp && rm -f $@.tmp.bak
+	@echo ']' >> $@.tmp
+	@mv $@.tmp $@
+
+# clang-tidy over the library sources (config in .clang-tidy). Report-only.
+# TIDY overrides the binary (e.g. TIDY=/opt/homebrew/opt/llvm/bin/clang-tidy).
+TIDY ?= clang-tidy
+tidy:
+	$(TIDY) $(SRC) -- $(CPPFLAGS) $(CFLAGS)
 
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
 	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN)
-	rm -rf rei.c rei.h rei-*.profraw rei.profdata
+	rm -rf rei.c rei.h rei-*.profraw rei.profdata compile_commands.json

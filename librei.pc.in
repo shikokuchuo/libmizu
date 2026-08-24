@@ -1,0 +1,12 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: librei
+Description: Lock-free shared-memory IPC: SPSC channels and work-stealing task pools
+URL: https://github.com/shikokuchuo/librei
+Version: @VERSION@
+Libs: -L${libdir} -lrei
+Libs.private: @LIBS_PRIVATE@
+Cflags: -I${includedir}

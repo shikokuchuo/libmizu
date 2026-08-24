@@ -12,6 +12,7 @@
 dev/
 /rei.c
 /rei.h
+/compile_commands.json
 /build/
 tests/unit/*
 !tests/unit/*.c

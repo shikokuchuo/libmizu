@@ -1,0 +1,41 @@
+# Diagnostics for the library sources. Run via `make tidy`.
+# Disabled groups:
+#   altera-*, llvmlibc-*, android-*      — target-specific frameworks
+#   readability-magic-numbers            — wire-format constants are the point
+#   misc-include-cleaner                 — noisy with platform-guarded TUs
+#   readability-identifier-length        — hot-loop code uses short names
+# Style-preference checks that fight the codebase's concise idiom:
+#   braces-around-statements, named-parameter (platform-guarded TUs omit
+#   params deliberately), uppercase-literal-suffix, math-missing-parentheses,
+#   isolate-declaration, concise-preprocessor, avoid-nested-conditional,
+#   redundant-casting; plus two noisy bugprone heuristics and mt-unsafe.
+Checks: >
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -altera-*,
+  -android-*,
+  -llvmlibc-*,
+  -readability-magic-numbers,
+  -misc-include-cleaner,
+  -readability-identifier-length,
+  -readability-non-const-global-variables,
+  -readability-braces-around-statements,
+  -readability-named-parameter,
+  -readability-uppercase-literal-suffix,
+  -readability-math-missing-parentheses,
+  -readability-isolate-declaration,
+  -readability-use-concise-preprocessor-directives,
+  -readability-avoid-nested-conditional-operator,
+  -readability-redundant-casting,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-easily-swappable-parameters,
+  -concurrency-mt-unsafe
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(include|src)/'
+CheckOptions:
+  readability-function-size.LineThreshold: 800
