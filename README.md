@@ -1,5 +1,8 @@
 # librei れい
 
+[![CI](https://github.com/shikokuchuo/librei/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/librei/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 librei is a C library for lock-free shared-memory IPC.
 It provides SPSC channels and work-stealing task pools through a language-agnostic C ABI.
 Channels and pools run over POSIX shm or Win32 file mappings.

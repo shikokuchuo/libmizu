@@ -37,6 +37,15 @@ jobs:
           ./public_only
           cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei.h)
 
+  # The shared library must export exactly the rei.h surface: a missing
+  # symbol is an ABI break, an extra one is a leak past REI_API.
+  exports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make
+      - run: tools/check-exports.sh
+
   # libFuzzer bursts: fixed seed + fixed run count, so deterministic.
   # ASan+UBSan catch what the torn-byte parsers would otherwise hide.
   fuzz:
