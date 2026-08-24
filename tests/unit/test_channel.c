@@ -16,6 +16,10 @@ static void send_bytes(rei_channel *c, const void *data, size_t len) {
   assert(rei_channel_send(c, &b) == REI_OK);
 }
 
+static void array_sink(void *ctx, size_t i, void *obj) {
+  ((void **) ctx)[i] = obj;
+}
+
 static void recv_bytes(rei_channel *c, const void *expect, size_t len) {
   void *obj = NULL;
   assert(rei_channel_recv(c, &obj, 1000) == REI_OK);
@@ -166,6 +170,28 @@ int main(void) {
              memcmp(b->data, parts[i].data, b->len) == 0);
       rei_bytes_free(b);
     }
+  }
+
+  /* batch, sink form: same drain, each message delivered as read */
+  {
+    rei_bytes parts[2] = { { "e", 1 }, { "ff", 2 } };
+    void *objs[2] = { parts, parts + 1 };
+    size_t accepted = 0;
+    assert(rei_channel_send_batch(host, objs, 2, &accepted) == REI_OK);
+    assert(accepted == 2);
+    void *got[2] = { NULL, NULL };
+    size_t n = 0;
+    assert(rei_channel_recv_batch_fn(peer, 4, &n, array_sink, got,
+                                     1000) == REI_OK);
+    assert(n == 2);
+    for (size_t i = 0; i < 2; i++) {
+      rei_bytes *b = got[i];
+      assert(b->len == i + 1 &&
+             memcmp(b->data, parts[i].data, b->len) == 0);
+      rei_bytes_free(b);
+    }
+    assert(rei_channel_recv_batch_fn(peer, 4, &n, NULL, got, 0) ==
+           REI_ERR);
   }
 
   /* ring full: cap 8 with nothing drained; the 9th send is refused.

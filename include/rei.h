@@ -673,6 +673,17 @@ REI_API rei_status rei_channel_recv_batch(rei_channel *, void **objs,
                                           size_t cap, size_t *n_out,
                                           double timeout_ms);
 
+/* The sink-callback form of recv_batch: each message is handed to sink
+   as it is read, so a binding can anchor every object (a GC protect, a
+   refcount) before the next read allocates — the array form forces a
+   binding to hold n unanchored products across the remaining reads.
+   Same wait and status discipline as recv_batch (which is a thin
+   adapter over this). */
+typedef void (*rei_obj_sink)(void *ctx, size_t i, void *obj);
+REI_API rei_status rei_channel_recv_batch_fn(rei_channel *, size_t cap,
+                                             size_t *n_out, rei_obj_sink,
+                                             void *ctx, double timeout_ms);
+
 /* close signals this side's close bit, then waits up to timeout_ms for
    the peer's close bit or its death — the rendezvous that makes it safe
    to release the sent-payload pins, since the peer sets its bit only
@@ -872,6 +883,17 @@ REI_API rei_status rei_pool_collect_all(rei_pool *, const rei_task *,
                                         size_t n, void **values_out,
                                         size_t *err_index_out,
                                         double timeout_ms);
+
+/* The sink-callback form of collect_all: each value is handed to sink
+   as it is claimed (input order, through the first non-OK outcome
+   inclusive), so a binding can anchor every object before the next
+   claim's read allocates. Same wait and stop-at-error semantics as the
+   array form (which is a thin adapter over this). */
+REI_API rei_status rei_pool_collect_all_fn(rei_pool *, const rei_task *,
+                                           size_t n, rei_obj_sink,
+                                           void *ctx,
+                                           size_t *err_index_out,
+                                           double timeout_ms);
 
 /* Task lifecycle trace hook: per-handle, per-process; NULL removes.
    Worker-side events fire on the worker thread, REI_TRACE_SUBMIT on the

@@ -3259,11 +3259,10 @@ rei_status rei_pool_collect_any(rei_pool *p, const rei_task *tasks,
    silently discarded. On success the claim runs in input order and stops
    at the first non-OK outcome by position inclusive: slots before it are
    claimed, slots after it stay collectible. */
-rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
-                                size_t n, void **values_out,
-                                size_t *err_index_out, double timeout_ms) {
-  if (values_out != NULL)
-    for (size_t i = 0; i < n; i++) values_out[i] = NULL;
+static rei_status pool_collect_all_impl(rei_pool *p, const rei_task *tasks,
+                                        size_t n, rei_obj_sink sink,
+                                        void *ctx, size_t *err_index_out,
+                                        double timeout_ms) {
   if (pool_get(p) == NULL) return REI_ERR;
   rei_rs_hdr **rss;
   if (pool_collect_resolve(p, tasks, n, &rss) != REI_OK) return REI_ERR;
@@ -3389,7 +3388,8 @@ rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
       rc = REI_ERR;
       break;
     }
-    if (values_out != NULL) values_out[i] = v;
+    if (sink != NULL) sink(ctx, i, v);   /* anchored by the binding
+                                            before the next claim reads */
     if (st != REI_RS_OK) {
       err = i;
       break;
@@ -3398,6 +3398,28 @@ rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
   free(rss);
   if (err_index_out != NULL) *err_index_out = err;
   return rc;
+}
+
+static void pool_array_sink(void *ctx, size_t i, void *obj) {
+  ((void **) ctx)[i] = obj;
+}
+
+rei_status rei_pool_collect_all_fn(rei_pool *p, const rei_task *tasks,
+                                   size_t n, rei_obj_sink sink, void *ctx,
+                                   size_t *err_index_out,
+                                   double timeout_ms) {
+  return pool_collect_all_impl(p, tasks, n, sink, ctx, err_index_out,
+                               timeout_ms);
+}
+
+rei_status rei_pool_collect_all(rei_pool *p, const rei_task *tasks,
+                                size_t n, void **values_out,
+                                size_t *err_index_out, double timeout_ms) {
+  if (values_out != NULL)
+    for (size_t i = 0; i < n; i++) values_out[i] = NULL;
+  return pool_collect_all_impl(p, tasks, n,
+                               values_out != NULL ? pool_array_sink : NULL,
+                               values_out, err_index_out, timeout_ms);
 }
 
 /* Advisory and discard-only, never preemptive: a task already executing

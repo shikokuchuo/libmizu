@@ -22,6 +22,10 @@ static int exec_mode = 0;  /* 0 echo, 1 strand (no publish), 2 infra fail,
                               3 abandon (eval_mark + longjmp), 4 ERR inline,
                               5 ERR tiered */
 static int err_read = 0;   /* read_fn returns the ERR envelope's bytes */
+
+static void array_sink(void *ctx, size_t i, void *obj) {
+  ((void **) ctx)[i] = obj;
+}
 static int exec_calls = 0;
 static jmp_buf abandon_jmp;
 
@@ -761,6 +765,23 @@ static void test_collect_all(void) {
   assert(rei_pool_collect_all(ctrl, &t4, 1, vals, &err, 1000) == REI_OK);
   assert(err == 1);   /* == n: all OK */
   rei_bytes_free(vals[0]);
+
+  /* sink form: values delivered in input order as claimed */
+  rei_task t5 = submit_bytes(ctrl, "e", 1);
+  rei_task t6 = submit_bytes(ctrl, "f", 1);
+  assert(rei_pool_step(wk, 0) == REI_STEP_TASK);
+  assert(rei_pool_step(wk, 0) == REI_STEP_TASK);
+  rei_task ts3[2] = { t5, t6 };
+  vals[0] = vals[1] = NULL;
+  err = 0;
+  assert(rei_pool_collect_all_fn(ctrl, ts3, 2, array_sink, vals, &err,
+                                 1000) == REI_OK);
+  assert(err == 2);
+  rei_bytes *b5 = vals[0], *b6 = vals[1];
+  assert(b5->len == 1 && memcmp(b5->data, "e", 1) == 0);
+  assert(b6->len == 1 && memcmp(b6->data, "f", 1) == 0);
+  rei_bytes_free(b5);
+  rei_bytes_free(b6);
   pool_end();
   puts("ok collect_all");
 }

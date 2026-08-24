@@ -1007,15 +1007,19 @@ rei_status rei_channel_recv(rei_channel *c, void **obj_out,
 
 /* Up to cap messages under a single park cycle and a single batched head
    publication. Waits only for the first message; whatever else has already
-   been published comes along, and the status discipline matches recv. */
-rei_status rei_channel_recv_batch(rei_channel *c, void **objs, size_t cap,
-                                  size_t *n_out, double timeout_ms) {
+   been published comes along, and the status discipline matches recv.
+   Each message goes to the sink as it is read: a binding can anchor
+   every product before the next read allocates. */
+rei_status rei_channel_recv_batch_fn(rei_channel *c, size_t cap,
+                                     size_t *n_out, rei_obj_sink sink,
+                                     void *ctx, double timeout_ms) {
   if (c == NULL || c->released) {
     *n_out = 0;
     return REI_CLOSED;
   }
-  if (cap < 1) {
-    rei_err_record(&c->h, REI_ERRCAT_OTHER, "n must be at least 1");
+  if (cap < 1 || sink == NULL) {
+    rei_err_record(&c->h, REI_ERRCAT_OTHER,
+                   "n must be at least 1 and the sink non-NULL");
     return REI_ERR;
   }
   rei_status st = chan_wait_msg(c, timeout_ms);
@@ -1028,11 +1032,23 @@ rei_status rei_channel_recv_batch(rei_channel *c, void **objs, size_t cap,
   size_t count = avail < (int64_t) cap ? (size_t) avail : cap;
   size_t i = 0;
   for (; i < count; i++) {
-    st = chan_consume1(c, &objs[i]);
+    void *obj = NULL;
+    st = chan_consume1(c, &obj);
     if (st != REI_OK) break;
+    sink(ctx, i, obj);
   }
   *n_out = i;
   return st;
+}
+
+static void chan_array_sink(void *ctx, size_t i, void *obj) {
+  ((void **) ctx)[i] = obj;
+}
+
+rei_status rei_channel_recv_batch(rei_channel *c, void **objs, size_t cap,
+                                  size_t *n_out, double timeout_ms) {
+  return rei_channel_recv_batch_fn(c, cap, n_out, chan_array_sink,
+                                   (void *) objs, timeout_ms);
 }
 
 // Close protocol ------------------------------------------------------------------
