@@ -19,17 +19,29 @@ attribution).
 
 - `include/rei.h` — the public API contract. Documents ownership, threading,
   and `rei_status` returns per verb. The pinned API surface.
+- `include/rei_ext.h` — dual-form accessors over the wire structs: C
+  consumers get `static inline`s, FFI consumers bind the exported symbols
+  from `src/ext.c` (`REI_EXT_NO_INLINES` keeps the inlines out of that TU).
+- `CHANGELOG.md` — Keep a Changelog; versions carry the ABI contract.
 - `DESIGN.md` — design authority: invariants the implementation maintains
   (wire format, parker protocol, payload tiers, binding seam, retain table,
   zero-copy, crash atomicity, pool mechanics, ABI discipline). Code comments
   reference it.
 - `src/` — implementation. Every TU is platform-guarded internally, so all
   sources compile on every platform (a foreign platform's file is empty).
-  Main pieces: region layer, parker (`parker.c`), liveness lock, death
-  listeners, spill/ledger/zc machinery (`spill.c`), channel transport
-  (`channel.c`), bytes binding (`bytes.c`), pool transport (`pool.c` —
-  full verb surface: vectored collects, introspection, map support, armed
-  death watches, `rei_pool_task_release`, `rei_pool_submit_batch_fn`).
+  Main pieces: region layer (`shm.c`, `shm_rw.c`, `preamble.c`,
+  `err_tls.c` — the thread-local error slot for handle-free entry points;
+  `shm.c` + `err_tls.c` vendor as a unit and depend only on `rei.h`),
+  parker (`parker.c`), liveness lock (`liveness.c`), spill/ledger/zc
+  machinery (`spill.c`), channel transport (`channel.c`), bytes binding
+  (`bytes.c`), pool transport (`pool.c` — full verb surface: vectored
+  collects, introspection, map support, armed death watches,
+  `rei_pool_task_release`, `rei_pool_submit_batch_fn`). Also: `ext.c`
+  (exported half of `rei_ext.h`; excluded from the amalgamation, which
+  already carries the inlines), `err.c` (handle-bound error recorders),
+  `rng_jump.c` (L'Ecuyer MRG32k3a stream jumping, for a future rei_map),
+  `tune.c` (`rei_tune` — glibc malloc thresholds, called by the binding
+  at load; GLIBC_TUNABLES wins).
   Platform waiters: `wait_linux.c` (futex), `wait_macos.c` (`__ulock`),
   `wait_win32.c` (WaitOnAddress + named events).
   Performance notes: the parker caches the self pid with an atfork reset;
@@ -40,6 +52,11 @@ attribution).
 - `src/internal.h` — internals; unit tests may include it, integration tests
   must not.
 - `tests/unit/` — in-process, deterministic tier (one binary per `.c` file).
+- `tests/ext_surface.c` — ext tier: includes only `rei.h` + `rei_ext.h`,
+  references every ext symbol and runs functional checks. Default mode
+  exercises the header inlines (also compiled against the amalgamation in
+  CI); `EXT_PROBE_EXPORTS` mode (`make test-ext`) forces the exported
+  symbols to link, proving both forms agree.
 - `tests/integration/` — real fork/spawn children; compiles against `rei.h`
   only, as the API's compile-time contract check.
 - `tests/soak/` — minutes-long forked contention runs (nightly, not per-PR;
@@ -55,6 +72,9 @@ attribution).
   configs. clang-format matches the existing style but the tree isn't fully
   conformant; use it for new code, no whole-tree reformat, no CI gate.
 - `tools/amalgamate.sh` — generates the two-file distribution `rei.c` + `rei.h`.
+- `tools/check-exports.sh` — diffs the shared library's exported `rei_*`
+  symbols against `tools/exports.txt` (no leaks, no missing = ABI break);
+  `--write` regenerates after an intended change. Run in CI.
 - `tools/build-win.bat` — Windows build (clang-cl).
 - `dev/` — scratch copies of headers.
 
@@ -64,7 +84,9 @@ The Makefile is the only build system (on Unix):
 
 ```sh
 make                  # librei.a + shared library
-make test             # unit tier (per-PR)
+make test             # unit + ext tiers (per-PR)
+make test-unit        # unit tier only
+make test-ext         # ext surface tier (EXT_PROBE_EXPORTS mode)
 make test-integration # fork/spawn tier
 make test-soak        # soak tier (nightly; SOAK_SECONDS / REI_SOAK_SECONDS)
 make test-fuzz        # fuzz bursts (clang; FUZZ_CC/FUZZ_SAN/FUZZ_RUNS/FUZZ_SEED)
@@ -125,9 +147,10 @@ these.
 
 - `.github/workflows/ci.yml` — matrix: ubuntu-latest, ubuntu-24.04-arm,
   macos-latest, macos-15-intel. Runs `make`, `make test`,
-  `make test-integration`, and the amalgamation smoke test (compiles unit
-  tests against `rei.c`, then links and runs a public-only program against
-  `rei.c`/`rei.h` with no defines). A fuzz leg runs the fixed-seed bursts
+  `make test-integration`, `tools/check-exports.sh`, and the amalgamation
+  smoke test (compiles unit tests against `rei.c`, then links and runs a
+  public-only program plus `tests/ext_surface.c` against `rei.c`/`rei.h`
+  with no defines). A fuzz leg runs the fixed-seed bursts
   on ubuntu; sanitizer legs cover ASan/UBSan/TSan on the unit tier.
 - `.github/workflows/release.yml` — on `v*` tags: checks tag matches
   `REI_VERSION`, generates the amalgamation for the release.

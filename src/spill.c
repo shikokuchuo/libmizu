@@ -37,6 +37,26 @@ void rei_region_unlink(rei_shm *shm) {
 #endif
 }
 
+// Handle queries (rei_ext.h) ---------------------------------------------------
+
+/* Field reads over the private handle struct, so bindings never open it.
+   rei_handle_churn is deliberately a plain extern call: bindings gate it
+   behind their payload size check, so it runs only for payloads already
+   proven large (where the layout write dominates the call). */
+int rei_handle_kind(const rei_handle *h) {
+  return h->htype;
+}
+
+int rei_handle_churn(const rei_handle *h) {
+  return h->fl.churn;
+}
+
+void rei_handle_spill_info(const rei_handle *h, uint32_t *fl_entries,
+                           uint32_t *ledger_entries) {
+  *fl_entries = h->fl.n;
+  *ledger_entries = h->fl.led_n;
+}
+
 // Free list --------------------------------------------------------------------
 
 static size_t spill_round(size_t n) {

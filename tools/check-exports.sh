@@ -1,7 +1,7 @@
 #!/bin/sh
-# Verifies the shared library exports exactly the rei.h surface: no leaks,
-# no missing symbols (the latter is an ABI break). Expects the library to
-# be built already (run `make` first).
+# Verifies the shared library exports exactly the rei.h + rei_ext.h
+# surface: no leaks, no missing symbols (the latter is an ABI break).
+# Expects the library to be built already (run `make` first).
 set -eu
 
 cd "$(dirname "$0")/.."

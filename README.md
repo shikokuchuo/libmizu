@@ -11,7 +11,18 @@ The first-party bindings are [rei](https://github.com/shikokuchuo/rei) (R) and [
 You can write bindings in other languages against the C ABI.
 Handles are opaque.
 The surface is FFI-safe: every public operation is an exported function, with no macros or `static inline` in the public contract.
-The library also distributes as a two-file amalgamation: `rei.c` and `rei.h`.
+The library also distributes as a three-file amalgamation: `rei.c`, `rei.h`, and `rei_ext.h`.
+
+## API tiers
+
+The headers are two deliberate tiers:
+
+- **`rei.h`** — the stable consumer API.
+  The soname tracks its ABI; the stability promise starts at 1.0.
+- **`rei_ext.h`** — the binding-author API: the callback seam (`stage`, `read`, `exec`, ...), the stager/read/publish services, the built-in bytes binding, and promoted internals (parker, liveness, preamble, map support).
+  It is version-pinned per minor release and may change without deprecation, ever — binding authors rebuild (or re-vendor) per minor release.
+
+A third header, `src/internal.h`, is private and never installed; bindings never include it.
 
 librei needs a C11 compiler and a 64-bit platform: the wire formats depend on lock-free 64-bit atomics.
 On Linux, kernel 5.3 or later is required.
@@ -48,15 +59,18 @@ The Makefile and `build-win.bat` set these defines for you.
 To generate the amalgamation, run:
 
 ```sh
-tools/amalgamate.sh   # writes rei.c + rei.h
+tools/amalgamate.sh   # writes rei.c + rei.h + rei_ext.h
 ```
 
 ## Quickstart
 
 This example makes a channel between two processes.
+Registering callbacks is binding-author surface, so it includes `rei_ext.h`.
 The host:
 
 ```c
+#include <rei_ext.h>   /* rei_binding, rei_binding_init (implies rei.h) */
+
 rei_channel_opts opts;
 rei_channel_opts_init(&opts);
 rei_binding binding;

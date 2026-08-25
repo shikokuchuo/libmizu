@@ -18,10 +18,11 @@ jobs:
       - run: make
       - run: make test
       - run: make test-integration
-      # The consumer contract: rei.c + rei.h alone, no defines — the
-      # public-only program must link and run, not just compile. The
-      # stamp check guards the bare-file skew case (both files must
-      # carry the identical Version line).
+      # The consumer contract: rei.c + rei.h + rei_ext.h alone, no
+      # defines — the public-only program and the ext-surface proof must
+      # link and run, not just compile. The stamp check guards the
+      # bare-file skew case (all three files must carry the identical
+      # Version line).
       - name: amalgamation
         run: |
           tools/amalgamate.sh
@@ -35,10 +36,15 @@ jobs:
           cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \
             public_only.c rei.c -o public_only
           ./public_only
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \
+            tests/ext_surface.c rei.c -o ext_surface_amalg
+          ./ext_surface_amalg
           cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei.h)
+          cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei_ext.h)
 
-  # The shared library must export exactly the rei.h surface: a missing
-  # symbol is an ABI break, an extra one is a leak past REI_API.
+  # The shared library must export exactly the rei.h + rei_ext.h
+  # surface: a missing symbol is an ABI break, an extra one is a leak
+  # past REI_API.
   exports:
     runs-on: ubuntu-latest
     steps:

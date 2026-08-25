@@ -26,3 +26,6 @@ tests/fuzz/*
 bench/*
 !bench/*.c
 !bench/notes.md
+/rei_ext.h
+tests/ext_surface
+tests/ext_surface.dSYM

@@ -5,12 +5,24 @@
    (the wire formats depend on lock-free 64-bit atomics); Linux requires
    kernel >= 5.3 (pidfd_open, no fallback).
 
+   Three API tiers (the CPython PEP 689 model):
+   - rei.h (this header): the stable consumer API. The soname
+     (librei.so.N = REI_VERSION_MAJOR) tracks its ABI; opaque handles +
+     size-field structs keep it stable. The stable promise starts at
+     1.0; until then any line may still move.
+   - rei_ext.h (installed alongside): the binding-author API — the
+     callback seam, stager/read/publish services, and promoted
+     internals. Version-pinned per minor release, may change without
+     deprecation, ever. Language bindings compile against it (the
+     first-party ones vendor the sources at a pinned commit).
+   - src/internal.h: private, never installed.
+
    Two versioned contracts:
    - REI_ABI_VERSION: the wire format (shared-memory layouts). Peers
-     validate it at attach; bump on any wire-format change.
-   - The library soname (librei.so.N = REI_VERSION_MAJOR): the API/ABI
-     of this header. Opaque handles + size-field structs keep it stable;
-     abidiff gates it once prebuilt shared libraries ship.
+     validate it at attach; bump on any wire-format change. The
+     wire-format structs below are this contract: preamble-versioned,
+     not soname-frozen.
+   - The library soname (above): the API/ABI of this header only.
 
    Conventions:
    - Handles are opaque typedefs; struct definitions live in
@@ -28,11 +40,12 @@
      and the check/park hooks run on the verb-calling thread.
      Documented per-function below.
 
-   Not here (src/internal.h): the handle struct definitions, parker
-   protocol, liveness lock, death listener, preamble, spin machinery,
-   rei_now, the RNG jump kernel, the spill/ledger/open-cache internals,
-   and the map-support exports. First-party bindings compile the vendored
-   sources and include internal.h; none of it is FFI-stable surface. */
+   Not here: the binding seam (rei_binding, the rei_stage_* services,
+   result publish, the bytes binding) and the promoted internals
+   (parker, liveness lock, death watch, preamble, map support,
+   rei_now, the RNG jump kernel) are binding-author surface in
+   rei_ext.h; the handle struct definitions, spin machinery, and
+   spill/ledger/open-cache internals stay private in src/internal.h. */
 
 #ifndef REI_REI_H
 #define REI_REI_H
@@ -119,12 +132,10 @@ REI_API const char *rei_last_error_message(void);
 typedef struct rei_channel_s rei_channel;
 typedef struct rei_pool_s rei_pool;
 typedef struct rei_shm_s rei_shm;
-/* Generic handle view for stager services; the core passes the handle a
-   binding's callbacks were registered with. Never constructed by
-   bindings. */
-typedef struct rei_handle_s rei_handle;
-/* Valid only during an exec callback. */
-typedef struct rei_result_sink_s rei_result_sink;
+/* The binding callbacks struct, taken by pointer at create/attach/join.
+   Binding-author surface: the definition, rei_binding_init, and the
+   built-in bytes binding live in rei_ext.h. */
+typedef struct rei_binding_s rei_binding;
 
 // Wire format: channel region ----------------------------------------------------
 
@@ -374,201 +385,6 @@ typedef enum rei_park_state_e { REI_WPK_RUNNING = 0, REI_WPK_IDLE,
 #define REI_CTRL_SHUTDOWN_OFF ((size_t) 0)
 #define REI_CTRL_PARKED_OFF   ((size_t) 64)
 #define REI_CTRL_HELP_OFF     ((size_t) 128)
-
-// The binding seam ---------------------------------------------------------------
-
-/* The core never sees a language object. A binding registers these
-   callbacks at create/attach/join; the core copies them into the handle,
-   so a hot-path call is one load + a predicted indirect branch.
-
-   stage: frame obj as (hdr, payload) — payload capacity inline_max.
-     Spill/arena/retain via the rei_stage_* services on the handle.
-     Returns 0 on success, nonzero on staging failure (the verb fails as
-     REI_ERR / REI_ERRCAT_STAGE). May also not return (a binding's
-     longjmp):
-     staging is transactional — the core mutates no shared state before
-     stage returns, a mid-stage arena chunk is FIFO-reclaimed like any
-     other, and an uncommitted region checkout or pin rolls back at the
-     next verb entry or at destroy. An abandoned stage leaves the handle
-     consistent.
-   read: produce the binding's object for a received frame; the return
-     value goes to the verb's caller, opaque to the core. May also not
-     return (a binding's longjmp): invocation points leave the handle
-     consistent and nothing consumed. payload is
-     always a dereferenceable byte range: the transport resolves its
-     arena-referencing kinds (ARENA, channel RAWSPILL) to their byte
-     range before the call, bounds-checked against the arena, passing
-     the validated capacity as limit (inline_max for slot-resident
-     frames). The kinds are NOT rewritten. For a pool collect,
-     ctx->outcome carries the result's terminal state (REI_RS_OK/ERR
-     with a payload frame; REI_RS_CANCEL/DIED without one — read_fn
-     builds the binding's error object for all three). A vanished
-     out-of-line region: rei_read_region sets ctx->gone and read_fn
-     propagates by returning NULL.
-   exec: pool workers only — run one claimed task frame and publish
-     through the sink. Must not abandon: the binding catches every task
-     condition into the sink; an escape degrades to worker death plus
-     the reaper verdict (the hard-crash semantics, never the path for an
-     ordinary task error). catching marks a reentrant invocation
-     (nested-collect help, nested submit's inline execute): contain task
-     conditions there instead of letting them unwind through the worker
-     loop. Returns 0 on success; nonzero is infrastructure failure and
-     takes the worker down (REI_EXIT_ERROR).
-   check: interrupt/cancel poll, invoked from core wait/work loops at
-     abandon-safe points only (no shared-state mutation in progress, no
-     cleanup pending), once per spin/park iteration. Return 0 to
-     continue, nonzero to abandon: the verb unwinds as REI_ERR with
-     REI_ERRCAT_INTERRUPTED, consuming nothing (a recv interrupted
-     mid-wait has claimed no slot; a collect interrupted while parked
-     has consumed no result). The hook may also not return (a binding's
-     longjmp) — invocation points are chosen so an abandoned wait leaves
-     the handle consistent. Verb-calling thread only, never death-watch
-     or reaper threads. NULL for plain-C consumers: the poll skips at
-     one load + a predicted branch.
-   park: around-park hook, bracketing each bounded park — after the
-     parker's announce, around the sleep only, never around shared-state
-     mutation: `entering` is nonzero before the sleep, zero after the
-     wake. For runtimes with a global lock: a Python worker holds the
-     GIL through collect (nested-collect help reenters exec_fn); this
-     hook drops it for each bounded sleep so other threads in the worker
-     process run while the worker parks. Verb-calling thread only. NULL
-     for runtimes without a global lock, plain-C consumers, and
-     submitter handles (which release around the whole verb instead).
-   sweep: idle hook, invoked when a pool worker goes idle or departs
-     (the core's keeper-table sweep points): drop binding-side caches.
-     NULL for bindings without per-handle caches.
-   drop: pin-release hook, invoked when a retained staging entry is
-     released — at the consumer-done points (collect, slot reuse, the
-     worker keeper sweep), on a cancelled publish, on a staging
-     rollback, and at handle teardown. `pin` is the opaque token the
-     stager registered with rei_stage_pin. Fires only on the
-     handle-owning thread. NULL when the binding never pins.
-   ctx: opaque to the core. */
-
-typedef int (*rei_stage_fn)(void *obj, rei_slot_hdr *hdr,
-                            uint8_t *payload, uint32_t inline_max,
-                            rei_handle *);
-
-typedef struct rei_read_ctx_s {
-  uint32_t size;        /* core-set: sizeof the struct it knows */
-  int32_t outcome;      /* pool: rei_rs_status of the result (channel:
-                           REI_RS_OK) */
-  int32_t gone;         /* set by rei_read_region on a vanished region;
-                           read_fn propagates by returning NULL */
-  int32_t died_slot;    /* REI_RS_DIED: the claimant worker slot (-1) */
-  int64_t died_pid;     /* REI_RS_DIED: its pid (0 when unknown) */
-  rei_handle *handle;   /* the reading handle */
-  void   *binding_ctx;  /* the handle's binding.ctx */
-  void   *reserved[4];  /* zero; future growth without a soname bump */
-} rei_read_ctx;
-
-typedef void *(*rei_read_fn)(const rei_slot_hdr *, const uint8_t *payload,
-                             size_t limit, rei_read_ctx *);
-
-typedef int (*rei_exec_fn)(const rei_slot_hdr *hdr, const uint8_t *payload,
-                           size_t limit, rei_result_sink *, int catching,
-                           void *ctx);
-typedef int (*rei_check_fn)(void *ctx);
-typedef void (*rei_park_fn)(void *ctx, int entering);
-typedef void (*rei_sweep_fn)(void *ctx);
-typedef void (*rei_drop_fn)(void *ctx, void *pin);
-
-typedef struct rei_binding_s {
-  uint32_t     size;    /* sizeof(rei_binding); set via rei_binding_init */
-  rei_stage_fn stage;
-  rei_read_fn  read;
-  rei_exec_fn  exec;    /* pool workers only; NULL on submitter handles */
-  rei_check_fn check;   /* interrupt poll; NULL for plain-C consumers */
-  rei_park_fn  park;    /* around-park lock release; usually NULL */
-  rei_sweep_fn sweep;   /* idle cache drop; usually NULL */
-  rei_drop_fn  drop;    /* pin release; NULL when the binding never pins */
-  void        *ctx;     /* opaque to the core */
-} rei_binding;
-
-/* Zero and size-stamp a binding struct. Call before filling the fn pointers. */
-REI_API void rei_binding_init(rei_binding *);
-
-/* Core services for a stager (per handle), valid only during a stage_fn
-   call — staging is single-threaded per handle role, so at most one
-   checkout is in flight per handle:
-   - arena_alloc: reserve n bytes in the channel's spill arena; *off
-     receives the chunk offset for the frame's aux. NULL when
-     full/disabled. The arena base stays core-private.
-   - spill_get: check out a region of at least n bytes — recycled from
-     the free list or created fresh. Uncommitted until retained (below)
-     and the frame publishes: rolls back to the free list at the next
-     verb entry or at destroy, so a mid-stage abandon never leaks.
-   - retain / retain_zc: commit the checkout's kind — SPILL surrenders
-     to the free list at the consumer-done release point; ZC runs the
-     zero-copy refcount protocol (the producer-loan store happens here)
-     and lends to the ledger while views are outstanding. `region` must
-     be the current checkout.
-   - pin: attach an opaque token to the staging entry, handed to the
-     drop hook at the entry's release (a binding pins the staged object,
-     whose serialized stream may carry hook-emitted identifiers).
-   - reap: the channel's pre-spill consumer-done reap, so a checkout
-     sees the freshest surrenders. A no-op on pool handles. */
-REI_API void *rei_stage_arena_alloc(rei_handle *, size_t n, uint64_t *off);
-REI_API rei_status rei_stage_spill_get(rei_handle *, size_t n,
-                                       rei_shm **out);
-REI_API void rei_stage_retain(rei_handle *, rei_shm *region);
-REI_API void rei_stage_retain_zc(rei_handle *, rei_shm *region);
-REI_API void rei_stage_pin(rei_handle *, void *pin);
-REI_API void rei_stage_reap(rei_handle *);
-
-/* Read-side service, invoked through the read_ctx handed to read_fn: a
-   borrowed consumer mapping for a SHM_RAW-class payload name, from the
-   handle's open cache (open/fstat/mmap on a miss, LRU-evicted). The
-   mapping is cache-owned: copy the payload out before consumer-done. On
-   a vanished region, sets ctx->gone and returns NULL; read_fn
-   propagates by returning NULL. View tiers do not use it — their
-   mappings are binding-owned (rei_shm_open_view), pinned by the view. */
-REI_API rei_shm *rei_read_region(rei_read_ctx *, const uint8_t *name,
-                                 uint32_t len);
-
-/* Result publish, valid during exec only. publish stages value via the
-   worker handle's stage_fn and publishes REI_RS_OK — a result past the
-   inline budget spills to a region whose consumer is the submitter, so
-   a large result never has to fit the slot. publish_err publishes
-   REI_RS_ERR: when inline_n != 0 the binding has already framed the
-   flattened envelope INLINE in the sink's frame buffer (a self-contained
-   stream pins nothing); otherwise the flattened object rides the tiered
-   stage (the tiny-slot fallback). The ERR envelope is INLINE-framed by
-   construction wherever a classed condition fits the slot, so the
-   publish cannot fail: a task error fails the task, never the worker.
-   publish_died is the status-only terminal for a task whose out-of-line
-   payload vanished with its dead enqueuer. The publish pair return 1 when
-   the publish CAS won, 0 when a cancel beat it, and -1 on infrastructure
-   failure (recorded on the handle — the worker cannot continue). */
-REI_API int rei_result_publish(rei_result_sink *, void *value);
-REI_API int rei_result_publish_err(rei_result_sink *, void *flattened,
-                                   uint32_t inline_n);
-REI_API void rei_result_publish_died(rei_result_sink *);
-
-// The built-in bytes binding -----------------------------------------------------
-
-/* A byte buffer. Send: the consumer fills {data, len} and passes its
-   address as the verb's obj. Recv: the binding returns a malloc'd
-   rei_bytes (data rides the same allocation); release with
-   rei_bytes_free — an export, not documented free(), so a shared-library
-   build never crosses allocator domains. Fixed layout, never extended. */
-typedef struct rei_bytes_s {
-  void *data;
-  size_t len;
-} rei_bytes;
-
-/* Fill `binding` with the bytes binding: stage/read only — exec, check,
-   park, sweep, drop are NULL (a bytes handle is a channel peer or a pool
-   submitter, never a worker). Stage rides the INLINE/ARENA/SHM_RAW tiers
-   exactly as a serialize stream does; read copies out before
-   consumer-done. The copy tiers of a foreign peer (RAWVEC/RAWSPILL/STR1)
-   read as their bare bytes; the view tiers (SHM_VEC/REF) fail the read —
-   they are binding-owned by design. Pool collects surface non-OK
-   outcomes only as the verb's rei_status — the binding builds no error
-   object. This is the FFI zero-callback path, the reference stager for
-   binding authors, and the C test tiers' stager. */
-REI_API void rei_binding_bytes(rei_binding *);
-REI_API void rei_bytes_free(rei_bytes *);
 
 // Regions (rei_shm) ----------------------------------------------------------------
 

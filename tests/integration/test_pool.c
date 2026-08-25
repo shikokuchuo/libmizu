@@ -7,7 +7,9 @@
    peer; owner death -> worker exit (REI_EXIT_OWNER_GONE) + orphan
    teardown; submitter death -> registry-slot reclaim; stop with live
    workers through a collect_all round trip; the lame-duck linger.
-   Compiles against rei.h only — the API's compile-time contract check.
+   Compiles against the installed headers (rei.h + rei_ext.h — the bytes
+   binding is ext-tier surface) with internal.h absent: the API's
+   compile-time contract check.
    POSIX (fork); a stub passes elsewhere. Run via `make test-integration`. */
 
 #include <assert.h>
@@ -16,6 +18,7 @@
 #include <string.h>
 
 #include "rei.h"
+#include "rei_ext.h"
 
 #ifdef _WIN32
 

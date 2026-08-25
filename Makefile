@@ -76,8 +76,9 @@ FUZZ_SAN  ?= -fsanitize=fuzzer,address,undefined
 FUZZ_RUNS ?= 100000
 FUZZ_SEED ?= 1
 
-.PHONY: all static shared test test-unit test-integration test-soak \
-        test-fuzz bench coverage install uninstall clean amalgamation tidy
+.PHONY: all static shared test test-unit test-ext test-integration \
+        test-soak test-fuzz bench coverage install uninstall clean \
+        amalgamation tidy
 
 all: static shared
 
@@ -93,13 +94,14 @@ $(SHARED): $(OBJ)
 	$(CC) $(SHARED_LD) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
 endif
 
-src/%.o: src/%.c include/rei.h src/internal.h
+src/%.o: src/%.c include/rei.h include/rei_ext.h src/internal.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 # Test tiers: unit (in-process, per-PR), integration (real fork/spawn
 # children), soak (minutes-long contention runs; nightly). Integration
-# tests compile against rei.h only — the API's compile-time contract
-# check; unit tests may include internal.h.
+# tests compile against the installed headers (rei.h + rei_ext.h) only —
+# the API's compile-time contract check; unit tests may include
+# internal.h.
 tests/unit/%: tests/unit/%.c $(STATIC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(STATIC) $(LDLIBS)
 
@@ -107,7 +109,19 @@ tests/integration/%: tests/integration/%.c $(STATIC)
 	$(CC) $(CPPFLAGS) -Iinclude -std=c11 -Wall -Wextra -Wpedantic -Werror \
 	  -o $@ $< $(STATIC) $(LDLIBS)
 
-test: test-unit
+# The ext-tier contract proof: references every rei_ext.h symbol with
+# internal.h absent from the include path (-Isrc filtered out), probing
+# the exported dual-form symbols (EXT_PROBE_EXPORTS) against the static
+# lib. Carries CFLAGS/LDFLAGS like the other tiers — the sanitizer legs
+# link the instrumented static lib.
+tests/ext_surface: tests/ext_surface.c $(STATIC)
+	$(CC) $(filter-out -Isrc,$(CPPFLAGS)) $(CFLAGS) $(LDFLAGS) \
+	  -DEXT_PROBE_EXPORTS -o $@ $< $(STATIC) $(LDLIBS)
+
+test-ext: tests/ext_surface
+	@./tests/ext_surface
+
+test: test-unit test-ext
 
 test-unit: $(TEST_UNIT_BIN)
 	@for t in $(TEST_UNIT_BIN); do echo "== $$t"; ./$$t || exit 1; done
@@ -185,7 +199,7 @@ amalgamation:
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib \
 	         $(DESTDIR)$(PREFIX)/lib/pkgconfig
-	cp include/rei.h $(DESTDIR)$(PREFIX)/include/rei.h
+	cp include/rei.h include/rei_ext.h $(DESTDIR)$(PREFIX)/include/
 	cp $(STATIC) $(DESTDIR)$(PREFIX)/lib/$(STATIC)
 	sed -e 's|@PREFIX@|$(PREFIX)|g' \
 	    -e 's|@VERSION@|$(VERSION)|g' \
@@ -199,7 +213,8 @@ ifneq ($(SHARED),)
 endif
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/include/rei.h
+	rm -f $(DESTDIR)$(PREFIX)/include/rei.h \
+	      $(DESTDIR)$(PREFIX)/include/rei_ext.h
 	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/librei.pc
 	rm -f $(DESTDIR)$(PREFIX)/lib/$(STATIC) \
 	      $(DESTDIR)$(PREFIX)/lib/$(SHARED) $(SYMLINKS:%=$(DESTDIR)$(PREFIX)/lib/%)
@@ -226,5 +241,6 @@ tidy:
 
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
-	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN)
-	rm -rf rei.c rei.h rei-*.profraw rei.profdata compile_commands.json
+	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface
+	rm -rf rei.c rei.h rei_ext.h rei-*.profraw rei.profdata \
+	      compile_commands.json

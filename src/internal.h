@@ -4,8 +4,11 @@
    freely. -fvisibility=hidden keeps these symbols out of the shared
    library; the amalgamation folds it in.
 
-   Consumers: the core's own TUs, and first-party bindings' internal TUs
-   from the vendored tree (test-hook wrappers, map support).
+   Consumers: the core's own TUs only. The binding-author surface is
+   include/rei_ext.h (installed, version-pinned per minor release) — a
+   binding never includes this header. The two headers share the
+   offset-math accessors by inclusion: the dual-form static inlines used
+   below come from rei_ext.h, so core and binding can never drift.
 
    Macros and static inline are fine here (no FFI to reach them). */
 
@@ -15,6 +18,7 @@
 #include <string.h>
 
 #include "rei.h"
+#include "rei_ext.h"
 
 /* Some static inlines below go unused in some TUs; the amalgamation
    folds this header into the single rei.c TU, where they would trip
@@ -27,28 +31,8 @@
 
 // Region layer internals ---------------------------------------------------------
 
-#ifdef _WIN32
-#  define REI_PREFIX_LITERAL "Local\\rei_"
-#else
-#  define REI_PREFIX_LITERAL "/rei_"
-#endif
 /* macOS registry dir: "<dir>/rei". The liveness dir env override: */
 #define REI_LIVENESS_DIR_ENV "REI_LIVENESS_DIR"
-
-#define REI_ALIGN64(x) (((x) + 63) & ~(size_t) 63)
-
-/* The public opaque type; stack-resident inside the core (control-region
-   mappings embed one in the handle structs). Heap-only for bindings. */
-struct rei_shm_s {
-  void *addr;
-  size_t size;
-  char name[REI_NAME_MAX];
-  uint8_t name_len;
-  unsigned int pid;            /* creator PID: fork guard (POSIX only) */
-#ifdef _WIN32
-  void *handle;
-#endif
-};
 
 /* Stack forms (the public API is the heap form). create returns an
    rei_errcat (REI_ERRCAT_NONE on success); open returns 0/-1. */
@@ -100,10 +84,6 @@ void rei_region_unlink(rei_shm *shm);
 #  define REI_COLD __attribute__((cold))
 #endif
 
-/* Category + remediation text for an REI_ERRCAT (fills the handle /
-   thread-local error slot). */
-REI_COLD void rei_err_describe(rei_errcat, const char **summary, const char **hint);
-
 // Errors ---------------------------------------------------------------------------
 
 /* The handle error slot lives in rei_handle_s; handle-free entry points
@@ -111,12 +91,6 @@ REI_COLD void rei_err_describe(rei_errcat, const char **summary, const char **hi
    records, valid until the next call on the same handle / thread. */
 REI_COLD void rei_err_record(rei_handle *h, rei_errcat cat, const char *fmt, ...);
 REI_COLD void rei_err_record_tls(rei_errcat cat, const char *fmt, ...);
-
-// Time ----------------------------------------------------------------------------
-
-/* Monotonic seconds (the spin/deadline clock) and the current pid. */
-double rei_now(void);
-long rei_self_pid(void);
 
 // Spin machinery (parker.c) --------------------------------------------------------
 
@@ -175,25 +149,11 @@ static inline REI_MAYBE_UNUSED uint64_t rei_spin_learn(double gap_ns, uint64_t b
     }                                                                   \
   } while (0)
 
-// Parker (wait_*.c) ---------------------------------------------------------------
+// Parker internals -----------------------------------------------------------------
 
-/* One parker per waiting entity: a 32-bit monotonic epoch word in the
-   shared region plus, on Windows only, one named auto-reset event (the
-   epoch compare is not atomic with the sleep there). Park sites follow
-   snapshot -> announce -> re-check -> sleep-bounded; any unpark that
-   observes the announcement bumps the epoch after the snapshot, so the
-   sleep returns immediately. Spurious wakes are absorbed by the caller's
-   re-check. This handshake is the sole guarantee against lost wakeups. */
-
-typedef struct rei_parker_s {
-  _Atomic uint32_t *epoch;   /* in the shared region */
-#ifdef _WIN32
-  void *event;               /* named auto-reset event handle */
-#endif
-} rei_parker;
-
-typedef enum rei_park_result_e { REI_PARK_WOKEN = 0, REI_PARK_TIMEOUT,
-                                 REI_PARK_INTR } rei_park_result;
+/* The parker struct, the park/unpark verbs, and the rei_parker_snapshot
+   fast path are binding-author surface (rei_ext.h); the handshake
+   contract is documented there. What stays here: the platform bounds. */
 
 /* POSIX parks are always timed: an untimed wait is silently restarted
    under SA_RESTART and would swallow Ctrl-C until the next genuine wake,
@@ -208,94 +168,44 @@ typedef enum rei_park_result_e { REI_PARK_WOKEN = 0, REI_PARK_TIMEOUT,
 #  define REI_INTERRUPT_BOUND_MS 2000L
 #endif
 
-/* region_name/entity name the Windows event ("<region>.pk.<entity>"),
-   created by the region's host (create = 1) and opened by name by
-   attachers; unused on POSIX. Returns 0 on success. */
-int rei_parker_attach(rei_parker *pk, _Atomic uint32_t *epoch,
-                      const char *region_name, int entity, int create);
-void rei_parker_detach(rei_parker *pk);
+// Death listener internals ---------------------------------------------------------
 
-static inline REI_MAYBE_UNUSED uint32_t rei_parker_snapshot(const rei_parker *pk) {
-  return atomic_load_explicit(pk->epoch, memory_order_acquire);
-}
+/* The rei_death_watch type, rei_death_watch_start/stop, and the
+   listener teardown are binding-author surface (rei_ext.h). start2
+   stays private: the callback-capable form is the pool's worker reap. */
 
-/* Sleeps while the epoch still equals snapshot, up to timeout_ms
-   (0 = poll: never sleeps; < 0 = indefinite, see above). */
-int rei_park(rei_parker *pk, uint32_t snapshot, long timeout_ms);
-void rei_unpark(rei_parker *pk);
-
-// Death listener (wait_linux.c / wait_macos.c / wait_win32.c) ---------------------
-
-/* Translates a watched pid's exit into *flag = 1 plus a directed unpark
-   of pk (optional, copied). A pid already dead fires immediately. The
-   flag target and the parker's epoch word / event must stay valid until
-   rei_death_watch_stop returns: stop synchronizes with any in-flight
-   callback, so after it returns nothing touches them. Detection is a
-   wake trigger only — the liveness lock is the verdict; pid-reuse races
-   are absorbed there. */
-
-typedef struct rei_death_watch_s rei_death_watch;
-
-rei_death_watch *rei_death_watch_start(long pid, _Atomic int *flag,
-                                       const rei_parker *pk);
-/* As above plus a callback invoked after the flag store and unpark, on
-   the listener's callback thread (or synchronously from start when the
-   pid is already dead): pure C only; its targets must stay valid until
-   rei_death_watch_stop returns. The pool's worker reap rides this. This
-   is the threading contract a binding's trace/eval hooks must respect —
-   see the callback-threading note in rei.h. */
+/* As rei_death_watch_start, plus a callback invoked after the flag store
+   and unpark, on the listener's callback thread (or synchronously from
+   start when the pid is already dead): pure C only; its targets must
+   stay valid until rei_death_watch_stop returns. The pool's worker reap
+   rides this. This is the threading contract a binding's trace/eval
+   hooks must respect — see the callback-threading note in rei.h. */
 rei_death_watch *rei_death_watch_start2(long pid, _Atomic int *flag,
                                         const rei_parker *pk,
                                         void (*cb)(void *), void *cb_arg);
-void rei_death_watch_stop(rei_death_watch *w);
 
-/* Library-unload teardown; joins the Linux epoll thread (no-op
-   elsewhere: macOS dispatch sources and Windows thread-pool waits are
-   per-watch). */
-void rei_death_listener_teardown(void);
+// Liveness lock internals (liveness.c) ------------------------------------------
 
-// Liveness lock (liveness.c) ---------------------------------------------------
+/* The liveness contract, rei_live_dir/open/try/close, and the
+   rei_live_probe enum are binding-author surface (rei_ext.h). What
+   stays here: the prober's kept-fd forms. */
 
-/* Exclusive flock (POSIX) / LockFileEx (Windows) held for a process's
-   entire lifetime and released by the kernel on any exit path.
-   fd-scoped, not PID-scoped: pid reuse cannot fake "alive". A probe is a
-   non-blocking acquire on the fd kept from open — ACQUIRED means the
-   previous holder is dead (and the caller now holds the lock,
-   serializing survivor cleanup); HELD means alive. */
-
-typedef enum rei_live_probe_e { REI_LIVE_ACQUIRED = 0,
-                                REI_LIVE_HELD = 1 } rei_live_probe;
-
-/* Directory for liveness lock files: the REI_LIVENESS_DIR override
-   (read-through, checked every call) else a per-platform default
-   resolved once — /dev/shm on Linux, the per-user temp dir on macOS and
-   Windows. NULL if unresolvable. Only region creators call this;
-   participants read the embedded copy. */
-const char *rei_live_dir(void);
-
-int rei_live_open(const char *path, intptr_t *out);
 /* Open without creating: ENOENT reads as "indeterminate, treat as
    alive", never a verdict — the probe-by-path discipline. */
 int rei_live_open_existing(const char *path, intptr_t *out);
-int rei_live_try(intptr_t h);
 /* Release an acquired lock while keeping the fd — the kept-fd prober's
    epilogue after a reap, so a respawned holder can lock the same file. */
 void rei_live_unlock(intptr_t h);
-void rei_live_close(intptr_t h);
 /* The locked file's identity — (dev, inode) / (volume serial, file
    index) — recorded in registry slots at join so a path-opened prober
    can discard a probe whose file was unlinked and recreated. */
 int rei_live_ident(intptr_t h, uint64_t *dev, uint64_t *ino);
 
-// Preamble (preamble.c) ----------------------------------------------------------
+// Preamble internals (preamble.c) --------------------------------------------------
 
-/* Host writes at create, immutable thereafter; the peer validates before
-   any shared atomic is read or written. validate returns NULL and fills
-   *out on success, else a static error message. The pool header check
-   (magic + version) lives in pool.c's attach path, not here. */
-void rei_preamble_write(void *region, const rei_preamble *p);
-const char *rei_preamble_validate(const void *region, size_t region_size,
-                                  rei_preamble *out);
+/* rei_preamble_write/validate are binding-author surface (rei_ext.h).
+   What stays here: the attach-path checks. */
+
 /* The join-token charset check shared by the channel and pool attach
    paths ("<pid hex>_<counter hex>"; NULL and empty are malformed). */
 int rei_token_valid(const char *token);
@@ -304,28 +214,19 @@ int rei_token_valid(const char *token);
 const char *rei_pool_hdr_validate(const void *region, size_t region_size,
                                   rei_pool_hdr *out);
 
-// Payload-policy constants and helpers --------------------------------------------
+// Payload-policy helpers ------------------------------------------------------------
 
 /* Whether a staged payload created no keeper record, so the collect-side
    keeper-drop wake is pure cost: the immediate kinds, or a self-contained
    codec stream inline (payload byte 0 is the codec magic — an INLINE
-   stream is never empty). Core-only: the core owns the wake gate. */
-#define REI_CODEC_MAGIC 0x53u   /* 'S'; native binary/xdr streams are 'B'/'X' */
-
+   stream is never empty). Core-only: the core owns the wake gate. The
+   magic byte itself is binding-registry surface (rei_ext.h). */
 static inline REI_MAYBE_UNUSED int rei_keeperless(uint32_t kind,
                                  const unsigned char *payload) {
   return kind == REI_KIND_NIL || kind == REI_KIND_RAWVEC ||
     kind == REI_KIND_STR1 ||
     (kind == REI_KIND_INLINE && payload[0] == REI_CODEC_MAGIC);
 }
-
-/* Staging-policy floors for a binding's stage_fn (not used by the
-   core): SHM_VEC escalates only past max(inline budget, REI_ZC_FLOOR);
-   the channel's raw floor is higher (the arena copy has no region
-   machinery to amortize) and lifts entirely under the churn signal.
-   Bindings pick their own. */
-#define REI_ZC_FLOOR     ((size_t) 32768)
-#define REI_ZC_FLOOR_RAW ((size_t) (256 << 10))
 
 // Spill free list, lent-region ledger, open cache, retain table (spill.c) ---------
 
@@ -334,7 +235,6 @@ static inline REI_MAYBE_UNUSED int rei_keeperless(uint32_t kind,
 #define REI_SPILL_FL_BYTES  ((size_t) 32 << 20)
 #define REI_SPILL_FL_FLOOR  ((size_t) 4096)
 #define REI_LEDGER_MAX      64
-#define REI_OPEN_CACHE_MAX  16
 
 /* Producer spill-region free list + lent-region ledger. Regions are
    rei_shm pointers owned by the handle outright: created or popped at
@@ -450,25 +350,14 @@ rei_shm *rei_oc_lookup(rei_open_cache *oc, const unsigned char *name,
 void rei_oc_store(rei_open_cache *oc, rei_shm *shm);
 void rei_oc_teardown(rei_open_cache *oc);
 
-/* The zc refcount / flags words of a REI* region header (the rei-owned
-   bytes [24-31] of the reserved band). Shared by the core release
-   machinery and the bindings' view wrap/resolve paths. */
-static inline REI_MAYBE_UNUSED _Atomic uint32_t *rei_zc_rc(void *base) {
-  return (_Atomic uint32_t *) ((unsigned char *) base + REI_ZC_REFCOUNT_OFF);
-}
-static inline REI_MAYBE_UNUSED _Atomic uint32_t *rei_zc_flags_(void *base) {
-  return (_Atomic uint32_t *) ((unsigned char *) base + REI_ZC_FLAGS_OFF);
-}
-
 // Handle base (channel.c / pool.c embed as first member) --------------------------
 
 /* Every handle embeds this header as its first member, so an
    rei_channel or rei_pool pointer converts to rei_handle for the
    callback seam. The full struct definitions live with their TUs.
-   htype dispatches the handle-kind-specific staging services
-   (rei_stage_arena_alloc / rei_stage_reap are channel-only). */
-enum { REI_HTYPE_CHANNEL = 1, REI_HTYPE_POOL = 2 };
-
+   htype (REI_HTYPE_*, rei_ext.h) dispatches the handle-kind-specific
+   staging services (rei_stage_arena_alloc / rei_stage_reap are
+   channel-only). */
 struct rei_handle_s {
   rei_binding binding;          /* copied in at create/attach: one load +
                                    a predicted indirect branch per call */
@@ -502,82 +391,5 @@ static inline REI_MAYBE_UNUSED int rei_check_interrupt(const rei_binding *b) {
 static inline REI_MAYBE_UNUSED void rei_park_bracket(const rei_binding *b, int entering) {
   if (b->park != NULL) b->park(b->ctx, entering);
 }
-
-// Map support (pool.c; the bindings' map rides these) ---------------------------------
-
-/* The opaque pool-signal trio a map runner loads relaxed once per batch
-   transition: the help_wanted doorbell, the pool's shared shutdown word,
-   and the handle's process-local listener-written owner_dead flag.
-   Borrowed; map.c dereferences the words and stays pool-layout-free. */
-typedef struct rei_pool_sig_s {
-  _Atomic uint32_t *help_wanted;
-  _Atomic uint32_t *shutdown;
-  _Atomic int      *owner_dead;
-} rei_pool_sig;
-
-/* A malloc'd copy of the signal trio (the caller frees). NULL on
-   failure. */
-rei_pool_sig *rei_pool_signals(rei_pool *);
-/* One doorbell help beat (claims a map runner and re-homes it onto the
-   helper's own deque) and the test-harness injection pull. help_once
-   returns 1 when it claimed, 0 when not, -1 on an exec_fn
-   infrastructure failure (recorded on the handle). */
-int rei_pool_help_once(rei_pool *);
-int rei_pool_deque_pull(rei_pool *, uint32_t n);
-/* A map's batch-sizing inputs: claims the worker's nested-submitter slot
-   when unclaimed (as a first nested submit does), then reports the
-   caller's FREE result slots, the injection cap, and the entry inline
-   budget. Only this process allocates from its own subrange, so the
-   FREE count can only grow under it. Returns -1 on a claim failure (the
-   handle error slot holds it). */
-int rei_pool_map_caps(rei_pool *, uint32_t *free_rs, uint32_t *inj_cap,
-                      uint32_t *inline_entry);
-/* The map runner's submit: rei_pool_submit plus the entry flags
-   (REI_ENTRY_RUNNER marks a map's join ticket — a doorbell help beat
-   re-homes it onto the helper's own deque instead of executing it). */
-rei_status rei_pool_submit_flags(rei_pool *, void *task_obj,
-                                 uint16_t flags, rei_task *out,
-                                 double timeout_ms);
-
-// The result sink and the unwind path (pool.c) ----------------------------------
-
-/* The result-sink struct (opaque in rei.h): the core fills it from a
-   claimed entry and hands it to exec_fn; the binding passes it back to
-   the publish verbs. payload/inline_max expose the slot's frame buffer
-   so the binding frames its ERR envelope inline. */
-struct rei_result_sink_s {
-  rei_pool     *p;
-  rei_rs_hdr   *rs;
-  unsigned char *payload;   /* rs + sizeof(rei_rs_hdr): the frame buffer */
-  uint32_t      rs_index;
-  uint32_t      inline_max; /* the slot's payload capacity */
-  uint16_t      sub_slot;   /* the task's submitter (zc keying, probes) */
-  uint64_t      seq;        /* rs->sequence at claim */
-  uint64_t      task_id;
-};
-
-/* The eval-in-flight marker a binding sets around its catching = 0 task
-   eval only (R: around Rf_eval, never the decode), so its unwind path
-   can tell a task error from infrastructure failure. The core heals it
-   at worker step/run entry. */
-void rei_pool_eval_mark(rei_pool *, int in_flight);
-/* The unwind path for a binding whose catching = 0 exec abandons (R's
-   longjmp): when the eval marker says a task eval was in flight, clears
-   it and mints that task's sink (from the identity the core saved at
-   execute) for the err publish. Returns 1 then; 0 when the abandonment
-   came from outside any task eval — infrastructure failure, the worker
-   goes down. */
-int rei_pool_unwind_sink(rei_pool *, rei_result_sink *out);
-
-// RNG jump kernel (rng_jump.c) -----------------------------------------------------------
-
-/* One 2^127-step L'Ecuyer-CMRG stream jump in place over a 6-word state.
-   Internal until a map API exists (the map is binding-side in v1). */
-void rei_rng_jump(int *seed);
-
-// Init / fini -----------------------------------------------------------------------------
-
-/* malloc tuning (tune.c), called by the binding at load. */
-void rei_tune(void);
 
 #endif /* REI_INTERNAL_H */
