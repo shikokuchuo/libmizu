@@ -30,6 +30,24 @@ static void handle_reset(void) {
 int main(void) {
   handle_reset();
 
+  /* the collect-side keeperless gate: the immediate kinds and the
+     self-contained codec magics skip the keeper-drop wake; kinds that
+     carry keepers and reference-capable streams never qualify */
+  const unsigned char r_codec[1] = { REI_CODEC_MAGIC };
+  const unsigned char p_codec[1] = { REI_PYREI_CODEC_MAGIC };
+  const unsigned char pickle[1] = { 0x80 };
+  assert(rei_keeperless(REI_KIND_NIL, NULL));
+  assert(rei_keeperless(REI_KIND_RAWVEC, NULL));
+  assert(rei_keeperless(REI_KIND_STR1, NULL));
+  assert(rei_keeperless(REI_KIND_INLINE, r_codec));
+  assert(rei_keeperless(REI_KIND_INLINE, p_codec));
+  assert(!rei_keeperless(REI_KIND_INLINE, pickle));
+  assert(!rei_keeperless(REI_KIND_INLINE, (const unsigned char *) "B"));
+  assert(!rei_keeperless(REI_KIND_INLINE, (const unsigned char *) "X"));
+  assert(!rei_keeperless(REI_KIND_SHM_RAW, r_codec));
+  assert(!rei_keeperless(REI_KIND_SHM_VEC, r_codec));
+  assert(!rei_keeperless(REI_KIND_RAWSPILL, r_codec));
+
   /* checkout: fresh create at the pow2 size class, recorded in staging */
   rei_shm *a = rei_spill_region_get(&h.fl, 100);
   assert(a != NULL && a->size == REI_SPILL_FL_FLOOR);

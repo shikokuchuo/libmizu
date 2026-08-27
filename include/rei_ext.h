@@ -90,6 +90,7 @@ extern "C" {
    deliberately — both denote an R-binding payload, in disjoint
    contexts. */
 #define REI_CODEC_MAGIC 0x52u   /* 'R' */
+#define REI_PYREI_CODEC_MAGIC 0x50u   /* 'P' */
 
 // Handle views -------------------------------------------------------------------
 

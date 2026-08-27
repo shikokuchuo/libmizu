@@ -220,12 +220,18 @@ const char *rei_pool_hdr_validate(const void *region, size_t region_size,
    keeper-drop wake is pure cost: the immediate kinds, or a self-contained
    codec stream inline (payload byte 0 is the codec magic — an INLINE
    stream is never empty). Core-only: the core owns the wake gate. The
-   magic byte itself is binding-registry surface (rei_ext.h). */
+   magic set is binding-registry surface (rei_ext.h, DESIGN.md's codec
+   registry): a byte qualifies only if that codec's INLINE streams never
+   carry a keeper on this path — pyrei's one reference form (a BUFREF
+   task-frame leaf) rides the zc loan claim-side, so 'P' qualifies;
+   pickle (0x80) and the R native streams can reference regions, so they
+   stay out. */
 static inline REI_MAYBE_UNUSED int rei_keeperless(uint32_t kind,
                                  const unsigned char *payload) {
   return kind == REI_KIND_NIL || kind == REI_KIND_RAWVEC ||
     kind == REI_KIND_STR1 ||
-    (kind == REI_KIND_INLINE && payload[0] == REI_CODEC_MAGIC);
+    (kind == REI_KIND_INLINE && (payload[0] == REI_CODEC_MAGIC ||
+                                 payload[0] == REI_PYREI_CODEC_MAGIC));
 }
 
 // Spill free list, lent-region ledger, open cache, retain table (spill.c) ---------

@@ -77,7 +77,7 @@ This registry is it — a header comment alone would drift.
 
 - `'B'` (0x42), `'X'` (0x58): R native serialize streams (binary / XDR).
 - `'R'` (0x52, `REI_CODEC_MAGIC` in `rei_ext.h`): the rei compact codec.
-- `'P'` (0x50): the pyrei compact codec.
+- `'P'` (0x50, `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`): the pyrei compact codec.
 
 A binding introducing a self-describing stream claims its byte here first.
 The drop's first-byte tags (`REI_DROP_*` in `rei.h`) are a disjoint context — drop region byte 0, never an INLINE payload — and share letters deliberately: `REI_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.

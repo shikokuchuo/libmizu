@@ -107,6 +107,7 @@ int main(void) {
   assert(REI_ZC_FLOOR < REI_ZC_FLOOR_RAW);
   assert(REI_OPEN_CACHE_MAX == 16);
   assert(REI_CODEC_MAGIC == 'R');
+  assert(REI_PYREI_CODEC_MAGIC == 'P');
   assert(REI_HTYPE_CHANNEL != REI_HTYPE_POOL);
   assert(REI_PARK_WOKEN != REI_PARK_TIMEOUT);
   assert(REI_LIVE_ACQUIRED != REI_LIVE_HELD);

@@ -30,3 +30,4 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 - Zero-copy payload tiers with spill/ledger machinery and retain table.
 - Three-file amalgamation distribution (`rei.c` + `rei.h` + `rei_ext.h`).
 - pkg-config support via `make install`.
+- `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`; the keeperless gate recognizes it.
