@@ -53,6 +53,7 @@ int main(void) {
   /* Handle queries. */
   refs += sink((rei_any_fn) &rei_handle_kind);
   refs += sink((rei_any_fn) &rei_handle_churn);
+  refs += sink((rei_any_fn) &rei_handle_binding_ctx);
   refs += sink((rei_any_fn) &rei_handle_spill_info);
 
   /* Parker, death watch, liveness, preamble. */
@@ -92,7 +93,7 @@ int main(void) {
   refs += sink((rei_any_fn) &rei_zc_rc);
   refs += sink((rei_any_fn) &rei_zc_flags_);
 
-  assert(refs == 44);
+  assert(refs == 45);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +

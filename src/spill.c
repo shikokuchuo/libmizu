@@ -51,6 +51,10 @@ int rei_handle_churn(const rei_handle *h) {
   return h->fl.churn;
 }
 
+void *rei_handle_binding_ctx(const rei_handle *h) {
+  return h->binding.ctx;
+}
+
 void rei_handle_spill_info(const rei_handle *h, uint32_t *fl_entries,
                            uint32_t *ledger_entries) {
   *fl_entries = h->fl.n;

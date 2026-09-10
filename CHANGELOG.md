@@ -31,3 +31,5 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 - Three-file amalgamation distribution (`rei.c` + `rei.h` + `rei_ext.h`).
 - pkg-config support via `make install`.
 - `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`; the keeperless gate recognizes it.
+- `rei_handle_binding_ctx` handle query in `rei_ext.h`: the registered
+  binding ctx, for the stage hook (which receives the handle, not the ctx).
