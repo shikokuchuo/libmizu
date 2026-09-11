@@ -14,6 +14,7 @@ The layout is fixed: later phases add capability without moving anything.
 `REI_ABI_VERSION` gates mixed builds.
 Peers validate it at attach, before any thread reads or writes a shared atomic.
 Bump it on each wire-format change.
+Wire type tags (`rei_type_e`) sit in the same contract: int64 rides tag 32 (outside SEXPTYPE space), with INT64_MIN the missing sentinel.
 
 ## Statuses, not exceptions
 

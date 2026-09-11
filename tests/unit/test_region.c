@@ -12,6 +12,7 @@ int main(void) {
   assert(rei_version() != NULL);
   assert(rei_type_elt_size(REI_TYPE_REAL) == 8);
   assert(rei_type_elt_size(REI_TYPE_INT) == 4);
+  assert(rei_type_elt_size(REI_TYPE_INT64) == 8);
   assert(rei_type_elt_size(REI_TYPE_STR) == 0);
 
   /* region create / open / round-trip / close */

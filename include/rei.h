@@ -86,7 +86,7 @@ extern "C" {
 #endif
 
 #define REI_VERSION_MAJOR 0
-#define REI_VERSION_MINOR 1
+#define REI_VERSION_MINOR 2
 #define REI_VERSION_PATCH 0
 
 /* Library version, "major.minor.patch". Static storage; never freed. */
@@ -238,7 +238,8 @@ typedef enum rei_type_e {
   REI_TYPE_CPLX = 15,        /* interleaved float64 re/im */
   REI_TYPE_STR = 16,         /* string vector (REIS layout) */
   REI_TYPE_VEC = 19,         /* list tree (REIL layout) */
-  REI_TYPE_RAW = 24          /* bytes */
+  REI_TYPE_RAW = 24,         /* bytes */
+  REI_TYPE_INT64 = 32        /* int64; INT64_MIN is the missing sentinel */
 } rei_type;
 
 /* Element size of an atomic wire type, 0 for non-atomic. */

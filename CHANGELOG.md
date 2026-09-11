@@ -13,6 +13,10 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- `REI_TYPE_INT64` wire tag (32) for int64 payloads; INT64_MIN is the
+  missing sentinel. Pre-release: `REI_ABI_VERSION` stays 1 (peers are
+  same-build; an old reader fails safe — elt size 0 is a corrupt-slot
+  error, never a misread).
 - Three-tier API: stable `rei.h`, the binding-author `rei_ext.h`
   (installed, version-pinned per minor release), and a private
   `src/internal.h`. The callback seam, stager/read/publish services,

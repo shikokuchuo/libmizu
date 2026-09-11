@@ -41,6 +41,7 @@ size_t rei_type_elt_size(int type) {
   case REI_TYPE_INT:
   case REI_TYPE_LGL: return sizeof(int32_t);
   case REI_TYPE_RAW: return 1;
+  case REI_TYPE_INT64: return sizeof(int64_t);
   case REI_TYPE_CPLX: return 2 * sizeof(double);
   default:           return 0;
   }
