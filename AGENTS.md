@@ -36,7 +36,10 @@ attribution).
   machinery (`spill.c`), channel transport (`channel.c`), bytes binding
   (`bytes.c`), pool transport (`pool.c` — full verb surface: vectored
   collects, introspection, map support, armed death watches,
-  `rei_pool_task_release`, `rei_pool_submit_batch_fn`). Also: `ext.c`
+  `rei_pool_task_release`, `rei_pool_submit_batch_fn`), the raw-tier
+  staging reservation (`stage_raw.c` — `rei_stage_raw` /
+  `rei_stage_raw_spill`), and the map morsel-claim protocol (`morsel.c` —
+  `rei_morsel_*`). Also: `ext.c`
   (exported half of `rei_ext.h`; excluded from the amalgamation, which
   already carries the inlines), `err.c` (handle-bound error recorders),
   `rng_jump.c` (L'Ecuyer MRG32k3a stream jumping, for a future rei_map),
