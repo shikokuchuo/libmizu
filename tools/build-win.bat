@@ -23,15 +23,14 @@ rem misfires -Wpre-c11-compat on C11 constructs even with the standard
 rem set; /W4 maps to clang's -Wall -Wextra.
 set CFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -D_CRT_SECURE_NO_WARNINGS
 set DLLFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -DREI_SHARED -DREI_BUILDING -D_CRT_SECURE_NO_WARNINGS
-set SOURCES=src\api.c src\bytes.c src\channel.c src\err.c src\err_tls.c src\ext.c src\liveness.c src\parker.c src\pool.c src\preamble.c src\rng_jump.c src\shm.c src\shm_rw.c src\spill.c src\tune.c src\wait_linux.c src\wait_macos.c src\wait_win32.c
-
 rem Every TU is platform-guarded internally; a foreign platform's file
-rem compiles empty.
+rem compiles empty — so the source set is the src\*.c glob, as in the
+rem Makefile (a hand-maintained list silently drops new TUs at link).
 
 if exist build rmdir /s /q build
 mkdir build
 
-for %%f in (%SOURCES%) do (
+for %%f in (src\*.c) do (
   clang-cl %CFLAGS% -c %%f -Fobuild\ || exit /b 1
 )
 
@@ -42,7 +41,7 @@ rem attribute (REI_API defaults to empty — objects compiled without
 rem REI_SHARED carry no exports), and the link's default import library
 rem name would clobber the static rei.lib.
 mkdir build\dll
-for %%f in (%SOURCES%) do (
+for %%f in (src\*.c) do (
   clang-cl %DLLFLAGS% -c %%f -Fobuild\dll\ || exit /b 1
 )
 clang-cl -nologo -LD build\dll\*.obj -Fe:build\rei.dll -link -IMPLIB:build\rei-dll.lib || exit /b 1
