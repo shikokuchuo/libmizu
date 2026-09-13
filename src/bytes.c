@@ -16,8 +16,9 @@
    sees the freshest consumer-done surrenders). The region is retained
    SPILL — it surrenders to the free list at consumer-done. */
 static int rei_bytes_stage(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
-                           uint32_t inline_max, rei_handle *h) {
+                           uint32_t inline_max, rei_handle *h, void *ctx) {
   rei_bytes *b = (rei_bytes *) obj;
+  (void) ctx;
   size_t n = b->len;
 
   if (n == 0) {

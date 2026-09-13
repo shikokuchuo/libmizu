@@ -298,7 +298,7 @@ static int pool_watch_owner(rei_pool *p, rei_parker *own_pk);
 
 /* Full teardown of a handle's process-local state, idempotent. Never
    unlinks: the region name and liveness files are removed only by the
-   controller's stop / destroy protocol. Order is load-bearing, as in the
+   controller's stop / destroy protocol. Order matters, as in the
    channel: the death watch and parkers reference the mapping. */
 static void pool_release(rei_pool *p) {
   if (p->released) return;
@@ -1394,7 +1394,7 @@ static rei_status pool_submit_nested(rei_pool *p, void *task_obj,
     return REI_ERR;
   }
   if (p->h.binding.stage(task_obj, &eh->ph, e + sizeof(rei_entry_hdr),
-                         p->inline_entry, &p->h) != 0) {
+                         p->inline_entry, &p->h, p->h.binding.ctx) != 0) {
     rei_err_record(&p->h, REI_ERRCAT_STAGE, "staging failed");
     return REI_ERR;
   }
@@ -1432,7 +1432,7 @@ static rei_status pool_submit1(rei_pool *p, rei_keeper *keepers,
   unsigned char *e = ring_entry(p, ring, (uint64_t) p->inj_ltail);
   rei_entry_hdr *eh = (rei_entry_hdr *) e;
   if (p->h.binding.stage(task_obj, &eh->ph, e + sizeof(rei_entry_hdr),
-                         p->inline_entry, &p->h) != 0) {
+                         p->inline_entry, &p->h, p->h.binding.ctx) != 0) {
     rei_err_record(&p->h, REI_ERRCAT_STAGE, "staging failed");
     return REI_ERR;
   }
@@ -2454,7 +2454,7 @@ int rei_result_publish(rei_result_sink *sink, void *value) {
   rei_stage_rollback(&p->h);
   if (pool_rk_reserve(p) != 0) return -1;
   if (p->h.binding.stage(value, &sink->rs->ph, sink->payload,
-                         sink->inline_max, &p->h) != 0) {
+                         sink->inline_max, &p->h, p->h.binding.ctx) != 0) {
     rei_err_record(&p->h, REI_ERRCAT_STAGE, "staging failed");
     return -1;
   }
@@ -2483,7 +2483,7 @@ int rei_result_publish_err(rei_result_sink *sink, void *flattened,
        classed condition) the tiered stage carries the envelope out of
        line */
     if (p->h.binding.stage(flattened, &sink->rs->ph, sink->payload,
-                           sink->inline_max, &p->h) != 0) {
+                           sink->inline_max, &p->h, p->h.binding.ctx) != 0) {
       rei_err_record(&p->h, REI_ERRCAT_STAGE, "staging failed");
       return -1;
     }
@@ -2571,10 +2571,14 @@ static int pool_execute(rei_pool *p, int catching) {
                                         task_id);
   pool_trace_emit(p, REI_TRACE_START, task_id);
   /* scratch (and eh with it) is dead once the task runs: the eval may
-     claim into it — the binding decodes the frame before then */
+     claim into it — the binding decodes the frame before then. The exec
+     ctx is a fresh read ctx off the handle's template (outcome OK;
+     died_slot -1, gone and flags zeroed by the template). */
+  rei_read_ctx rctx = p->h.read_tmpl;
+  rctx.outcome = REI_RS_OK;
   if (p->h.binding.exec(&eh->ph, p->scratch + sizeof(rei_entry_hdr),
                         (size_t) p->inline_entry, &sink, catching,
-                        p->h.binding.ctx) != 0) {
+                        &rctx) != 0) {
     rei_err_record(&p->h, REI_ERRCAT_OTHER,
                    "the binding's exec_fn failed (infrastructure failure)");
     return 1;
@@ -2816,9 +2820,13 @@ static void pool_collect_learn(rei_pool *p, double t_wait,
    slot's payload frame; CANCEL/DIED carry none — a NIL header stands in,
    and read_fn builds the binding's error object off ctx.outcome (DIED
    also fills the claimant record). Returns the product, NULL with the
-   handle's error slot filled on failure. */
+   handle's error slot filled on failure. *rflags_out receives the read's
+   flags: a REI_READ_CONSUME failure (a foreign/corrupt payload that must
+   not wedge the slot) records no generic handle error — the binding
+   carries its own message — and the caller frees the slot anyway. */
 static void *pool_read_outcome(rei_pool *p, rei_rs_hdr *rs, int32_t st,
-                               int32_t died_slot, int64_t died_pid) {
+                               int32_t died_slot, int64_t died_pid,
+                               uint32_t *rflags_out) {
   rei_read_ctx ctx = p->h.read_tmpl;
   ctx.outcome = st;
   ctx.died_slot = died_slot;
@@ -2828,7 +2836,8 @@ static void *pool_read_outcome(rei_pool *p, rei_rs_hdr *rs, int32_t st,
     &rs->ph : &nil_hdr;
   void *v = p->h.binding.read(hdr, (unsigned char *) rs + sizeof(rei_rs_hdr),
                               p->inline_rs, &ctx);
-  if (v == NULL) {
+  *rflags_out = ctx.flags;
+  if (v == NULL && !(ctx.flags & REI_READ_CONSUME)) {
     const char *what =
       ctx.gone ? "payload region vanished" :
       st == REI_RS_OK ? "payload read failed" :
@@ -2851,14 +2860,17 @@ static void *pool_read_outcome(rei_pool *p, rei_rs_hdr *rs, int32_t st,
    rides the read. CANCEL reads without consuming — the task keeper
    releases at slot reuse, not here (the worker may not have materialized
    yet). Returns the read_fn product, NULL with the handle's error slot
-   filled (an OK/ERR read failure consumes nothing — retryable). */
+   filled (an OK/ERR read failure consumes nothing — retryable — unless
+   the read set REI_READ_CONSUME: the FREE transition and keeper drop
+   then run exactly as on success and the verb still returns REI_ERR). */
 static void *pool_rs_claim(rei_pool *p, rei_rs_hdr *rs, uint32_t idx,
                            int32_t st) {
   switch (st) {
   case REI_RS_OK:
   case REI_RS_ERR: {
-    void *v = pool_read_outcome(p, rs, st, -1, 0);
-    if (v == NULL) return NULL;
+    uint32_t rflags = 0;
+    void *v = pool_read_outcome(p, rs, st, -1, 0, &rflags);
+    if (v == NULL && !(rflags & REI_READ_CONSUME)) return NULL;
     uint32_t kind = rs->ph.kind;
     int32_t w = atomic_load_explicit(&rs->worker_slot, memory_order_acquire);
     pool_task_keeper_drop(p, idx, w);
@@ -2879,6 +2891,7 @@ static void *pool_rs_claim(rei_pool *p, rei_rs_hdr *rs, uint32_t idx,
     return v;
   }
   case REI_RS_DIED: {
+    uint32_t rflags = 0;
     int32_t w = atomic_load_explicit(&rs->worker_slot, memory_order_acquire);
     pool_task_keeper_drop(p, idx, w);
     if (w >= 0 && (uint32_t) w < p->hdr.max_workers)
@@ -2894,10 +2907,12 @@ static void *pool_rs_claim(rei_pool *p, rei_rs_hdr *rs, uint32_t idx,
                      "task handle already collected");
       return NULL;
     }
-    return pool_read_outcome(p, rs, st, w, wpid);
+    return pool_read_outcome(p, rs, st, w, wpid, &rflags);
   }
-  case REI_RS_CANCEL:
-    return pool_read_outcome(p, rs, st, -1, 0);
+  case REI_RS_CANCEL: {
+    uint32_t rflags = 0;
+    return pool_read_outcome(p, rs, st, -1, 0, &rflags);
+  }
   case REI_RS_FREE:
   default:
     rei_err_record(&p->h, REI_ERRCAT_OTHER, "task handle already collected");

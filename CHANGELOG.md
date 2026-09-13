@@ -9,7 +9,7 @@ Versions carry an ABI contract: any wire-format change bumps
 ## [Unreleased]
 
 Pre-release; no tagged version yet. On the first tag, rename this section
-to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
+to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
@@ -37,3 +37,15 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 - `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`; the keeperless gate recognizes it.
 - `rei_handle_binding_ctx` handle query in `rei_ext.h`: the registered
   binding ctx, for the stage hook (which receives the handle, not the ctx).
+- `rei_shm_open_view_flags` with `REI_OPEN_VIEW_NOCOUNT`.
+- `REI_READ_CONSUME` read flag: a failed read with the flag set consumes
+  the slot while the verb returns `REI_ERR`.
+- `REI_NA_INT32` / `REI_NA_INT64` / `REI_NA_REAL_BITS` sentinels.
+- Wire helpers in `rei_ext.h`: `rei_timeout_ms`, `rei_store_na_real`,
+  `rei_aux_rawspill_pool`, `rei_aux_shm_vec`, `rei_reih_write`,
+  `rei_reih_check`.
+
+### Changed
+
+- `rei_stage_fn` gains the binding ctx; `rei_exec_fn` receives a read
+  ctx in place of the bare binding ctx.

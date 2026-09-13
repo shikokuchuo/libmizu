@@ -30,8 +30,9 @@ static int exec_calls = 0;
 static jmp_buf abandon_jmp;
 
 /* Resolve a task frame's bytes: INLINE/NIL directly, SHM_RAW through the
-   read-side region service (the worker handle's open cache). */
-static void task_bytes(rei_pool *p, const rei_slot_hdr *hdr,
+   read-side region service (the worker handle's open cache) on the exec
+   ctx. */
+static void task_bytes(rei_read_ctx *ctx, const rei_slot_hdr *hdr,
                        const uint8_t *payload, size_t limit,
                        const uint8_t **bytes, size_t *n) {
   switch (hdr->kind) {
@@ -45,13 +46,7 @@ static void task_bytes(rei_pool *p, const rei_slot_hdr *hdr,
     *n = hdr->len;
     return;
   case REI_KIND_SHM_RAW: {
-    rei_read_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.size = (uint32_t) sizeof(ctx);
-    ctx.outcome = REI_RS_OK;
-    ctx.died_slot = -1;
-    ctx.handle = (rei_handle *) p;   /* the handle base is the first member */
-    rei_shm *shm = rei_read_region(&ctx, payload, hdr->len);
+    rei_shm *shm = rei_read_region(ctx, payload, hdr->len);
     assert(shm != NULL);
     assert(hdr->aux <= (uint64_t) shm->size);
     *bytes = shm->addr;
@@ -65,8 +60,7 @@ static void task_bytes(rei_pool *p, const rei_slot_hdr *hdr,
 
 static int test_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
                      size_t limit, rei_result_sink *sink, int catching,
-                     void *ctx) {
-  (void) ctx;
+                     rei_read_ctx *ctx) {
   /* payload-keyed outcome, ahead of the mode dispatch: "err" publishes
      the INLINE-framed ERR envelope */
   if (hdr->kind == REI_KIND_INLINE && hdr->len == 3 &&
@@ -108,7 +102,7 @@ static int test_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
   /* echo: the task bytes come back as the result */
   const uint8_t *bytes = NULL;   /* MinGW's assert is not noreturn, so */
   size_t n = 0;                  /* task_bytes' default case warns */
-  task_bytes(sink->p, hdr, payload, limit, &bytes, &n);
+  task_bytes(ctx, hdr, payload, limit, &bytes, &n);
   rei_bytes b = { (void *) bytes, n };
   assert(rei_result_publish(sink, &b) == 1);
   exec_calls++;

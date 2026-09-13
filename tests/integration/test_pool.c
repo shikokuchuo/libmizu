@@ -56,7 +56,7 @@ static void sleep_ms(long ms) {
    mid-task; "big" returns a 100 KB (spilled) result. */
 static int child_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
                       size_t limit, rei_result_sink *sink, int catching,
-                      void *ctx) {
+                      rei_read_ctx *ctx) {
   (void) limit; (void) catching; (void) ctx;
   if (hdr->kind == REI_KIND_NIL) {
     rei_bytes b = { NULL, 0 };

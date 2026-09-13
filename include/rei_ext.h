@@ -15,12 +15,15 @@
    private.
 
    Conventions differ from rei.h where the consumers differ: this tier
-   is C-only binding surface, so macros are fine, and exactly three hot
-   accessors ship in dual form (below). Every other operation is a real
-   exported function (REI_API), so FFI consumers see the full tier.
+   is C-only binding surface, so macros are fine, and the hot accessors
+   plus the small wire-format helpers ship in dual form (below). Every
+   other operation is a real exported function (REI_API), so FFI
+   consumers see the full tier.
 
    Dual-form fast paths (the CPython Py_INCREF pattern):
-   rei_parker_snapshot, rei_zc_rc, and rei_zc_flags_ ship as
+   rei_parker_snapshot, rei_zc_rc, rei_zc_flags_, and the wire helpers
+   (rei_timeout_ms, rei_store_na_real, rei_aux_rawspill_pool,
+   rei_aux_shm_vec, rei_reih_write, rei_reih_check) ship as
    `static inline` here AND as same-named exported functions (src/ext.c).
    A C TU inlines its own copy — zero cost — while an FFI binds the
    exported symbol. This is legal C: internal and external linkage of the
@@ -35,6 +38,9 @@
 
 #ifndef REI_EXT_H
 #define REI_EXT_H
+
+#include <math.h>
+#include <string.h>
 
 #include "rei.h"
 
@@ -113,14 +119,15 @@ enum { REI_HTYPE_CHANNEL = 1, REI_HTYPE_POOL = 2 };
    — while set, a stager falls back to the copy tiers. The churn read is
    an extern call: gate it behind the payload's size check so it runs
    only for payloads already proven large. binding_ctx returns the
-   binding.ctx pointer registered at create/attach/join — the stage hook
-   receives the handle but not the ctx, so a binding whose per-handle
-   context lives off the core handle reaches it here. spill_info fills
-   the producer free-list entry count and the lent-region ledger count
-   (debug/dump surface; the per-kind public snapshots are
-   rei_channel_info_get / rei_pool_dump_get). */
+   binding.ctx pointer registered at create/attach/join (the seam
+   callbacks receive it directly — this is for contexts with no callback
+   in flight). spill_info fills the producer free-list entry count and
+   the lent-region ledger count (debug/dump surface; the per-kind public
+   snapshots are rei_channel_info_get / rei_pool_dump_get). */
 REI_API int rei_handle_kind(const rei_handle *);
 REI_API int rei_handle_churn(const rei_handle *);
+/* Superseded on the stage path (stage_fn receives the ctx directly since
+   0.3.0); retained for contexts with no seam callback in flight. */
 REI_API void *rei_handle_binding_ctx(const rei_handle *);
 REI_API void rei_handle_spill_info(const rei_handle *,
                                    uint32_t *fl_entries,
@@ -133,10 +140,10 @@ REI_API void rei_handle_spill_info(const rei_handle *,
    so a hot-path call is one load + a predicted indirect branch.
 
    stage: frame obj as (hdr, payload) — payload capacity inline_max.
-     Spill/arena/retain via the rei_stage_* services on the handle.
-     Returns 0 on success, nonzero on staging failure (the verb fails as
-     REI_ERR / REI_ERRCAT_STAGE). May also not return (a binding's
-     longjmp):
+     Spill/arena/retain via the rei_stage_* services on the handle. ctx
+     is the handle's binding.ctx. Returns 0 on success, nonzero on
+     staging failure (the verb fails as REI_ERR / REI_ERRCAT_STAGE). May
+     also not return (a binding's longjmp):
      staging is transactional — the core mutates no shared state before
      stage returns, a mid-stage arena chunk is FIFO-reclaimed like any
      other, and an uncommitted region checkout or pin rolls back at the
@@ -155,9 +162,21 @@ REI_API void rei_handle_spill_info(const rei_handle *,
      with a payload frame; REI_RS_CANCEL/DIED without one — read_fn
      builds the binding's error object for all three). A vanished
      out-of-line region: rei_read_region sets ctx->gone and read_fn
-     propagates by returning NULL.
+     propagates by returning NULL. A NULL return consumes nothing —
+     unless the read first set ctx->flags |= REI_READ_CONSUME: then the
+     transport consumes exactly as on success (channel: the head advance
+     and its batched publication; pool OK/ERR: the FREE transition, the
+     task-keeper drop, and the producer-keeper wake) while the verb
+     still returns REI_ERR. Use for foreign or corrupt payloads that
+     must not wedge the ring behind an unreadable slot: the binding
+     carries its specific message in its own state (the core records no
+     generic error for a consumed read), and a retried read sees the
+     next slot.
    exec: pool workers only — run one claimed task frame and publish
-     through the sink. Must not abandon: the binding catches every task
+     through the sink. ctx is a read ctx on the handle (outcome
+     REI_RS_OK): decode reads ride it (rei_read_region, ctx->gone), and
+     the binding ctx remains reachable as ctx->binding_ctx. Must not
+     abandon: the binding catches every task
      condition into the sink; an escape degrades to worker death plus
      the reaper verdict (the hard-crash semantics, never the path for an
      ordinary task error). catching marks a reentrant invocation
@@ -198,7 +217,13 @@ REI_API void rei_handle_spill_info(const rei_handle *,
 
 typedef int (*rei_stage_fn)(void *obj, rei_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,
-                            rei_handle *);
+                            rei_handle *, void *ctx);
+
+/* read_fn flags (ctx->flags, zero at each read's start): CONSUME makes a
+   NULL return consume the slot exactly as on success while the verb
+   still returns REI_ERR — the foreign/corrupt-payload contract; see the
+   seam comment above. */
+#define REI_READ_CONSUME 1u
 
 typedef struct rei_read_ctx_s {
   uint32_t size;        /* core-set: sizeof the struct it knows */
@@ -210,6 +235,7 @@ typedef struct rei_read_ctx_s {
   int64_t died_pid;     /* REI_RS_DIED: its pid (0 when unknown) */
   rei_handle *handle;   /* the reading handle */
   void   *binding_ctx;  /* the handle's binding.ctx */
+  uint32_t flags;       /* binding-set REI_READ_*; zero on entry */
   void   *reserved[4];  /* zero; future growth without a soname bump */
 } rei_read_ctx;
 
@@ -218,7 +244,7 @@ typedef void *(*rei_read_fn)(const rei_slot_hdr *, const uint8_t *payload,
 
 typedef int (*rei_exec_fn)(const rei_slot_hdr *hdr, const uint8_t *payload,
                            size_t limit, rei_result_sink *, int catching,
-                           void *ctx);
+                           rei_read_ctx *ctx);
 typedef int (*rei_check_fn)(void *ctx);
 typedef void (*rei_park_fn)(void *ctx, int entering);
 typedef void (*rei_sweep_fn)(void *ctx);
@@ -528,6 +554,83 @@ REI_EXT_INLINE REI_ATOMIC(uint32_t) *rei_zc_rc(void *base) {
 REI_EXT_INLINE REI_ATOMIC(uint32_t) *rei_zc_flags_(void *base) {
   return (REI_ATOMIC(uint32_t) *) ((unsigned char *) base +
                                    REI_ZC_FLAGS_OFF);
+}
+#endif
+
+// Wire-format helpers --------------------------------------------------------------
+
+/* The small pure helpers over rei.h's wire-format conventions, dual form
+   like the zc accessors above (see the banner): the timeout unit
+   conversion, the NA_real_ store (for a binding filling converted output
+   without R headers), the aux packing of the pool RAWSPILL and SHM_VEC
+   kinds, and the flat REIH header write/check. */
+
+#ifdef REI_EXT_NO_INLINES
+REI_API double rei_timeout_ms(double seconds);
+REI_API void rei_store_na_real(void *dst);
+REI_API uint64_t rei_aux_rawspill_pool(int type, uint32_t name_len);
+REI_API uint64_t rei_aux_shm_vec(int type, uint64_t total);
+REI_API void rei_reih_write(void *base, int wire_type, int64_t n_elems);
+REI_API int rei_reih_check(const void *base, size_t size,
+                           int *wire_type, int64_t *n_elems);
+#else
+/* seconds (a binding's convention; <= 0 polls, non-finite waits
+   indefinitely) to the core's timeout_ms (0 polls, < 0 indefinite). */
+REI_EXT_INLINE double rei_timeout_ms(double seconds) {
+  if (!isfinite(seconds)) return -1;
+  return seconds <= 0 ? 0 : seconds * 1000;
+}
+REI_EXT_INLINE void rei_store_na_real(void *dst) {
+  const uint64_t bits = REI_NA_REAL_BITS;
+  memcpy(dst, &bits, 8);
+}
+/* aux = wire type tag | region name length << 8. */
+REI_EXT_INLINE uint64_t rei_aux_rawspill_pool(int type, uint32_t name_len) {
+  return (uint64_t) (uint32_t) type | ((uint64_t) name_len << 8);
+}
+/* aux = layout type tag | exact used bytes << 8. */
+REI_EXT_INLINE uint64_t rei_aux_shm_vec(int type, uint64_t total) {
+  return (uint64_t) (uint32_t) type | (total << 8);
+}
+/* The flat REIH header: magic, type, element count, zero attrs, and the
+   reserved band [24, 64) zeroed. Write BEFORE rei_stage_retain_zc: the
+   zeroing covers the zc refcount word (a recycled region carries a stale
+   count), and the retain stores the producer loan after. */
+REI_EXT_INLINE void rei_reih_write(void *base, int wire_type,
+                                   int64_t n_elems) {
+  const uint32_t magic = REI_MAGIC_VEC;
+  const int32_t t32 = wire_type;
+  const int64_t zero64 = 0;
+  memcpy(base, &magic, 4);
+  memcpy((unsigned char *) base + 4, &t32, 4);
+  memcpy((unsigned char *) base + 8, &n_elems, 8);
+  memcpy((unsigned char *) base + 16, &zero64, 8);
+  memset((unsigned char *) base + 24, 0, REI_HEADER_SIZE - 24);
+}
+/* Validate the REIH header at base: region size, magic, a known atomic
+   wire type, and the element/attribute extents against the region size —
+   0 on success, -1 on any rejection. Attribute policy (whether the word
+   at [16, 24) may be nonzero, and what it means) stays binding-side. */
+REI_EXT_INLINE int rei_reih_check(const void *base, size_t size,
+                                  int *wire_type, int64_t *n_elems) {
+  if (size < REI_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t t32;
+  int64_t len, attrs;
+  memcpy(&magic, base, 4);
+  if (magic != REI_MAGIC_VEC) return -1;
+  memcpy(&t32, (const unsigned char *) base + 4, 4);
+  memcpy(&len, (const unsigned char *) base + 8, 8);
+  memcpy(&attrs, (const unsigned char *) base + 16, 8);
+  const size_t elt = rei_type_elt_size(t32);
+  if (elt == 0 || len < 0 || attrs < 0 ||
+      len > ((int64_t) size - (int64_t) REI_HEADER_SIZE) / (int64_t) elt ||
+      attrs > (int64_t) size - (int64_t) REI_HEADER_SIZE -
+              len * (int64_t) elt)
+    return -1;
+  *wire_type = t32;
+  *n_elems = len;
+  return 0;
 }
 #endif
 

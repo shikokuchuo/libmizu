@@ -97,14 +97,19 @@ A binding registers its callbacks at create, attach, or join:
 
 The core copies the function pointers into the handle.
 A hot-path call is one load plus a predicted indirect branch.
+`stage_fn` receives the binding ctx alongside the handle; `exec_fn` receives a read ctx on the handle (the binding ctx rides it), so task-frame decode shares the collect path's region service.
 The typedefs in `include/rei_ext.h` (the binding-author tier) document the full contracts.
-Three of them are load-bearing:
+Four of them carry the correctness guarantees:
 
 - Staging is transactional.
   The core mutates no shared state before `stage_fn` returns.
   The core reclaims an arena chunk allocated mid-stage in FIFO order, like any other chunk.
   An uncommitted region checkout or pin rolls back at the next verb entry or at destroy.
   A binding can abandon mid-stage (a longjmp) and leave the handle consistent.
+- A failed `read_fn` (a NULL return) consumes nothing — the slot stays for a retry.
+  Setting `REI_READ_CONSUME` first flips that: the transport consumes exactly as on success (the channel head advance and its batched publication; the pool FREE transition, task-keeper drop, and producer-keeper wake) while the verb still returns `REI_ERR`.
+  This is the foreign/corrupt-payload contract: an unreadable slot must not wedge the ring behind it.
+  The binding carries its specific message in its own state; the core records no generic error for a consumed read.
 - `exec_fn` must not abandon.
   The binding catches each task condition into the result sink.
   A worker that lets one escape degrades to worker death plus the reaper verdict.
@@ -145,6 +150,7 @@ The cross-process refcount lives in bytes [24-31] of the region header.
 The offset macros are wire format (`REI_ZC_REFCOUNT_OFF` / `REI_ZC_FLAGS_OFF` in `rei.h`); the `rei_zc_rc` / `rei_zc_flags_` accessors are core-owned binding surface (`rei_ext.h`, dual-form).
 The producer stores 1 at stage.
 `rei_shm_open_view` adds 1 at the wrap of the consumer: open implies counted, so add-before-consumer-done is structural.
+The `REI_OPEN_VIEW_NOCOUNT` form splits the two for a binding whose wrap can fail between map and count (an R ALTREP wrap can longjmp): open first, then `rei_zc_ref` at wrap, still before the consumer-done signal.
 The release of the view subtracts 1.
 The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 

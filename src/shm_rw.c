@@ -240,10 +240,14 @@ rei_status rei_shm_open_rw(rei_shm **out, const char *name, int populate) {
 
 /* The zc consumer open: page 0 read-write (the refcount word), the rest
    read-only. Lazy everywhere — a view is touched on demand, so eager PTE
-   install would prefault never-read pages on the recv hot path. Performs
-   the zc counted add itself: open implies counted, so no view mapping
-   exists without the count. */
-rei_status rei_shm_open_view(rei_shm **out, const char *name) {
+   install would prefault never-read pages on the recv hot path. The
+   default form performs the zc counted add itself: open implies counted,
+   so no view mapping exists without the count. REI_OPEN_VIEW_NOCOUNT
+   skips the add — the caller owns the rei_zc_ref timing then (a binding
+   whose wrap can fail between map and count) and must complete it before
+   its consumer-done signal. */
+rei_status rei_shm_open_view_flags(rei_shm **out, const char *name,
+                                   uint32_t flags) {
   rei_shm *shm = rei_shm_open_rw_heap(name, 0);
   if (shm == NULL) {
     rei_err_record_tls(REI_ERRCAT_OTHER, "cannot open region '%s'", name);
@@ -274,9 +278,14 @@ rei_status rei_shm_open_view(rei_shm **out, const char *name) {
     (void) mprotect((unsigned char *) shm->addr + pagesz, size - pagesz,
                     PROT_READ);
 #endif
-  atomic_fetch_add_explicit(rei_zc_rc(shm->addr), 1, memory_order_acq_rel);
+  if (!(flags & REI_OPEN_VIEW_NOCOUNT))
+    atomic_fetch_add_explicit(rei_zc_rc(shm->addr), 1, memory_order_acq_rel);
   *out = shm;
   return REI_OK;
+}
+
+rei_status rei_shm_open_view(rei_shm **out, const char *name) {
+  return rei_shm_open_view_flags(out, name, 0);
 }
 
 void rei_zc_ref(rei_shm *shm) {

@@ -28,3 +28,54 @@ REI_ATOMIC(uint32_t) *rei_zc_flags_(void *base) {
   return (REI_ATOMIC(uint32_t) *) ((unsigned char *) base +
                                    REI_ZC_FLAGS_OFF);
 }
+
+double rei_timeout_ms(double seconds) {
+  if (!isfinite(seconds)) return -1;
+  return seconds <= 0 ? 0 : seconds * 1000;
+}
+
+void rei_store_na_real(void *dst) {
+  const uint64_t bits = REI_NA_REAL_BITS;
+  memcpy(dst, &bits, 8);
+}
+
+uint64_t rei_aux_rawspill_pool(int type, uint32_t name_len) {
+  return (uint64_t) (uint32_t) type | ((uint64_t) name_len << 8);
+}
+
+uint64_t rei_aux_shm_vec(int type, uint64_t total) {
+  return (uint64_t) (uint32_t) type | (total << 8);
+}
+
+void rei_reih_write(void *base, int wire_type, int64_t n_elems) {
+  const uint32_t magic = REI_MAGIC_VEC;
+  const int32_t t32 = wire_type;
+  const int64_t zero64 = 0;
+  memcpy(base, &magic, 4);
+  memcpy((unsigned char *) base + 4, &t32, 4);
+  memcpy((unsigned char *) base + 8, &n_elems, 8);
+  memcpy((unsigned char *) base + 16, &zero64, 8);
+  memset((unsigned char *) base + 24, 0, REI_HEADER_SIZE - 24);
+}
+
+int rei_reih_check(const void *base, size_t size,
+                   int *wire_type, int64_t *n_elems) {
+  if (size < REI_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t t32;
+  int64_t len, attrs;
+  memcpy(&magic, base, 4);
+  if (magic != REI_MAGIC_VEC) return -1;
+  memcpy(&t32, (const unsigned char *) base + 4, 4);
+  memcpy(&len, (const unsigned char *) base + 8, 8);
+  memcpy(&attrs, (const unsigned char *) base + 16, 8);
+  const size_t elt = rei_type_elt_size(t32);
+  if (elt == 0 || len < 0 || attrs < 0 ||
+      len > ((int64_t) size - (int64_t) REI_HEADER_SIZE) / (int64_t) elt ||
+      attrs > (int64_t) size - (int64_t) REI_HEADER_SIZE -
+              len * (int64_t) elt)
+    return -1;
+  *wire_type = t32;
+  *n_elems = len;
+  return 0;
+}

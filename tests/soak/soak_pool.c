@@ -82,8 +82,8 @@ static void verify(const rei_bytes *b, size_t len, uint64_t seq) {
    publish, the task's consumer-done point). */
 static int soak_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
                      size_t limit, rei_result_sink *sink, int catching,
-                     void *ctx) {
-  (void) limit; (void) catching; (void) ctx;
+                     rei_read_ctx *ctx) {
+  (void) limit; (void) catching;
   rei_bytes b;
   if (hdr->kind == REI_KIND_NIL) {
     b.data = NULL;
@@ -93,13 +93,7 @@ static int soak_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
     b.len = hdr->len;
   } else {
     assert(hdr->kind == REI_KIND_SHM_RAW);
-    rei_read_ctx rctx;
-    memset(&rctx, 0, sizeof(rctx));
-    rctx.size = (uint32_t) sizeof(rctx);
-    rctx.outcome = REI_RS_OK;
-    rctx.died_slot = -1;
-    rctx.handle = (rei_handle *) sink->p;   /* the handle base is first */
-    rei_shm *shm = rei_read_region(&rctx, payload, hdr->len);
+    rei_shm *shm = rei_read_region(ctx, payload, hdr->len);
     assert(shm != NULL && hdr->aux <= (uint64_t) shm->size);
     b.data = shm->addr;
     b.len = (size_t) hdr->aux;

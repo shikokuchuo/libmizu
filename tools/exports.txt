@@ -1,3 +1,5 @@
+rei_aux_rawspill_pool
+rei_aux_shm_vec
 rei_binding_bytes
 rei_binding_init
 rei_bytes_free
@@ -78,6 +80,8 @@ rei_pool_worker_run
 rei_preamble_validate
 rei_preamble_write
 rei_read_region
+rei_reih_check
+rei_reih_write
 rei_result_publish
 rei_result_publish_died
 rei_result_publish_err
@@ -90,6 +94,7 @@ rei_shm_name
 rei_shm_open
 rei_shm_open_rw
 rei_shm_open_view
+rei_shm_open_view_flags
 rei_shm_reap
 rei_shm_size
 rei_stage_arena_alloc
@@ -98,6 +103,8 @@ rei_stage_reap
 rei_stage_retain
 rei_stage_retain_zc
 rei_stage_spill_get
+rei_store_na_real
+rei_timeout_ms
 rei_tune
 rei_type_elt_size
 rei_unpark

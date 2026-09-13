@@ -219,7 +219,7 @@ static int chan_probe_dead(rei_channel *c) {
 
 // Release -------------------------------------------------------------------------
 
-/* Full teardown, idempotent. The order is load-bearing: the death watch and
+/* Full teardown, idempotent. The order matters: the death watch and
    parkers reference the mapping (the watch's unpark target is the epoch word
    inside it), so both stop before the munmap. The retain table, free list,
    ledger, and mapping cache release their regions first — they are
@@ -373,7 +373,8 @@ static rei_status chan_send1(rei_channel *c, void *obj) {
      slot stays unpublished until ltail advances below, and the core
      mutates no shared state before stage returns, so a mid-stage abandon
      leaves the handle consistent. */
-  if (c->h.binding.stage(obj, hdr, payload, c->inline_max, &c->h) != 0) {
+  if (c->h.binding.stage(obj, hdr, payload, c->inline_max, &c->h,
+                         c->h.binding.ctx) != 0) {
     rei_err_record(&c->h, REI_ERRCAT_STAGE, "staging failed");
     return REI_ERR;
   }
@@ -440,9 +441,12 @@ static void chan_publish_head(rei_channel *c) {
    range and never learns arena mechanics (the base and the FIFO reclaim
    stay core-private). ARENA carries the chunk offset in aux and the
    stream length in the payload, channel RAWSPILL the offset in the
-   payload; both ranges are bounds-checked against the arena here. */
+   payload; both ranges are bounds-checked against the arena here.
+   *rflags_out receives the read's flags (REI_READ_CONSUME): a consumed
+   failure records no generic handle error — the binding carries its own
+   message, and a stale generic record would mislead a later errcat. */
 static rei_status chan_read(rei_channel *c, const unsigned char *sl,
-                            void **out) {
+                            void **out, uint32_t *rflags_out) {
   const rei_slot_hdr *hdr = (const rei_slot_hdr *) sl;
   const unsigned char *payload = sl + sizeof(rei_slot_hdr);
   const unsigned char *bytes;
@@ -478,10 +482,12 @@ static rei_status chan_read(rei_channel *c, const unsigned char *sl,
   ctx.outcome = REI_RS_OK;
 
   void *obj = c->h.binding.read(hdr, bytes, limit, &ctx);
+  *rflags_out = ctx.flags;
   if (obj == NULL) {
-    rei_err_record(&c->h, REI_ERRCAT_OTHER,
-                   ctx.gone ? "payload region vanished" :
-                              "payload read failed");
+    if (!(ctx.flags & REI_READ_CONSUME))
+      rei_err_record(&c->h, REI_ERRCAT_OTHER,
+                     ctx.gone ? "payload region vanished" :
+                                "payload read failed");
     return REI_ERR;
   }
   *out = obj;
@@ -608,17 +614,20 @@ static rei_status chan_wait_msg(rei_channel *c, double timeout_ms) {
    is the whole correctness story for large-message transport: publication
    is what lets the sender's reap drop the keeper pinning every region this
    message references. A failed read does not advance: the slot stays at
-   the head. */
+   the head — unless the read set REI_READ_CONSUME (a foreign/corrupt
+   payload that must not wedge the ring): then the advance and publish
+   happen exactly as on success and the verb still returns REI_ERR. */
 static rei_status chan_consume1(rei_channel *c, void **out) {
   rei_chan_ring *r = &c->rx;
+  uint32_t rflags = 0;
   rei_status st = chan_read(c, r->slots + ((uint64_t) r->lhead & r->mask) * r->slot,
-                            out);
-  if (st != REI_OK) return st;
+                            out, &rflags);
+  if (st != REI_OK && !(rflags & REI_READ_CONSUME)) return st;
   r->lhead++;
   r->unpublished++;
   if (r->unpublished >= REI_HEAD_PUBLISH_K || !chan_rx_avail(c))
     chan_publish_head(c);
-  return REI_OK;
+  return st;
 }
 
 // Create (host) -------------------------------------------------------------------

@@ -87,13 +87,22 @@ int main(void) {
   refs += sink((rei_any_fn) &rei_rng_jump);
   refs += sink((rei_any_fn) &rei_tune);
 
-  /* The dual-form accessors: the header's static inlines by default,
-     the exported symbols under EXT_PROBE_EXPORTS. */
+  /* The dual-form accessors and wire helpers: the header's static
+     inlines by default, the exported symbols under EXT_PROBE_EXPORTS. */
   refs += sink((rei_any_fn) &rei_parker_snapshot);
   refs += sink((rei_any_fn) &rei_zc_rc);
   refs += sink((rei_any_fn) &rei_zc_flags_);
+  refs += sink((rei_any_fn) &rei_timeout_ms);
+  refs += sink((rei_any_fn) &rei_store_na_real);
+  refs += sink((rei_any_fn) &rei_aux_rawspill_pool);
+  refs += sink((rei_any_fn) &rei_aux_shm_vec);
+  refs += sink((rei_any_fn) &rei_reih_write);
+  refs += sink((rei_any_fn) &rei_reih_check);
 
-  assert(refs == 45);
+  /* A taste of the stable tier: the proof links both headers' surface. */
+  refs += sink((rei_any_fn) &rei_shm_open_view_flags);
+
+  assert(refs == 52);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +
@@ -137,6 +146,30 @@ int main(void) {
   memset(&pk, 0, sizeof pk);
   pk.epoch = (_Atomic uint32_t *) &epoch;
   assert(rei_parker_snapshot(&pk) == 42);
+
+  /* The wire helpers, in either mode (the edge cases live in
+     tests/unit/test_wire.c; here a smoke pass proves the two forms). */
+  assert(rei_timeout_ms(1.5) == 1500.0);
+  assert(rei_timeout_ms(NAN) == -1 && rei_timeout_ms(-1) == 0);
+  unsigned char na8[8];
+  rei_store_na_real(na8);
+  uint64_t na_bits;
+  memcpy(&na_bits, na8, 8);
+  assert(na_bits == REI_NA_REAL_BITS);
+  assert(rei_aux_rawspill_pool(REI_TYPE_INT64, 27) ==
+         ((uint64_t) 32 | ((uint64_t) 27 << 8)));
+  assert(rei_aux_shm_vec(REI_TYPE_REAL, 1u << 20) ==
+         ((uint64_t) 14 | ((uint64_t) (1u << 20) << 8)));
+  unsigned char reih[REI_HEADER_SIZE + 24];
+  memset(reih, 0xAA, sizeof reih);
+  rei_reih_write(reih, REI_TYPE_REAL, 3);
+  int wtype = 0;
+  int64_t nelem = 0;
+  assert(rei_reih_check(reih, sizeof reih, &wtype, &nelem) == 0);
+  assert(wtype == REI_TYPE_REAL && nelem == 3);
+  uint32_t rc_after_write;
+  memcpy(&rc_after_write, reih + REI_ZC_REFCOUNT_OFF, sizeof rc_after_write);
+  assert(rc_after_write == 0);   /* the reserved band write zeroed it */
 
   /* A taste of the stable tier: the proof links both headers' surface. */
   assert(rei_version() != NULL);

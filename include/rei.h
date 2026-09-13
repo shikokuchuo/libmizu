@@ -55,7 +55,7 @@
 
 /* The wire-format structs carry atomic words. C++ consumers get
    std::atomic, layout-compatible with _Atomic on every supported
-   platform; the atomics are load-bearing only in C TUs. */
+   platform; only the C TUs rely on the atomic semantics. */
 #ifdef __cplusplus
 #  include <atomic>
 #  define REI_ATOMIC(T) std::atomic<T>
@@ -86,8 +86,8 @@ extern "C" {
 #endif
 
 #define REI_VERSION_MAJOR 0
-#define REI_VERSION_MINOR 2
-#define REI_VERSION_PATCH 0
+#define REI_VERSION_MINOR 0
+#define REI_VERSION_PATCH 1
 
 /* Library version, "major.minor.patch". Static storage; never freed. */
 REI_API const char *rei_version(void);
@@ -194,19 +194,27 @@ REI_STATIC_ASSERT(sizeof(rei_preamble) == 64, "rei_preamble is the wire format")
 // Wire format: payload framing -------------------------------------------------
 
 /* A 16-byte header then payload bytes, shared by channel slots and pool
-   entries / result slots. INLINE: a complete serialized stream. ARENA
-   (channel-only): one chunk in the spill arena (aux = chunk offset, byte
-   length as uint64 in the payload). SHM_RAW: name of a region holding the
-   stream (len = name length; aux = exact stream length). RAWVEC: bare
-   bytes of an attribute-free atomic vector (aux = wire type tag).
-   RAWSPILL: RAWVEC out of line — channel arena chunk (payload = uint64
-   offset) or pool spill region (payload = name, name length in aux >> 8);
-   len is the byte count and aux & 0xff the wire type tag in both.
-   SHM_VEC: name of a region holding an REI* layout object (aux = layout
-   type tag | exact used bytes << 8) — the consumer wraps a zero-copy
-   view. REF: the /rei_ identifier of an object already in shm. NIL:
-   immediate empty value — no bytes move. STR1: a length-1 string (bytes
-   in the payload, aux the encoding; REI_STR1_NA marks the missing string). */
+   entries / result slots. The aux/payload conventions per kind are wire
+   contract (cross-language peers read them), not binding choice:
+   - INLINE: a complete serialized stream (len = stream length; aux = 0).
+   - ARENA (channel-only): one chunk in the spill arena (aux = chunk
+     offset, byte length as uint64 in the payload).
+   - SHM_RAW: name of a region holding the stream (len = name length,
+     payload = name; aux = exact stream length).
+   - RAWVEC: bare bytes of an attribute-free atomic vector, slot-resident
+     (len = byte count; aux = wire type tag).
+   - RAWSPILL: RAWVEC out of line — len is the byte count and aux & 0xff
+     the wire type tag in both framings. Channel: an arena chunk
+     (aux = type, payload = uint64 offset). Pool: a spill region
+     (aux = type | name length << 8, payload = name).
+   - SHM_VEC: name of a region holding an REI* layout object (len = name
+     length, payload = name; aux = layout type tag | exact used bytes
+     << 8) — the consumer wraps a zero-copy view.
+   - REF: the /rei_ identifier of an object already in shm (payload =
+     identifier; aux = 0).
+   - NIL: immediate empty value — no bytes move.
+   - STR1: a length-1 string (bytes in the payload, aux the encoding;
+     REI_STR1_NA marks the missing string). */
 typedef enum rei_kind_e {
   REI_KIND_INLINE = 0,
   REI_KIND_ARENA,
@@ -241,6 +249,13 @@ typedef enum rei_type_e {
   REI_TYPE_RAW = 24,         /* bytes */
   REI_TYPE_INT64 = 32        /* int64; INT64_MIN is the missing sentinel */
 } rei_type;
+
+/* The missing-value sentinels of the atomic wire types (the R ABI fixes
+   the bit patterns; a binding of any language writes them without R
+   headers). Little-endian throughout, as the whole wire format is. */
+#define REI_NA_INT32     INT32_MIN              /* NA_integer_ / NA logical */
+#define REI_NA_INT64     INT64_MIN              /* NA_integer64_ sentinel */
+#define REI_NA_REAL_BITS 0x7FF80000000007A2ULL  /* NA_real_ (a NaN payload) */
 
 /* Element size of an atomic wire type, 0 for non-atomic. */
 REI_API size_t rei_type_elt_size(int type);
@@ -394,14 +409,21 @@ typedef enum rei_park_state_e { REI_WPK_RUNNING = 0, REI_WPK_IDLE,
    pre-faults); open_view is the zc consumer open: page 0 RW (the
    refcount word), the rest read-only — and performs the zc counted add
    itself, so a binding cannot hold a view mapping without the count.
+   open_view_flags is the flags form: REI_OPEN_VIEW_NOCOUNT skips the
+   counted add — the caller then owns the rei_zc_ref timing and must
+   complete it before its consumer-done signal (a binding whose wrap can
+   fail between map and count opens first and counts at wrap).
    close unmaps and frees the handle; unlink != 0 also removes the name.
    On failure these return REI_ERR with the category in the thread-local
    error slot. addr/size/name are borrowed reads, valid until close. */
+#define REI_OPEN_VIEW_NOCOUNT 1u /* caller performs the counted add itself */
 REI_API rei_status rei_shm_create(rei_shm **out, size_t size);
 REI_API rei_status rei_shm_open(rei_shm **out, const char *name);
 REI_API rei_status rei_shm_open_rw(rei_shm **out, const char *name,
                                    int populate);
 REI_API rei_status rei_shm_open_view(rei_shm **out, const char *name);
+REI_API rei_status rei_shm_open_view_flags(rei_shm **out, const char *name,
+                                           uint32_t flags);
 REI_API void rei_shm_close(rei_shm *, int unlink);
 REI_API void *rei_shm_addr(rei_shm *);
 REI_API size_t rei_shm_size(const rei_shm *);

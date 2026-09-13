@@ -83,7 +83,7 @@ static int rei_live_dir_default(char *buf, size_t size) {
 #include <errno.h>
 
 int rei_live_open(const char *path, intptr_t *out) {
-  /* O_CLOEXEC is load-bearing: flock is scoped to the open file
+  /* O_CLOEXEC is required: flock is scoped to the open file
      description, so an inherited fd would keep the lock alive past the
      holder's death — a manufactured false ALIVE. */
   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);

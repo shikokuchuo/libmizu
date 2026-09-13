@@ -43,7 +43,7 @@ static void count_drop(void *ctx, void *pin) {
 }
 
 static int wrap_stage(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
-                      uint32_t inline_max, rei_handle *h) {
+                      uint32_t inline_max, rei_handle *h, void *ctx) {
   if (stage_mode == 1) return 1;
   if (stage_mode == 2) {
     /* abandon after retaining: the checkout must roll back at the
@@ -53,15 +53,15 @@ static int wrap_stage(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
     rei_stage_retain(h, shm);
     return 1;
   }
-  int rc = bytesb.stage(obj, hdr, payload, inline_max, h);
+  int rc = bytesb.stage(obj, hdr, payload, inline_max, h, ctx);
   if (rc == 0) rei_stage_pin(h, &pin_token);
   return rc;
 }
 
 /* A frame the bytes reader must refuse (a view tier). */
 static int stage_shm_vec(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
-                         uint32_t inline_max, rei_handle *h) {
-  (void) obj; (void) h;
+                         uint32_t inline_max, rei_handle *h, void *ctx) {
+  (void) obj; (void) h; (void) ctx;
   const char *name = "/rei_nonexistent";
   hdr->kind = REI_KIND_SHM_VEC;
   hdr->len = (uint32_t) strlen(name);
