@@ -755,13 +755,15 @@ REI_EXT_INLINE REI_ATOMIC(uint32_t) *rei_zc_flags_(void *base) {
    like the zc accessors above (see the banner): the timeout unit
    conversion, the NA_real_ store (for a binding filling converted output
    without R headers), the aux packing of the pool RAWSPILL and SHM_VEC
-   kinds, and the flat REIH header write/check. */
+   kinds and its decode pair, and the flat REIH header write/check. */
 
 #ifdef REI_EXT_NO_INLINES
 REI_API double rei_timeout_ms(double seconds);
 REI_API void rei_store_na_real(void *dst);
 REI_API uint64_t rei_aux_rawspill_pool(int type, uint32_t name_len);
 REI_API uint64_t rei_aux_shm_vec(int type, uint64_t total);
+REI_API int rei_aux_type(uint64_t aux);
+REI_API uint64_t rei_aux_hi(uint64_t aux);
 REI_API void rei_reih_write(void *base, int wire_type, int64_t n_elems);
 REI_API int rei_reih_check(const void *base, size_t size,
                            int *wire_type, int64_t *n_elems);
@@ -783,6 +785,15 @@ REI_EXT_INLINE uint64_t rei_aux_rawspill_pool(int type, uint32_t name_len) {
 /* aux = layout type tag | exact used bytes << 8. */
 REI_EXT_INLINE uint64_t rei_aux_shm_vec(int type, uint64_t total) {
   return (uint64_t) (uint32_t) type | (total << 8);
+}
+/* The decode half of the aux split (low byte the type tag, the kind's
+   field above it): the tag, and the packed field (the pool RAWSPILL
+   region name length; the SHM_VEC exact used bytes). */
+REI_EXT_INLINE int rei_aux_type(uint64_t aux) {
+  return (int) (aux & 0xff);
+}
+REI_EXT_INLINE uint64_t rei_aux_hi(uint64_t aux) {
+  return aux >> 8;
 }
 /* The flat REIH header: magic, type, element count, zero attrs, and the
    reserved band [24, 64) zeroed. Write BEFORE rei_stage_retain_zc: the

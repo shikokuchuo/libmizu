@@ -95,6 +95,8 @@ int main(void) {
   refs += sink((rei_any_fn) &rei_store_na_real);
   refs += sink((rei_any_fn) &rei_aux_rawspill_pool);
   refs += sink((rei_any_fn) &rei_aux_shm_vec);
+  refs += sink((rei_any_fn) &rei_aux_type);
+  refs += sink((rei_any_fn) &rei_aux_hi);
   refs += sink((rei_any_fn) &rei_reih_write);
   refs += sink((rei_any_fn) &rei_reih_check);
 
@@ -121,7 +123,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((rei_any_fn) &rei_shm_open_view_flags);
 
-  assert(refs == 66);
+  assert(refs == 68);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +
@@ -180,6 +182,8 @@ int main(void) {
          ((uint64_t) 32 | ((uint64_t) 27 << 8)));
   assert(rei_aux_shm_vec(REI_TYPE_REAL, 1u << 20) ==
          ((uint64_t) 14 | ((uint64_t) (1u << 20) << 8)));
+  assert(rei_aux_type(rei_aux_shm_vec(REI_TYPE_REAL, 1u << 20)) == 14);
+  assert(rei_aux_hi(rei_aux_rawspill_pool(REI_TYPE_INT64, 27)) == 27);
   unsigned char reih[REI_HEADER_SIZE + 24];
   memset(reih, 0xAA, sizeof reih);
   rei_reih_write(reih, REI_TYPE_REAL, 3);

@@ -1,5 +1,7 @@
+rei_aux_hi
 rei_aux_rawspill_pool
 rei_aux_shm_vec
+rei_aux_type
 rei_binding_bytes
 rei_binding_init
 rei_bytes_free

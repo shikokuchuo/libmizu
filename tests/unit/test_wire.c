@@ -37,12 +37,12 @@ int main(void) {
   assert(isnan(na_real));
 
   /* aux pack/unpack identities (rei.h's kind table). */
-  assert((rei_aux_rawspill_pool(REI_TYPE_INT64, 27) & 0xff) == 32);
-  assert(rei_aux_rawspill_pool(REI_TYPE_INT64, 27) >> 8 == 27);
+  assert(rei_aux_type(rei_aux_rawspill_pool(REI_TYPE_INT64, 27)) == 32);
+  assert(rei_aux_hi(rei_aux_rawspill_pool(REI_TYPE_INT64, 27)) == 27);
   assert(rei_aux_rawspill_pool(REI_TYPE_REAL, 255) ==
          ((uint64_t) REI_TYPE_REAL | ((uint64_t) 255 << 8)));
-  assert((rei_aux_shm_vec(REI_TYPE_STR, 65536 + 64) & 0xff) == 16);
-  assert(rei_aux_shm_vec(REI_TYPE_STR, 65536 + 64) >> 8 == 65600);
+  assert(rei_aux_type(rei_aux_shm_vec(REI_TYPE_STR, 65536 + 64)) == 16);
+  assert(rei_aux_hi(rei_aux_shm_vec(REI_TYPE_STR, 65536 + 64)) == 65600);
 
   /* REIH round trip. */
   unsigned char reih[256];

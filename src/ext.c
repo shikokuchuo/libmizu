@@ -59,6 +59,14 @@ uint64_t rei_aux_shm_vec(int type, uint64_t total) {
   return (uint64_t) (uint32_t) type | (total << 8);
 }
 
+int rei_aux_type(uint64_t aux) {
+  return (int) (aux & 0xff);
+}
+
+uint64_t rei_aux_hi(uint64_t aux) {
+  return aux >> 8;
+}
+
 void rei_reih_write(void *base, int wire_type, int64_t n_elems) {
   const uint32_t magic = REI_MAGIC_VEC;
   const int32_t t32 = wire_type;

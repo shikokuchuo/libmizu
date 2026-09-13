@@ -40,8 +40,8 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   the slot while the verb returns `REI_ERR`.
 - `REI_NA_INT32` / `REI_NA_INT64` / `REI_NA_REAL_BITS` sentinels.
 - Wire helpers in `rei_ext.h`: `rei_timeout_ms`, `rei_store_na_real`,
-  `rei_aux_rawspill_pool`, `rei_aux_shm_vec`, `rei_reih_write`,
-  `rei_reih_check`.
+  `rei_aux_rawspill_pool`, `rei_aux_shm_vec` with the `rei_aux_type` /
+  `rei_aux_hi` decode pair, `rei_reih_write`, `rei_reih_check`.
 - `rei_stage_raw` in `rei_ext.h` (dual-form; slow path `rei_stage_raw_spill`
   in `stage_raw.c`): the core-owned raw-tier staging reservation — the
   RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both
