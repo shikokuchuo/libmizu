@@ -99,6 +99,8 @@ rei_shm_reap
 rei_shm_size
 rei_stage_arena_alloc
 rei_stage_pin
+rei_stage_raw
+rei_stage_raw_spill
 rei_stage_reap
 rei_stage_retain
 rei_stage_retain_zc

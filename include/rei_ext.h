@@ -293,6 +293,44 @@ REI_API void rei_stage_retain_zc(rei_handle *, rei_shm *region);
 REI_API void rei_stage_pin(rei_handle *, void *pin);
 REI_API void rei_stage_reap(rei_handle *);
 
+/* Raw-tier reservation (stage_raw.c), valid only during stage_fn: choose
+   the tier for n bare bytes of wire_type and return the destination with
+   hdr stamped — the caller memcpys n bytes into it. NULL hands the object
+   to the binding's serialized tiers (a reservation failure degrades, never
+   errors). Policy:
+   n <= inline_max → RAWVEC inline (aux = wire_type).
+   channel: arena RAWSPILL (aux = wire_type, payload = chunk offset) when
+     n <= REI_ZC_FLOOR_RAW or under churn; else flat SHM_VEC (REIH header +
+     retain_zc, aux = wire_type | exact used bytes << 8, payload = region
+     name) when n >= max(inline_max, REI_ZC_FLOOR) and no churn, reaping
+     before the checkout; an arena retry on region failure; else NULL.
+   pool: flat SHM_VEC on the same zc gate; else a RAWSPILL region (aux =
+     wire_type | name_len << 8, payload = name; n <= UINT32_MAX); else NULL.
+   Bare bytes carry no identifier, so nothing is pinned. Eligibility probes
+   (which objects are raw), STR1/NIL/REF, and the string/list-tree SHM_VEC
+   layouts stay binding-side. Dual form (see the banner): the inline stamps
+   the RAWVEC fast path and falls through to the exported slow path. */
+REI_API void *rei_stage_raw_spill(rei_handle *, uint64_t n, int wire_type,
+                                  rei_slot_hdr *, uint8_t *payload,
+                                  uint32_t inline_max);
+#ifdef REI_EXT_NO_INLINES
+REI_API void *rei_stage_raw(rei_handle *, uint64_t n, int wire_type,
+                            rei_slot_hdr *, uint8_t *payload,
+                            uint32_t inline_max);
+#else
+REI_EXT_INLINE void *rei_stage_raw(rei_handle *h, uint64_t n, int wire_type,
+                                   rei_slot_hdr *hdr, uint8_t *payload,
+                                   uint32_t inline_max) {
+  if (n <= (uint64_t) inline_max) {
+    hdr->kind = REI_KIND_RAWVEC;
+    hdr->len = (uint32_t) n;
+    hdr->aux = (uint64_t) (uint32_t) wire_type;
+    return payload;
+  }
+  return rei_stage_raw_spill(h, n, wire_type, hdr, payload, inline_max);
+}
+#endif
+
 /* Read-side service, invoked through the read_ctx handed to read_fn: a
    borrowed consumer mapping for a SHM_RAW-class payload name, from the
    handle's open cache (open/fstat/mmap on a miss, LRU-evicted). The

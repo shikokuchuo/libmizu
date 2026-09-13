@@ -117,6 +117,15 @@ Four of them carry the correctness guarantees:
 - `check` runs at abandon-safe points only, once per spin or park iteration.
   A nonzero return unwinds the verb as `REI_ERR` with `REI_ERRCAT_INTERRUPTED` and consumes nothing.
 
+### Staging policy
+
+`rei_stage_raw` (dual-form in `rei_ext.h`; the slow path is `stage_raw.c`) is the core-owned raw-tier reservation: the RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both first-party bindings stage by the same rules.
+It composes the stager services and is valid only during `stage_fn`.
+The churn signal is read at most once per stage, gated behind the zero-copy size gate.
+A NULL return hands the object to the binding's serialized tiers: a reservation failure degrades, never errors.
+Bare bytes carry no identifier, so the raw tiers pin nothing; the flat SHM_VEC reserve writes the REIH header before `rei_stage_retain_zc` stores the producer loan.
+Object eligibility (which values are raw) stays binding-side, as do the string and list-tree layouts.
+
 ## Retain table
 
 Payload lifetime is explicit, not GC-inherited.

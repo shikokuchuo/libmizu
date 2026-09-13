@@ -99,10 +99,15 @@ int main(void) {
   refs += sink((rei_any_fn) &rei_reih_write);
   refs += sink((rei_any_fn) &rei_reih_check);
 
+  /* The raw-tier staging reservation (the header inline by default, the
+     exported form under EXT_PROBE_EXPORTS; the slow path is extern-only). */
+  refs += sink((rei_any_fn) &rei_stage_raw);
+  refs += sink((rei_any_fn) &rei_stage_raw_spill);
+
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((rei_any_fn) &rei_shm_open_view_flags);
 
-  assert(refs == 52);
+  assert(refs == 54);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +

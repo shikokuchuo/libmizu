@@ -34,6 +34,18 @@ double rei_timeout_ms(double seconds) {
   return seconds <= 0 ? 0 : seconds * 1000;
 }
 
+void *rei_stage_raw(rei_handle *h, uint64_t n, int wire_type,
+                    rei_slot_hdr *hdr, uint8_t *payload,
+                    uint32_t inline_max) {
+  if (n <= (uint64_t) inline_max) {
+    hdr->kind = REI_KIND_RAWVEC;
+    hdr->len = (uint32_t) n;
+    hdr->aux = (uint64_t) (uint32_t) wire_type;
+    return payload;
+  }
+  return rei_stage_raw_spill(h, n, wire_type, hdr, payload, inline_max);
+}
+
 void rei_store_na_real(void *dst) {
   const uint64_t bits = REI_NA_REAL_BITS;
   memcpy(dst, &bits, 8);
