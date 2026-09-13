@@ -26,7 +26,6 @@ rei_death_listener_teardown
 rei_death_watch_start
 rei_death_watch_stop
 rei_err_describe
-rei_handle_binding_ctx
 rei_handle_churn
 rei_handle_kind
 rei_handle_spill_info

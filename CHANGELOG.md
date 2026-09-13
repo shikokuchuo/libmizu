@@ -35,8 +35,6 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 - Three-file amalgamation distribution (`rei.c` + `rei.h` + `rei_ext.h`).
 - pkg-config support via `make install`.
 - `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`; the keeperless gate recognizes it.
-- `rei_handle_binding_ctx` handle query in `rei_ext.h`: the registered
-  binding ctx, for the stage hook (which receives the handle, not the ctx).
 - `rei_shm_open_view_flags` with `REI_OPEN_VIEW_NOCOUNT`.
 - `REI_READ_CONSUME` read flag: a failed read with the flag set consumes
   the slot while the verb returns `REI_ERR`.

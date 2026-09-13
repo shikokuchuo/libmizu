@@ -118,17 +118,12 @@ enum { REI_HTYPE_CHANNEL = 1, REI_HTYPE_POOL = 2 };
    outstanding; cleared when a ledger sweep or force-reclaim returns one)
    — while set, a stager falls back to the copy tiers. The churn read is
    an extern call: gate it behind the payload's size check so it runs
-   only for payloads already proven large. binding_ctx returns the
-   binding.ctx pointer registered at create/attach/join (the seam
-   callbacks receive it directly — this is for contexts with no callback
-   in flight). spill_info fills the producer free-list entry count and
-   the lent-region ledger count (debug/dump surface; the per-kind public
-   snapshots are rei_channel_info_get / rei_pool_dump_get). */
+   only for payloads already proven large. spill_info fills the producer
+   free-list entry count and the lent-region ledger count (debug/dump
+   surface; the per-kind public snapshots are rei_channel_info_get /
+   rei_pool_dump_get). */
 REI_API int rei_handle_kind(const rei_handle *);
 REI_API int rei_handle_churn(const rei_handle *);
-/* Superseded on the stage path (stage_fn receives the ctx directly since
-   0.3.0); retained for contexts with no seam callback in flight. */
-REI_API void *rei_handle_binding_ctx(const rei_handle *);
 REI_API void rei_handle_spill_info(const rei_handle *,
                                    uint32_t *fl_entries,
                                    uint32_t *ledger_entries);

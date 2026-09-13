@@ -53,7 +53,6 @@ int main(void) {
   /* Handle queries. */
   refs += sink((rei_any_fn) &rei_handle_kind);
   refs += sink((rei_any_fn) &rei_handle_churn);
-  refs += sink((rei_any_fn) &rei_handle_binding_ctx);
   refs += sink((rei_any_fn) &rei_handle_spill_info);
 
   /* Parker, death watch, liveness, preamble. */
@@ -122,7 +121,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((rei_any_fn) &rei_shm_open_view_flags);
 
-  assert(refs == 67);
+  assert(refs == 66);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +
