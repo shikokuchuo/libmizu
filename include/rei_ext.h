@@ -544,6 +544,165 @@ REI_API rei_status rei_pool_submit_flags(rei_pool *, void *task_obj,
                                          uint16_t flags, rei_task *out,
                                          double timeout_ms);
 
+// Map morsel protocol (morsel.c) -------------------------------------------------
+
+/* A binding's parallel map rides one fresh region per map call: a 128-byte
+   header, the language-specific descriptor stream, an optional bare-bytes x
+   section, the morsel state, and an optional template output area. Map
+   regions are private to a binding install (workers spawn from the same
+   package), so the layout is unified here and each binding keeps only its
+   magic tag. The protocol:
+   - one CLAIM word per runner *ordinal*, packing (generation << 2) | state,
+     so the lane claim and the generation fence are one atomic (a
+     check-then-CAS would leave a TOCTOU window against reset's re-arm).
+   - the shared cursor is a relaxed ticket dispenser; ordering rides the
+     task claim/publish chain. An overshoot of up to k morsels is harmless —
+     a runner stops at its first exhausted issue.
+   - completion is never recorded: runners publish their batch histories
+     through ordinary results, and the lost set on worker death is
+     arithmetic over them (rei_morsel_lost).
+   The descriptor codec, the x-section element I/O, the batch loop, and the
+   result gather stay binding-side. */
+
+#define REI_MORSEL_CANCEL_OFF ((uint64_t) 0)
+#define REI_MORSEL_GEN_OFF    ((uint64_t) 4)
+#define REI_MORSEL_CURSOR_OFF ((uint64_t) 64)
+#define REI_MORSEL_CLAIM_OFF  ((uint64_t) 128)
+/* Generation comparisons mask to the CLAIM word's 30 bits (wrap takes 2^30
+   resets of one region: harmless). */
+#define REI_MORSEL_GEN_MASK   ((uint32_t) 0x3FFFFFFF)
+
+enum { REI_MORSEL_IDLE = 0, REI_MORSEL_RUNNING, REI_MORSEL_ABANDONED };
+enum { REI_MORSEL_X_DESC = 0, REI_MORSEL_X_RAW };
+
+/* Batch sizing policy (rei_morsel_next): k targets a batch duration,
+   growing at most 2x per step and shrinking immediately on overshoot,
+   clamped to the cap — which bounds lost-set coarseness and the ramp worst
+   case. Frozen by rei's 2026-08-04 gate sweep (M4 Pro, W = 4). */
+#define REI_MORSEL_T_TARGET  200e-6
+#define REI_MORSEL_BATCH_CAP 64
+
+/* The 128-byte region header. Not pool wire format — it rides its own
+   region, keyed by the same ABI version — but the same rules apply: the
+   struct is the layout, 64-byte-aligned sections follow it. */
+typedef struct rei_morsel_hdr_s {
+  uint32_t magic;          /* the binding's tag */
+  uint32_t version;        /* REI_ABI_VERSION */
+  uint32_t flags;          /* reserved, 0 */
+  uint32_t x_kind;         /* REI_MORSEL_X_* */
+  uint32_t x_type;         /* raw x section wire type (REI_TYPE_*) */
+  uint32_t out_type;       /* template element wire type; 0 = no output */
+  uint32_t out_elt;        /* template element size, bytes */
+  uint32_t claim_n;        /* CLAIM word count (runner ordinal bound) */
+  uint64_t n;              /* map elements */
+  uint64_t desc_off, desc_len;
+  uint64_t x_off, x_len;
+  uint64_t out_off;
+  uint64_t out_m;          /* template length: values per element */
+  uint64_t morsel_size;    /* elements per morsel */
+  uint64_t n_morsels;      /* ceiling(n / morsel_size) */
+  uint64_t state_off;      /* morsel state section offset */
+  uint8_t  pad[16];
+} rei_morsel_hdr;
+REI_STATIC_ASSERT(sizeof(rei_morsel_hdr) == 128,
+                  "rei_morsel_hdr is the wire format");
+
+/* Fill *h with the section layout for a map of n elements (morsel_size the
+   geometry input, desc_len the descriptor stream size, x_type/x_len the
+   optional raw x section — x_len must be exactly n elements — out_type/out_m
+   the optional template output area, claim_n the CLAIM word count). Sections
+   land 64-aligned in order: descriptor, x, morsel state, output. Returns the
+   region size, 0 on invalid geometry or overflow (the binding raises its own
+   error). The caller memcpys the header into the fresh region. */
+REI_API uint64_t rei_morsel_layout(rei_morsel_hdr *h, uint32_t magic,
+                                   uint64_t n, uint64_t morsel_size,
+                                   uint64_t desc_len, uint32_t x_type,
+                                   uint64_t x_len, uint32_t out_type,
+                                   uint64_t out_m, uint32_t claim_n);
+/* Validate a region's header against the mapping size and the binding's
+   magic, including section placement. Returns NULL and fills *out (when
+   non-NULL) on success, else a static message. Runs once per mapping. */
+REI_API const char *rei_morsel_hdr_check(const void *base, size_t size,
+                                         uint32_t magic,
+                                         rei_morsel_hdr *out);
+
+/* Batch-sizing state: process-private, never wire state, reset at each
+   run's first-call CLAIM CAS. The binding embeds one per map context; a
+   doorbell help that claims a queued runner of the same map aliases it (the
+   cost is a mis-sized batch or a re-ramp on resume — harmless). */
+typedef struct rei_morsel_sizer_s {
+  int32_t  run_r;          /* ordinal whose ramp this is (-1 = none) */
+  uint32_t run_gen;
+  uint64_t k;              /* current batch size, morsels */
+  uint64_t k_last;         /* morsels issued last transition */
+  double   t_last;         /* rei_now() at the last issue */
+  double   cost;           /* est. seconds per morsel (0 = unknown) */
+  int      skip;           /* last interval contained a help: no update */
+} rei_morsel_sizer;
+REI_API void rei_morsel_sizer_init(rei_morsel_sizer *);
+
+/* One whole batch transition — generation-fenced lane claim, cancel and
+   pool-signal checks, sized cursor issue — over the mapped region. Returns
+   1 and fills m (the 0-based first morsel), k (morsel count after the final
+   partial grant) and help (the doorbell flag); 0 means stop: the lane was
+   lost to the trim or a reset re-armed it, the cancel word fired, the pool
+   is stopping, the owner died, or the cursor is exhausted. sig (may be
+   NULL) is the worker-local pool-signal trio; pin_k != 0 fixes k (a test
+   entry, bypassing the sizing policy); now is the caller's rei_now() read.
+   Atomics only, no park: safe to call under a global lock. */
+REI_API int rei_morsel_next(void *base, const rei_morsel_hdr *h,
+                            rei_morsel_sizer *sz, uint32_t r, uint32_t gen,
+                            const rei_pool_sig *sig, uint64_t pin_k,
+                            double now, uint64_t *m_out, uint64_t *k_out,
+                            int *help_out);
+
+/* Prepared-run re-arm, O(1) in n (no per-morsel state exists to clear):
+   bump the generation, stamp (new_gen << 2) | IDLE over the CLAIM array,
+   zero the cursor, clear the cancel word. The stamped generation is the
+   fence against a stale trimmed runner from the prior run: its first-call
+   CAS expects the old generation and fails against the re-armed word
+   however the reset interleaves. Returns the new generation — the value the
+   next run's runner payloads must carry. */
+REI_API uint32_t rei_morsel_reset(void *base, const rei_morsel_hdr *h);
+
+/* The exhausted-runner trim's CAS, folding its own trigger: a no-op unless
+   the cursor is exhausted or the cancel word is set. Returns the
+   morsel-state verdict: REI_MORSEL_ABANDONED (won, or already trimmed),
+   REI_MORSEL_RUNNING (executing or published — collect it),
+   REI_MORSEL_IDLE (trigger unarmed: defer rather than park). */
+REI_API int rei_morsel_abandon(void *base, const rei_morsel_hdr *h,
+                               uint32_t r, uint32_t gen);
+
+/* The cancel word: set by the submitter on timeout / interrupt / death, and
+   by an erroring runner itself before its ERR publish — the fail-fast
+   store that stops every peer within ~a batch. Idempotent. */
+REI_API void rei_morsel_cancel_set(void *base, const rei_morsel_hdr *h);
+REI_API int rei_morsel_cancel_get(const void *base, const rei_morsel_hdr *h);
+/* Single reads of the mutable words: the generation (masked), the cursor
+   clamped to n_morsels, and one CLAIM word (the protocol tests' view). */
+REI_API uint32_t rei_morsel_generation(const void *base,
+                                       const rei_morsel_hdr *h);
+REI_API uint64_t rei_morsel_cursor(const void *base,
+                                   const rei_morsel_hdr *h);
+REI_API uint32_t rei_morsel_claim(const void *base, const rei_morsel_hdr *h,
+                                  uint32_t r);
+
+/* A batch's element range, 0-based half-open: [m * morsel_size, min((m + k)
+   * morsel_size, n)). Bindings with 1-based inclusive ranges add 1 to lo. */
+REI_API void rei_morsel_span_of(const rei_morsel_hdr *h, uint64_t m,
+                                uint64_t k, uint64_t *lo, uint64_t *hi);
+
+/* Worker-death lost set: issued = [0, bound), lost = issued minus the union
+   of the collected batch histories — a batch in no history was issued but
+   never completed (its claimant died, or the map fn errored mid-batch); a
+   dead runner's whole history lands here too — it publishes only at
+   exhaustion. spans (caller-assembled from the histories, element space,
+   lo <= hi) is sorted in place; the gaps (at most n + 1) land in out as
+   0-based half-open ranges; returns the gap count. */
+typedef struct rei_morsel_span_s { uint64_t lo, hi; } rei_morsel_span;
+REI_API size_t rei_morsel_lost(rei_morsel_span *spans, size_t n,
+                               uint64_t bound, rei_morsel_span *out);
+
 // The result sink and the unwind path (pool.c) ----------------------------------
 
 /* The result-sink struct: the core fills it from a claimed entry and

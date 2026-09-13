@@ -51,6 +51,11 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   against rei's former cascade: a channel SHM_VEC region-creation failure
   retries the arena before the reservation declines to the serialized
   tiers.
+- The map morsel protocol in `rei_ext.h` (`morsel.c`, `rei_morsel_*`): the
+  128-byte map header (one unified layout; bindings keep their magic tags),
+  the generation-fenced CLAIM word protocol, AIMD batch sizing
+  (`rei_morsel_sizer`), reset/re-arm, the abandon trim, the cancel word, and
+  the lost-set scan — extracted from rei's and pyrei's map modules.
 
 ### Changed
 

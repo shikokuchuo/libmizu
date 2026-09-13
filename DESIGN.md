@@ -126,6 +126,20 @@ A NULL return hands the object to the binding's serialized tiers: a reservation 
 Bare bytes carry no identifier, so the raw tiers pin nothing; the flat SHM_VEC reserve writes the REIH header before `rei_stage_retain_zc` stores the producer loan.
 Object eligibility (which values are raw) stays binding-side, as do the string and list-tree layouts.
 
+### Map morsel protocol
+
+A binding's parallel map rides one fresh region per map call: a 128-byte header, the descriptor stream, an optional bare-bytes x section, the morsel state, and an optional template output area.
+The protocol is core-owned (`morsel.c`, `rei_morsel_*` in `rei_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
+Map regions are private to a binding install, so the two first-party bindings share one layout and keep only their magic tags.
+
+- One CLAIM word per runner ordinal packs `(generation << 2) | state`, so the lane claim and the generation fence are one atomic.
+  A check-then-CAS would leave a TOCTOU window against reset's re-arm.
+- The shared cursor is a relaxed ticket dispenser; ordering rides the task claim/publish chain.
+  An overshoot of up to k morsels is harmless — a runner stops at its first exhausted issue.
+- Batch sizing is AIMD: k targets a fixed batch duration, grows at most 2x per step, shrinks immediately on overshoot, and clamps to a cap that bounds lost-set coarseness.
+- Completion is never recorded in the region.
+  Runners publish their batch histories through ordinary results, and the lost set on worker death is arithmetic over them.
+
 ## Retain table
 
 Payload lifetime is explicit, not GC-inherited.

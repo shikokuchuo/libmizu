@@ -104,15 +104,31 @@ int main(void) {
   refs += sink((rei_any_fn) &rei_stage_raw);
   refs += sink((rei_any_fn) &rei_stage_raw_spill);
 
+  /* The map morsel protocol. */
+  refs += sink((rei_any_fn) &rei_morsel_layout);
+  refs += sink((rei_any_fn) &rei_morsel_hdr_check);
+  refs += sink((rei_any_fn) &rei_morsel_sizer_init);
+  refs += sink((rei_any_fn) &rei_morsel_next);
+  refs += sink((rei_any_fn) &rei_morsel_reset);
+  refs += sink((rei_any_fn) &rei_morsel_abandon);
+  refs += sink((rei_any_fn) &rei_morsel_cancel_set);
+  refs += sink((rei_any_fn) &rei_morsel_cancel_get);
+  refs += sink((rei_any_fn) &rei_morsel_generation);
+  refs += sink((rei_any_fn) &rei_morsel_cursor);
+  refs += sink((rei_any_fn) &rei_morsel_claim);
+  refs += sink((rei_any_fn) &rei_morsel_span_of);
+  refs += sink((rei_any_fn) &rei_morsel_lost);
+
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((rei_any_fn) &rei_shm_open_view_flags);
 
-  assert(refs == 54);
+  assert(refs == 67);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(rei_binding) + sizeof(rei_read_ctx) +
     sizeof(rei_result_sink) + sizeof(rei_shm) + sizeof(rei_parker) +
-    sizeof(rei_pool_sig) + sizeof(rei_bytes);
+    sizeof(rei_pool_sig) + sizeof(rei_bytes) + sizeof(rei_morsel_hdr) +
+    sizeof(rei_morsel_sizer) + sizeof(rei_morsel_span);
   assert(sizes > 0);
 
   /* Macro surface. */
