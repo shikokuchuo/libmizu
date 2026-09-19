@@ -14,10 +14,10 @@
 
 /* splitmix64 finalizer seeding the region-name counter. From a fixed
    origin, a process reusing a dead creator's PID would regenerate its
-   names and collide with its orphans (REI_ERRCAT_EXISTS). Spread
+   names and collide with its orphans (MIZU_ERRCAT_EXISTS). Spread
    suffices — not cryptographic. Fork needs no guard: names embed the
    live PID. */
-static unsigned int rei_counter_seed(uint64_t x) {
+static unsigned int mizu_counter_seed(uint64_t x) {
   x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
   x ^= x >> 27; x *= 0x94d049bb133111ebULL;
   x ^= x >> 31;
@@ -31,29 +31,29 @@ static unsigned int rei_counter_seed(uint64_t x) {
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define REI_HINT_NOSPACE \
+#define MIZU_HINT_NOSPACE \
   "Free disk space backing the system paging file."
 
-static int rei_err_classify(long code) {
+static int mizu_err_classify(long code) {
   switch ((DWORD) code) {
   case ERROR_DISK_FULL:
-    return REI_ERRCAT_NOSPACE;
+    return MIZU_ERRCAT_NOSPACE;
   case ERROR_NOT_ENOUGH_MEMORY:
   case ERROR_OUTOFMEMORY:
   case ERROR_COMMITMENT_LIMIT:
   case ERROR_NO_SYSTEM_RESOURCES:
-    return REI_ERRCAT_NOMEMORY;
+    return MIZU_ERRCAT_NOMEMORY;
   default:
-    return REI_ERRCAT_OTHER;
+    return MIZU_ERRCAT_OTHER;
   }
 }
 
-static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
+static size_t mizu_region_name(char *name, size_t size, unsigned int pid) {
   static _Atomic unsigned int counter;   /* 0 = unseeded; seeded once */
   if (atomic_load_explicit(&counter, memory_order_relaxed) == 0) {
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
-    unsigned int seed = rei_counter_seed((uint64_t) t.QuadPart ^
+    unsigned int seed = mizu_counter_seed((uint64_t) t.QuadPart ^
                                           ((uint64_t) pid << 40) ^
                                           (uint64_t) (uintptr_t) &counter);
     if (seed == 0) seed = 1;             /* 0 is the unseeded sentinel */
@@ -65,12 +65,12 @@ static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
   }
   unsigned int c = atomic_fetch_add_explicit(&counter, 1,
                                              memory_order_relaxed);
-  int n = snprintf(name, size, REI_PREFIX_LITERAL "%lx_%x",
+  int n = snprintf(name, size, MIZU_PREFIX_LITERAL "%lx_%x",
                    (unsigned long) pid, c);
   return (n > 0 && (size_t) n < size) ? (size_t) n : 0;
 }
 
-int rei_shm_create_stack(rei_shm *shm, size_t size) {
+int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
 
   shm->addr = NULL;
   shm->size = 0;
@@ -80,30 +80,30 @@ int rei_shm_create_stack(rei_shm *shm, size_t size) {
   DWORD hi = (DWORD) ((uint64_t) size >> 32);
   DWORD lo = (DWORD) (size & 0xFFFFFFFF);
 
-  shm->name_len = (uint8_t) rei_region_name(shm->name, sizeof(shm->name), shm->pid);
+  shm->name_len = (uint8_t) mizu_region_name(shm->name, sizeof(shm->name), shm->pid);
   HANDLE h = CreateFileMappingA(
     INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, hi, lo, shm->name
   );
-  if (h == NULL) return rei_err_classify((long) GetLastError());
+  if (h == NULL) return mizu_err_classify((long) GetLastError());
   if (GetLastError() == ERROR_ALREADY_EXISTS) {  /* name already taken */
     CloseHandle(h);                              /* opened a pre-existing region */
-    return REI_ERRCAT_EXISTS;
+    return MIZU_ERRCAT_EXISTS;
   }
 
   void *addr = MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, size);
   if (addr == NULL) {
     long code = (long) GetLastError();       /* CloseHandle would clobber it */
     CloseHandle(h);
-    return rei_err_classify(code);
+    return mizu_err_classify(code);
   }
 
   shm->addr = addr;
   shm->size = size;
   shm->handle = h;
-  return REI_ERRCAT_NONE;
+  return MIZU_ERRCAT_NONE;
 }
 
-int rei_shm_open_stack(rei_shm *shm, const char *name) {
+int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
 
   shm->addr = NULL;
   shm->size = 0;
@@ -133,7 +133,7 @@ int rei_shm_open_stack(rei_shm *shm, const char *name) {
   return 0;
 }
 
-void rei_shm_close_stack(rei_shm *shm, int unlink) {
+void mizu_shm_close_stack(mizu_shm *shm, int unlink) {
   (void) unlink;
   if (shm->addr != NULL) UnmapViewOfFile(shm->addr);
   if (shm->handle != NULL) CloseHandle(shm->handle);
@@ -143,7 +143,7 @@ void rei_shm_close_stack(rei_shm *shm, int unlink) {
 
 /* A Win32 file mapping lives only while a handle to it is open, so it cannot
    outlive its creator: there are no persistent names and no orphans to reap. */
-char **rei_shm_reap(int *n) {
+char **mizu_shm_reap(int *n) {
   *n = 0;
   return NULL;
 }
@@ -166,18 +166,18 @@ char **rei_shm_reap(int *n) {
 #define PATH_MAX 1024
 #endif
 
-#define REI_HINT_NOSPACE \
+#define MIZU_HINT_NOSPACE \
   "Shared memory is provisioned at the OS or container level; in containers, " \
   "raise it at start (e.g. `docker run --shm-size=2g ...`)."
 
-static int rei_err_classify(long code) {
+static int mizu_err_classify(long code) {
   switch ((int) code) {
   case ENOSPC:
-    return REI_ERRCAT_NOSPACE;
+    return MIZU_ERRCAT_NOSPACE;
   case ENOMEM:
-    return REI_ERRCAT_NOMEMORY;
+    return MIZU_ERRCAT_NOMEMORY;
   default:
-    return REI_ERRCAT_OTHER;
+    return MIZU_ERRCAT_OTHER;
   }
 }
 
@@ -186,13 +186,13 @@ static int rei_err_classify(long code) {
 
 #ifdef __linux__
 
-static int rei_shm_os_open(const char *name, int flags, mode_t mode) {
+static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
   return open(path, flags, mode);
 }
 
-static int rei_shm_os_unlink(const char *name) {
+static int mizu_shm_os_unlink(const char *name) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
   return unlink(path);
@@ -200,14 +200,14 @@ static int rei_shm_os_unlink(const char *name) {
 
 #else /* macOS / other POSIX */
 
-static int rei_shm_os_open(const char *name, int flags, mode_t mode) {
+static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   return shm_open(name, flags, mode);
 }
 
 #ifdef __APPLE__
 
-/* macOS has no enumerable SHM namespace (no /dev/shm), so rei keeps its
-   own registry for reaping: one append-only log per process, "rei_<pid>"
+/* macOS has no enumerable SHM namespace (no /dev/shm), so mizu keeps its
+   own registry for reaping: one append-only log per process, "mizu_<pid>"
    under a per-user dir, holding the counter of every region the process
    creates as a 4-byte record (the pid comes from the filename). The
    reaper reads a dead PID's log, unlinks each reconstructed name, then
@@ -218,11 +218,11 @@ static int rei_shm_os_open(const char *name, int flags, mode_t mode) {
    lifetime creates. All log ops are best-effort — failure forfeits only
    reapability. */
 
-/* Per-user registry dir "<temp>/rei", resolved fresh each call (read-
+/* Per-user registry dir "<temp>/mizu", resolved fresh each call (read-
    through: tests point TMPDIR at a scratch dir). Builds the path but
-   never creates it (rei_log_append's job), so resolving for a reap
+   never creates it (mizu_log_append's job), so resolving for a reap
    leaves no empty dir behind. $TMPDIR first; -1 if unresolvable. */
-static int rei_log_dir(char *out, size_t size) {
+static int mizu_log_dir(char *out, size_t size) {
   char base[PATH_MAX];
   const char *tmp = getenv("TMPDIR");
   if (tmp != NULL && tmp[0] != '\0') {
@@ -237,9 +237,9 @@ static int rei_log_dir(char *out, size_t size) {
   }
 
   size_t bl = strlen(base);
-  while (bl > 1 && base[bl - 1] == '/') base[--bl] = '\0';   /* avoid "//rei" */
+  while (bl > 1 && base[bl - 1] == '/') base[--bl] = '\0';   /* avoid "//mizu" */
 
-  int n = snprintf(out, size, "%s/rei", base);
+  int n = snprintf(out, size, "%s/mizu", base);
   return (n > 0 && (size_t) n < size) ? 0 : -1;
 }
 
@@ -248,32 +248,32 @@ static int rei_log_dir(char *out, size_t size) {
    can never write to a reused fd. A forked child sees the pid mismatch
    and opens its own log, leaking the inherited fd (closing it could
    race a sibling thread's write). The release/acquire pairing on
-   rei_log_pid orders the fd reset before the pid change becomes
+   mizu_log_pid orders the fd reset before the pid change becomes
    visible. */
-static _Atomic int   rei_log_fd  = -1;
-static _Atomic pid_t rei_log_pid = 0;        /* pid that opened rei_log_fd */
+static _Atomic int   mizu_log_fd  = -1;
+static _Atomic pid_t mizu_log_pid = 0;        /* pid that opened mizu_log_fd */
 
 /* Truncate the log at a zero crossing only once it holds this many
    records: below the floor the file is at most 1 KB and the ftruncate
    costs more than the hygiene is worth (a create+destroy loop would
    otherwise pay it every cycle). */
-#define REI_LOG_TRUNC_MIN 256
+#define MIZU_LOG_TRUNC_MIN 256
 
 /* Created-minus-torn-down region count, driving the zero-crossing
    truncate, and the records written since the last truncate. Neither is
    reset after a fork: the inherited values are a conservative floor
    (teardowns of the parent's regions are pid-guarded out), so a child
    can only ever truncate its own log. */
-static _Atomic long rei_log_live  = 0;
-static _Atomic long rei_log_dirty = 0;
+static _Atomic long mizu_log_live  = 0;
+static _Atomic long mizu_log_dirty = 0;
 
 /* Record a created region: its name's counter as one 4-byte record
    (native endianness — the log is read on the same host), opening the
    log on first use. The count increments unconditionally, staying
-   balanced against rei_log_release even when logging itself fails. */
-static void rei_log_append(const char *name) {
-  atomic_fetch_add_explicit(&rei_log_live, 1, memory_order_relaxed);
-  atomic_fetch_add_explicit(&rei_log_dirty, 1, memory_order_relaxed);
+   balanced against mizu_log_release even when logging itself fails. */
+static void mizu_log_append(const char *name) {
+  atomic_fetch_add_explicit(&mizu_log_live, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&mizu_log_dirty, 1, memory_order_relaxed);
 
   const char *us = strrchr(name, '_');
   if (us == NULL) return;
@@ -281,17 +281,17 @@ static void rei_log_append(const char *name) {
 
   pid_t pid = getpid();
   int fd = -1;
-  if (atomic_load_explicit(&rei_log_pid, memory_order_acquire) == pid)
-    fd = atomic_load_explicit(&rei_log_fd, memory_order_relaxed);
+  if (atomic_load_explicit(&mizu_log_pid, memory_order_acquire) == pid)
+    fd = atomic_load_explicit(&mizu_log_fd, memory_order_relaxed);
   else {                                     /* first append, or post-fork */
-    atomic_store_explicit(&rei_log_fd, -1, memory_order_relaxed);
-    atomic_store_explicit(&rei_log_pid, pid, memory_order_release);
+    atomic_store_explicit(&mizu_log_fd, -1, memory_order_relaxed);
+    atomic_store_explicit(&mizu_log_pid, pid, memory_order_release);
   }
   if (fd < 0) {
     char dir[PATH_MAX], path[PATH_MAX];
-    if (rei_log_dir(dir, sizeof(dir)) != 0) return;
+    if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
     int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
-                     &REI_PREFIX_LITERAL[1], (unsigned) pid);
+                     &MIZU_PREFIX_LITERAL[1], (unsigned) pid);
     if (n <= 0 || (size_t) n >= sizeof(path)) return;
     int nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
     if (nfd < 0 && errno == ENOENT) {   /* dir absent: create it and retry */
@@ -300,7 +300,7 @@ static void rei_log_append(const char *name) {
     }
     if (nfd < 0) return;
     int expect = -1;
-    if (atomic_compare_exchange_strong_explicit(&rei_log_fd, &expect, nfd,
+    if (atomic_compare_exchange_strong_explicit(&mizu_log_fd, &expect, nfd,
                                                 memory_order_relaxed,
                                                 memory_order_relaxed)) {
       fd = nfd;
@@ -318,20 +318,20 @@ static void rei_log_append(const char *name) {
    fd is never closed, and O_APPEND continues from the new end. A create
    racing the truncate can lose its record: a microseconds-wide
    best-effort forfeiture. */
-static void rei_log_release(void) {
-  if (atomic_fetch_sub_explicit(&rei_log_live, 1, memory_order_relaxed) != 1)
+static void mizu_log_release(void) {
+  if (atomic_fetch_sub_explicit(&mizu_log_live, 1, memory_order_relaxed) != 1)
     return;
-  if (atomic_load_explicit(&rei_log_pid, memory_order_relaxed) != getpid())
+  if (atomic_load_explicit(&mizu_log_pid, memory_order_relaxed) != getpid())
     return;                                  /* pre-fork state: not our log */
-  int fd = atomic_load_explicit(&rei_log_fd, memory_order_relaxed);
+  int fd = atomic_load_explicit(&mizu_log_fd, memory_order_relaxed);
   if (fd < 0) return;
-  if (atomic_load_explicit(&rei_log_dirty, memory_order_relaxed) <
-      REI_LOG_TRUNC_MIN)
+  if (atomic_load_explicit(&mizu_log_dirty, memory_order_relaxed) <
+      MIZU_LOG_TRUNC_MIN)
     return;
   ftruncate(fd, 0);
   /* Appends racing the reset leave dirty low: the next truncate is
      merely delayed — the conservative direction. */
-  atomic_store_explicit(&rei_log_dirty, 0, memory_order_relaxed);
+  atomic_store_explicit(&mizu_log_dirty, 0, memory_order_relaxed);
 }
 
 /* Exit/unload hook, registered as a library destructor: with every
@@ -343,24 +343,24 @@ static void rei_log_release(void) {
    log from removing the parent's. The fd is never closed, only
    forgotten: an append racing exit writes to the unlinked inode — the
    same microseconds-wide forfeiture as a create racing the truncate. */
-__attribute__((destructor)) void rei_log_teardown(void) {
-  if (atomic_load_explicit(&rei_log_live, memory_order_relaxed) != 0)
+__attribute__((destructor)) void mizu_log_teardown(void) {
+  if (atomic_load_explicit(&mizu_log_live, memory_order_relaxed) != 0)
     return;
-  if (atomic_load_explicit(&rei_log_pid, memory_order_relaxed) != getpid())
+  if (atomic_load_explicit(&mizu_log_pid, memory_order_relaxed) != getpid())
     return;
   char dir[PATH_MAX], path[PATH_MAX];
-  if (rei_log_dir(dir, sizeof(dir)) != 0) return;
+  if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
   int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
-                   &REI_PREFIX_LITERAL[1], (unsigned) getpid());
+                   &MIZU_PREFIX_LITERAL[1], (unsigned) getpid());
   if (n <= 0 || (size_t) n >= sizeof(path)) return;
   unlink(path);
   rmdir(dir);            /* succeeds once the last process's log is gone */
-  atomic_store_explicit(&rei_log_fd, -1, memory_order_relaxed);
+  atomic_store_explicit(&mizu_log_fd, -1, memory_order_relaxed);
 }
 
 #endif /* __APPLE__ */
 
-static int rei_shm_os_unlink(const char *name) {
+static int mizu_shm_os_unlink(const char *name) {
   return shm_unlink(name);             /* region only; the log is per-process */
 }
 
@@ -371,7 +371,7 @@ static int rei_shm_os_unlink(const char *name) {
 #include <signal.h>
 #include <dirent.h>
 
-static int rei_pid_alive(pid_t pid) {
+static int mizu_pid_alive(pid_t pid) {
   if (pid <= 0) return 1;             /* never treat as reapable */
   if (kill(pid, 0) == 0) return 1;    /* exists and signalable */
   return errno == EPERM;              /* exists but owned by another user */
@@ -381,9 +381,9 @@ static int rei_pid_alive(pid_t pid) {
    (*list,*cap,*count) result. A name already gone (lost a race with
    another reap/unlink) is skipped, not reported. -1 on OOM so the caller
    stops, else 0. */
-static int rei_reap_unlink(const char *name,
+static int mizu_reap_unlink(const char *name,
                             char ***list, size_t *cap, size_t *count) {
-  if (rei_shm_os_unlink(name) != 0) return 0;
+  if (mizu_shm_os_unlink(name) != 0) return 0;
   if (*count == *cap) {
     size_t ncap = *cap ? *cap * 2 : 8;
     char **grown = realloc(*list, ncap * sizeof(**list));
@@ -404,18 +404,18 @@ static int rei_reap_unlink(const char *name,
    counter records, each reconstructed with the pid from the log's
    filename. A tail short of a record is a crash-torn write: fread
    declines it. */
-static int rei_reap_log(const char *path, unsigned long pid,
+static int mizu_reap_log(const char *path, unsigned long pid,
                         char ***list, size_t *cap, size_t *count) {
   FILE *f = fopen(path, "rb");
   if (f == NULL) return 0;
   uint32_t rec;
   int rc = 0;
   while (fread(&rec, sizeof(rec), 1, f) == 1) {
-    char name[REI_NAME_MAX];
+    char name[MIZU_NAME_MAX];
     int n = snprintf(name, sizeof(name), "%s%lx_%x",
-                     REI_PREFIX_LITERAL, pid, (unsigned int) rec);
+                     MIZU_PREFIX_LITERAL, pid, (unsigned int) rec);
     if (n <= 0 || (size_t) n >= sizeof(name)) continue;
-    if (rei_reap_unlink(name, list, cap, count) != 0) {
+    if (mizu_reap_unlink(name, list, cap, count) != 0) {
       rc = -1;                                   /* OOM */
       break;
     }
@@ -427,14 +427,14 @@ static int rei_reap_log(const char *path, unsigned long pid,
 
 /* Reap orphans of dead creators. Linux scans /dev/shm, where each entry
    is a region name; macOS scans the registry dir, where each entry is a
-   per-process log (rei_<pid>) whose records name that process's regions.
-   Either way the PID embedded in "rei_<pid>..." drives the liveness test.
+   per-process log (mizu_<pid>) whose records name that process's regions.
+   Either way the PID embedded in "mizu_<pid>..." drives the liveness test.
    Returns the removed names as a malloc'd array of *n malloc'd strings
    (caller frees each, then the array); NULL / *n == 0 if none. */
-char **rei_shm_reap(int *n) {
+char **mizu_shm_reap(int *n) {
   *n = 0;
 
-  const char *prefix = &REI_PREFIX_LITERAL[1];  /* skip the leading '/' */
+  const char *prefix = &MIZU_PREFIX_LITERAL[1];  /* skip the leading '/' */
   const size_t prefix_len = strlen(prefix);
   char **list = NULL;
   size_t cap = 0, count = 0;
@@ -452,18 +452,18 @@ char **rei_shm_reap(int *n) {
     char *end;
     long pid = strtol(pid_str, &end, 16);
     if (end == pid_str || *end != '_') continue;    /* not <pid>_<counter> */
-    if (rei_pid_alive((pid_t) pid)) continue;       /* creator still alive */
+    if (mizu_pid_alive((pid_t) pid)) continue;       /* creator still alive */
 
-    char shm_name[REI_NAME_MAX];                    /* shm name = "/" + entry */
+    char shm_name[MIZU_NAME_MAX];                    /* shm name = "/" + entry */
     int wn = snprintf(shm_name, sizeof(shm_name), "/%s", fname);
     if (wn <= 0 || (size_t) wn >= sizeof(shm_name)) continue;
-    if (rei_reap_unlink(shm_name, &list, &cap, &count) != 0) break;
+    if (mizu_reap_unlink(shm_name, &list, &cap, &count) != 0) break;
   }
   closedir(dir);
 #else /* __APPLE__ */
   char scan[PATH_MAX];
-  if (rei_log_dir(scan, sizeof(scan)) != 0) return NULL;
-  DIR *dir = opendir(scan);                      /* rei's per-process logs */
+  if (mizu_log_dir(scan, sizeof(scan)) != 0) return NULL;
+  DIR *dir = opendir(scan);                      /* mizu's per-process logs */
   if (dir == NULL) return NULL;                  /* no logs: nothing to reap */
 
   struct dirent *ent;
@@ -474,13 +474,13 @@ char **rei_shm_reap(int *n) {
     const char *pid_str = fname + prefix_len;
     char *end;
     long pid = strtol(pid_str, &end, 16);
-    if (end == pid_str || *end != '\0') continue;   /* log is "rei_<pid>" */
-    if (rei_pid_alive((pid_t) pid)) continue;       /* live owner: leave its log */
+    if (end == pid_str || *end != '\0') continue;   /* log is "mizu_<pid>" */
+    if (mizu_pid_alive((pid_t) pid)) continue;       /* live owner: leave its log */
 
     char path[PATH_MAX];
     int pn = snprintf(path, sizeof(path), "%s/%s", scan, fname);
     if (pn <= 0 || (size_t) pn >= sizeof(path)) continue;
-    if (rei_reap_log(path, (unsigned long) pid, &list, &cap, &count) != 0)
+    if (mizu_reap_log(path, (unsigned long) pid, &list, &cap, &count) != 0)
       break;                          /* OOM: leave the log for a later retry */
     unlink(path);                                /* drop the dead process's log */
   }
@@ -494,19 +494,19 @@ char **rei_shm_reap(int *n) {
 
 #else /* other POSIX: the SHM namespace cannot be enumerated */
 
-char **rei_shm_reap(int *n) {
+char **mizu_shm_reap(int *n) {
   *n = 0;
   return NULL;
 }
 
 #endif /* __linux__ || __APPLE__ */
 
-static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
+static size_t mizu_region_name(char *name, size_t size, unsigned int pid) {
   static _Atomic unsigned int counter;   /* 0 = unseeded; seeded once */
   if (atomic_load_explicit(&counter, memory_order_relaxed) == 0) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    unsigned int seed = rei_counter_seed(((uint64_t) ts.tv_sec << 32) ^
+    unsigned int seed = mizu_counter_seed(((uint64_t) ts.tv_sec << 32) ^
                                           (uint64_t) ts.tv_nsec ^
                                           ((uint64_t) pid << 40) ^
                                           (uint64_t) (uintptr_t) &counter);
@@ -519,43 +519,43 @@ static size_t rei_region_name(char *name, size_t size, unsigned int pid) {
   }
   unsigned int c = atomic_fetch_add_explicit(&counter, 1,
                                              memory_order_relaxed);
-  int n = snprintf(name, size, REI_PREFIX_LITERAL "%x_%x", pid, c);
+  int n = snprintf(name, size, MIZU_PREFIX_LITERAL "%x_%x", pid, c);
   return (n > 0 && (size_t) n < size) ? (size_t) n : 0;
 }
 
 /* Tear down a partially-created region and return the failure category.
    Callers pass errno (or posix_fallocate's return) as an argument: close
    and unlink would clobber errno. */
-static int rei_create_fail(int fd, const char *name, int code) {
+static int mizu_create_fail(int fd, const char *name, int code) {
   close(fd);
-  rei_shm_os_unlink(name);
+  mizu_shm_os_unlink(name);
 #ifdef __APPLE__
-  rei_log_release();  /* balance the append's count; the record goes stale */
+  mizu_log_release();  /* balance the append's count; the record goes stale */
 #endif
-  return rei_err_classify(code);
+  return mizu_err_classify(code);
 }
 
 /* Create a new region under a fresh name. EEXIST means the name is held
    by an orphan from a crashed process that reused this PID — surfaced as
-   an error rather than worked around: rei_shm_reap() reclaims such
+   an error rather than worked around: mizu_shm_reap() reclaims such
    orphans. */
-int rei_shm_create_stack(rei_shm *shm, size_t size) {
+int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
 
   shm->addr = NULL;
   shm->size = 0;
 
   shm->pid = (unsigned int) getpid();
-  shm->name_len = (uint8_t) rei_region_name(shm->name, sizeof(shm->name), shm->pid);
-  int fd = rei_shm_os_open(shm->name, O_CREAT | O_EXCL | O_RDWR, 0600);
+  shm->name_len = (uint8_t) mizu_region_name(shm->name, sizeof(shm->name), shm->pid);
+  int fd = mizu_shm_os_open(shm->name, O_CREAT | O_EXCL | O_RDWR, 0600);
   if (fd < 0)
-    return errno == EEXIST ? REI_ERRCAT_EXISTS : rei_err_classify(errno);
+    return errno == EEXIST ? MIZU_ERRCAT_EXISTS : mizu_err_classify(errno);
 
 #ifdef __APPLE__
-  rei_log_append(shm->name);   /* register before the region escapes */
+  mizu_log_append(shm->name);   /* register before the region escapes */
 #endif
 
   if (ftruncate(fd, (off_t) size) != 0)
-    return rei_create_fail(fd, shm->name, errno);
+    return mizu_create_fail(fd, shm->name, errno);
 
 #ifdef __linux__
   /* Reserve tmpfs pages now: ftruncate leaves the file sparse and tmpfs
@@ -565,13 +565,13 @@ int rei_shm_create_stack(rei_shm *shm, size_t size) {
      errno directly. */
   int ferr = posix_fallocate(fd, 0, (off_t) size);
   if (ferr != 0)
-    return rei_create_fail(fd, shm->name, ferr);
+    return mizu_create_fail(fd, shm->name, ferr);
 #endif
 
   void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE,
                      MAP_SHARED | MAP_POPULATE, fd, 0);
   if (addr == MAP_FAILED)
-    return rei_create_fail(fd, shm->name, errno);
+    return mizu_create_fail(fd, shm->name, errno);
 
   close(fd);
 
@@ -584,10 +584,10 @@ int rei_shm_create_stack(rei_shm *shm, size_t size) {
 
   shm->addr = addr;
   shm->size = size;
-  return REI_ERRCAT_NONE;
+  return MIZU_ERRCAT_NONE;
 }
 
-int rei_shm_open_stack(rei_shm *shm, const char *name) {
+int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
 
   shm->addr = NULL;
   shm->size = 0;
@@ -598,7 +598,7 @@ int rei_shm_open_stack(rei_shm *shm, const char *name) {
   shm->name_len = (uint8_t) nl;
   shm->pid = 0;                      /* consumer: never the creator */
 
-  int fd = rei_shm_os_open(name, O_RDONLY, 0);
+  int fd = mizu_shm_os_open(name, O_RDONLY, 0);
   if (fd < 0) return -1;
 
   struct stat st;
@@ -632,14 +632,14 @@ int rei_shm_open_stack(rei_shm *shm, const char *name) {
   return 0;
 }
 
-void rei_shm_close_stack(rei_shm *shm, int unlink) {
+void mizu_shm_close_stack(mizu_shm *shm, int unlink) {
   if (shm->addr != NULL) munmap(shm->addr, shm->size);
   if (unlink) {
-    rei_shm_os_unlink(shm->name);
+    mizu_shm_os_unlink(shm->name);
 #ifdef __APPLE__
     /* Creator-only: opened regions carry pid 0 and were never logged
        here. */
-    if (shm->pid == (unsigned int) getpid()) rei_log_release();
+    if (shm->pid == (unsigned int) getpid()) mizu_log_release();
 #endif
   }
   shm->addr = NULL;
@@ -652,23 +652,23 @@ void rei_shm_close_stack(rei_shm *shm, int unlink) {
 /* Map a failure category to a summary plus an actionable remediation
    hint ("" where the summary suffices); the caller composes its error
    message from these. */
-REI_COLD void rei_err_describe(rei_errcat category, const char **summary,
+MIZU_COLD void mizu_err_describe(mizu_errcat category, const char **summary,
                       const char **hint) {
   *hint = "";
   switch (category) {
-  case REI_ERRCAT_NOSPACE:
+  case MIZU_ERRCAT_NOSPACE:
     *summary = "out of space";
-    *hint = REI_HINT_NOSPACE;
+    *hint = MIZU_HINT_NOSPACE;
     break;
-  case REI_ERRCAT_NOMEMORY:
+  case MIZU_ERRCAT_NOMEMORY:
     *summary = "not enough memory";
     break;
-  case REI_ERRCAT_EXISTS:
+  case MIZU_ERRCAT_EXISTS:
     /* Preventative, not curative: the colliding orphans carry this PID, so the
        erroring process cannot reap them itself (it reads its own PID as alive)
-       — rei_shm_reap() must run while the PID is free, before reuse. */
+       — mizu_shm_reap() must run while the PID is free, before reuse. */
     *summary = "the region name is already in use";
-    *hint = "Clear orphans of crashed processes with rei_shm_reap() before a "
+    *hint = "Clear orphans of crashed processes with mizu_shm_reap() before a "
             "PID is reused.";
     break;
   default:
@@ -679,27 +679,27 @@ REI_COLD void rei_err_describe(rei_errcat category, const char **summary,
 
 // Platform-independent heap-allocating variants ------------------------------
 
-/* Malloc a rei_shm and create the region into it. Success: *out set,
-   REI_ERRCAT_NONE. Failure: *out NULL, nothing leaked, returns the
+/* Malloc a mizu_shm and create the region into it. Success: *out set,
+   MIZU_ERRCAT_NONE. Failure: *out NULL, nothing leaked, returns the
    failure category. */
-int rei_shm_create_heap(rei_shm **out, size_t size) {
+int mizu_shm_create_heap(mizu_shm **out, size_t size) {
   *out = NULL;
-  rei_shm *shm = malloc(sizeof(rei_shm));
-  if (shm == NULL) return REI_ERRCAT_NOMEMORY;
-  int rc = rei_shm_create_stack(shm, size);
-  if (rc != REI_ERRCAT_NONE) {
+  mizu_shm *shm = malloc(sizeof(mizu_shm));
+  if (shm == NULL) return MIZU_ERRCAT_NOMEMORY;
+  int rc = mizu_shm_create_stack(shm, size);
+  if (rc != MIZU_ERRCAT_NONE) {
     free(shm);
     return rc;
   }
   *out = shm;
-  return REI_ERRCAT_NONE;
+  return MIZU_ERRCAT_NONE;
 }
 
-/* Malloc a rei_shm and open an existing SHM region into it. */
-rei_shm *rei_shm_open_heap(const char *name) {
-  rei_shm *shm = malloc(sizeof(rei_shm));
+/* Malloc a mizu_shm and open an existing SHM region into it. */
+mizu_shm *mizu_shm_open_heap(const char *name) {
+  mizu_shm *shm = malloc(sizeof(mizu_shm));
   if (shm == NULL) return NULL;
-  if (rei_shm_open_stack(shm, name) != 0) {
+  if (mizu_shm_open_stack(shm, name) != 0) {
     free(shm);
     return NULL;
   }
@@ -710,60 +710,60 @@ rei_shm *rei_shm_open_heap(const char *name) {
 
 /* Release the host side of a created region — the name (POSIX: unlink) /
    creator handle (Windows) — without touching the mapping, which
-   rei_shm_close_stack releases. Unlinks only in the creating process: a
+   mizu_shm_close_stack releases. Unlinks only in the creating process: a
    forked child inherits this teardown for the parent's regions and must
    not destroy their names. */
-void rei_shm_host_release(rei_shm *shm) {
+void mizu_shm_host_release(mizu_shm *shm) {
 #ifdef _WIN32
   if (shm->handle != NULL) CloseHandle(shm->handle);
 #else
   if (shm->name[0] != '\0' && shm->pid == (unsigned int) getpid()) {
-    rei_shm_os_unlink(shm->name);
+    mizu_shm_os_unlink(shm->name);
 #ifdef __APPLE__
-    rei_log_release();
+    mizu_log_release();
 #endif
   }
 #endif
 }
 
-// Public heap API (rei.h) ----------------------------------------------------
+// Public heap API (mizu.h) ----------------------------------------------------
 
 /* The public region verbs are the heap form plus the thread-local error
    record on failure. */
 
-rei_status rei_shm_create(rei_shm **out, size_t size) {
-  int rc = rei_shm_create_heap(out, size);
-  if (rc == REI_ERRCAT_NONE) return REI_OK;
+mizu_status mizu_shm_create(mizu_shm **out, size_t size) {
+  int rc = mizu_shm_create_heap(out, size);
+  if (rc == MIZU_ERRCAT_NONE) return MIZU_OK;
   const char *summary, *hint;
-  rei_err_describe((rei_errcat) rc, &summary, &hint);
-  rei_err_record_tls((rei_errcat) rc,
+  mizu_err_describe((mizu_errcat) rc, &summary, &hint);
+  mizu_err_record_tls((mizu_errcat) rc,
                      "cannot create region (%llu bytes): %s%s%s",
                      (unsigned long long) size, summary,
                      hint[0] != '\0' ? ". " : "", hint);
-  return REI_ERR;
+  return MIZU_ERR;
 }
 
-rei_status rei_shm_open(rei_shm **out, const char *name) {
-  *out = rei_shm_open_heap(name);
-  if (*out != NULL) return REI_OK;
-  rei_err_record_tls(REI_ERRCAT_OTHER, "cannot open region '%s'", name);
-  return REI_ERR;
+mizu_status mizu_shm_open(mizu_shm **out, const char *name) {
+  *out = mizu_shm_open_heap(name);
+  if (*out != NULL) return MIZU_OK;
+  mizu_err_record_tls(MIZU_ERRCAT_OTHER, "cannot open region '%s'", name);
+  return MIZU_ERR;
 }
 
-void rei_shm_close(rei_shm *shm, int unlink) {
+void mizu_shm_close(mizu_shm *shm, int unlink) {
   if (shm == NULL) return;
-  rei_shm_close_stack(shm, unlink);
+  mizu_shm_close_stack(shm, unlink);
   free(shm);
 }
 
-void *rei_shm_addr(rei_shm *shm) {
+void *mizu_shm_addr(mizu_shm *shm) {
   return shm->addr;
 }
 
-size_t rei_shm_size(const rei_shm *shm) {
+size_t mizu_shm_size(const mizu_shm *shm) {
   return shm->size;
 }
 
-const char *rei_shm_name(const rei_shm *shm) {
+const char *mizu_shm_name(const mizu_shm *shm) {
   return shm->name;
 }

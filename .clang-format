@@ -1,4 +1,4 @@
-# librei style: LLVM base, 2-space indent, 80 columns, attached braces.
+# libmizu style: LLVM base, 2-space indent, 80 columns, attached braces.
 BasedOnStyle: LLVM
 IndentWidth: 2
 ColumnLimit: 80

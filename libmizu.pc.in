@@ -3,10 +3,10 @@ exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
-Name: librei
+Name: libmizu
 Description: Lock-free shared-memory IPC: SPSC channels and work-stealing task pools
-URL: https://github.com/shikokuchuo/librei
+URL: https://github.com/shikokuchuo/libmizu
 Version: @VERSION@
-Libs: -L${libdir} -lrei
+Libs: -L${libdir} -lmizu
 Libs.private: @LIBS_PRIVATE@
 Cflags: -I${includedir}

@@ -1,5 +1,5 @@
 /* Soak tier: full-duplex channel contention between two processes for
-   REI_SOAK_SECONDS (the make default is 120; nightly runs set it
+   MIZU_SOAK_SECONDS (the make default is 120; nightly runs set it
    higher). Both sides send sequence-tagged payloads across the
    INLINE / ARENA / SHM_RAW tiers while draining; every received
    seq-bearing message must carry its direction's next sequence number
@@ -63,7 +63,7 @@ static void fill(uint8_t *buf, size_t len, uint64_t seq) {
   memset(buf + 8, (uint8_t) seq, len - 8);
 }
 
-static void verify(const rei_bytes *b, uint64_t expect_seq) {
+static void verify(const mizu_bytes *b, uint64_t expect_seq) {
   assert(b->len >= 8);
   const uint8_t *d = b->data;
   uint64_t seq = 0;
@@ -87,16 +87,16 @@ struct traffic {
   int done;             /* the peer's DONE arrived (its ring is drained) */
 };
 
-static void send_round(rei_channel *c, uint8_t *buf, struct traffic *t) {
+static void send_round(mizu_channel *c, uint8_t *buf, struct traffic *t) {
   for (int k = 0; k < 4; k++) {
     size_t len = pick_len();
     if (len != 0) fill(buf, len, t->send_seq);
-    rei_bytes b = { buf, len };
-    rei_status st = rei_channel_send(c, &b);
-    if (st == REI_OK) {
+    mizu_bytes b = { buf, len };
+    mizu_status st = mizu_channel_send(c, &b);
+    if (st == MIZU_OK) {
       t->sent++;
       if (len != 0) t->send_seq++;
-    } else if (st == REI_FULL) {
+    } else if (st == MIZU_FULL) {
       break;
     } else {
       assert(0);   /* no close and no peer death before the shutdown */
@@ -104,7 +104,7 @@ static void send_round(rei_channel *c, uint8_t *buf, struct traffic *t) {
   }
 }
 
-static void recv_one(rei_bytes *b, struct traffic *t) {
+static void recv_one(mizu_bytes *b, struct traffic *t) {
   if (b->len == sizeof(DONE_MAGIC) + 8 &&
       memcmp(b->data, DONE_MAGIC, 8) == 0) {
     const uint8_t *d = b->data;
@@ -117,25 +117,25 @@ static void recv_one(rei_bytes *b, struct traffic *t) {
   t->received++;
 }
 
-static int recv_round(rei_channel *c, struct traffic *t, long timeout_ms) {
+static int recv_round(mizu_channel *c, struct traffic *t, long timeout_ms) {
   void *objs[16];
   size_t n = 0;
-  rei_status st = rei_channel_recv_batch(c, objs, 16, &n, timeout_ms);
-  assert(st == REI_OK || st == REI_TIMEOUT);
+  mizu_status st = mizu_channel_recv_batch(c, objs, 16, &n, timeout_ms);
+  assert(st == MIZU_OK || st == MIZU_TIMEOUT);
   for (size_t i = 0; i < n; i++) {
     recv_one(objs[i], t);
-    rei_bytes_free(objs[i]);
+    mizu_bytes_free(objs[i]);
   }
   return n != 0;
 }
 
 /* The whole lifecycle: traffic until the deadline, then the DONE
    handshake, then the close rendezvous. */
-static void run_traffic(rei_channel *c, double seconds, struct traffic *t) {
+static void run_traffic(mizu_channel *c, double seconds, struct traffic *t) {
   uint8_t *buf = malloc(MAX_PAYLOAD);
   assert(buf != NULL);
-  double deadline = rei_now() + seconds;
-  while (rei_now() < deadline) {
+  double deadline = mizu_now() + seconds;
+  while (mizu_now() < deadline) {
     send_round(c, buf, t);
     recv_round(c, t, 0);
   }
@@ -147,10 +147,10 @@ static void run_traffic(rei_channel *c, double seconds, struct traffic *t) {
   for (int i = 0; i < 8; i++)
     done_msg[8 + i] = (uint8_t) (t->sent >> (8 * i));
   for (;;) {
-    rei_bytes b = { done_msg, sizeof(done_msg) };
-    rei_status st = rei_channel_send(c, &b);
-    if (st == REI_OK) break;
-    assert(st == REI_FULL);
+    mizu_bytes b = { done_msg, sizeof(done_msg) };
+    mizu_status st = mizu_channel_send(c, &b);
+    if (st == MIZU_OK) break;
+    assert(st == MIZU_FULL);
     recv_round(c, t, 100);
   }
 
@@ -159,28 +159,28 @@ static void run_traffic(rei_channel *c, double seconds, struct traffic *t) {
   assert(t->received == t->peer_sent);
 
   /* the close discipline: my bit only now — I have drained the peer */
-  assert(rei_channel_close_signal(c) == REI_OK);
-  assert(rei_channel_close(c, 30000) == REI_OK);
+  assert(mizu_channel_close_signal(c) == MIZU_OK);
+  assert(mizu_channel_close(c, 30000) == MIZU_OK);
   free(buf);
 }
 
 int main(void) {
-  const char *env = getenv("REI_SOAK_SECONDS");
+  const char *env = getenv("MIZU_SOAK_SECONDS");
   double seconds = env != NULL ? atof(env) : 120;
   assert(seconds > 0);
 
-  rei_binding b;
-  rei_binding_bytes(&b);
-  rei_channel_opts opts;
-  rei_channel_opts_init(&opts);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
   opts.capacity = 1024;
   opts.slot_size = 512;
   opts.arena_size = 8u << 20;
 
-  rei_channel *host = NULL;
-  assert(rei_channel_create(&host, &opts, &b) == REI_OK);
+  mizu_channel *host = NULL;
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
   char token[64];
-  assert(rei_channel_token(host, token, sizeof(token)) == REI_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
 
   fflush(stdout);
   pid_t pid = fork();
@@ -188,20 +188,20 @@ int main(void) {
 
   if (pid == 0) {                       /* child: the peer */
     rng_state = 0x9E3779B97F4A7C15ULL;
-    rei_channel *peer = NULL;
-    assert(rei_channel_attach(&peer, token, &b) == REI_OK);
-    assert(rei_channel_ready_set(peer) == REI_OK);
+    mizu_channel *peer = NULL;
+    assert(mizu_channel_attach(&peer, token, &b) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
     struct traffic t = { 0 };
     run_traffic(peer, seconds, &t);
-    rei_channel_destroy(peer);
+    mizu_channel_destroy(peer);
     _exit(0);
   }
 
   rng_state = 0x2545F4914F6CDD1DULL;
-  assert(rei_channel_ready_wait(host, 30000) == REI_OK);
+  assert(mizu_channel_ready_wait(host, 30000) == MIZU_OK);
   struct traffic t = { 0 };
   run_traffic(host, seconds, &t);
-  rei_channel_destroy(host);
+  mizu_channel_destroy(host);
 
   int st = 0;
   assert(waitpid(pid, &st, 0) == pid);

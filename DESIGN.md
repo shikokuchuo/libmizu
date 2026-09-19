@@ -1,29 +1,29 @@
-# librei design notes
+# libmizu design notes
 
 This file is the design authority for the core.
-`include/rei.h` is the API contract.
+`include/mizu.h` is the API contract.
 This file holds the invariants that the implementation maintains.
 Code comments reference this file.
 
 ## Wire format
 
-Each struct in `include/rei.h` is the wire format.
+Each struct in `include/mizu.h` is the wire format.
 Sizes are static-asserted, and alignment is 64 bytes.
 Each shared hot word owns a full cache line, so writes from the producer and the consumer never share a line.
 The layout is fixed: later phases add capability without moving anything.
-`REI_ABI_VERSION` gates mixed builds.
+`MIZU_ABI_VERSION` gates mixed builds.
 Peers validate it at attach, before any thread reads or writes a shared atomic.
 Bump it on each wire-format change.
-Wire type tags (`rei_type_e`) sit in the same contract: int64 rides tag 32 (outside SEXPTYPE space), with INT64_MIN the missing sentinel.
+Wire type tags (`mizu_type_e`) sit in the same contract: int64 rides tag 32 (outside SEXPTYPE space), with INT64_MIN the missing sentinel.
 
 ## Statuses, not exceptions
 
-Terminal transport states return `rei_status` values: `REI_FULL`, `REI_TIMEOUT`, `REI_CLOSED`, `REI_PEER_GONE`.
+Terminal transport states return `mizu_status` values: `MIZU_FULL`, `MIZU_TIMEOUT`, `MIZU_CLOSED`, `MIZU_PEER_GONE`.
 This keeps hot loops branch-cheap.
-`REI_ERR` is a real error: a portable `rei_errcat` plus a formatted message.
+`MIZU_ERR` is a real error: a portable `mizu_errcat` plus a formatted message.
 The record lives on the handle and stays valid until the next call on it.
 Handle-free entry points (regions, prune) use a thread-local slot.
-Each binding maps the four terminal states to its own sentinel or condition values, and `REI_ERR` to its error hierarchy.
+Each binding maps the four terminal states to its own sentinel or condition values, and `MIZU_ERR` to its error hierarchy.
 The mapping is per-verb: a full ring on send is a sentinel value for the binding, and a full injection ring at the submit deadline raises.
 
 ## Liveness lock is the death verdict
@@ -46,11 +46,11 @@ This handshake is the only guarantee against lost wakeups.
 No watchdog sits behind it.
 
 On POSIX, each park is timed: an untimed wait restarts silently under SA_RESTART, and a Ctrl-C then surfaces only at the next genuine wake.
-An indefinite park uses `REI_PARK_NOMINAL_MS` and relies on directed unparks.
+An indefinite park uses `MIZU_PARK_NOMINAL_MS` and relies on directed unparks.
 
 ## Payload framing tiers
 
-A frame is a 16-byte `rei_slot_hdr` plus payload bytes.
+A frame is a 16-byte `mizu_slot_hdr` plus payload bytes.
 The tiers:
 
 - `NIL`: an immediate empty value.
@@ -63,9 +63,9 @@ The tiers:
 - `ARENA`: one chunk in the channel spill arena (channel only).
 - `SHM_RAW`: a serialized stream in a spill region.
   The consumer copies the bytes out before its consumer-done signal, so the region returns to the free list deterministically.
-- `SHM_VEC`: a spill region that holds an REIH/REIS/REIL layout object.
+- `SHM_VEC`: a spill region that holds an MIZH/MIZS/MIZL layout object.
   The consumer wraps a zero-copy view.
-- `REF`: the `/rei_` identifier of an object already in shared memory.
+- `REF`: the `/mizu_` identifier of an object already in shared memory.
 
 The core moves opaque frames.
 The tier contents are the binding's.
@@ -77,11 +77,11 @@ But readers dispatch on the first byte of an INLINE stream, so the magic bytes n
 This registry is it — a header comment alone would drift.
 
 - `'B'` (0x42), `'X'` (0x58): R native serialize streams (binary / XDR).
-- `'R'` (0x52, `REI_CODEC_MAGIC` in `rei_ext.h`): the rei compact codec.
-- `'P'` (0x50, `REI_PYREI_CODEC_MAGIC` in `rei_ext.h`): the pyrei compact codec.
+- `'R'` (0x52, `MIZU_CODEC_MAGIC` in `mizu_ext.h`): the mizu compact codec.
+- `'P'` (0x50, `MIZU_PYMIZU_CODEC_MAGIC` in `mizu_ext.h`): the pymizu compact codec.
 
 A binding introducing a self-describing stream claims its byte here first.
-The drop's first-byte tags (`REI_DROP_*` in `rei.h`) are a disjoint context — drop region byte 0, never an INLINE payload — and share letters deliberately: `REI_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.
+The drop's first-byte tags (`MIZU_DROP_*` in `mizu.h`) are a disjoint context — drop region byte 0, never an INLINE payload — and share letters deliberately: `MIZU_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.
 
 ## The binding seam
 
@@ -98,7 +98,7 @@ A binding registers its callbacks at create, attach, or join:
 The core copies the function pointers into the handle.
 A hot-path call is one load plus a predicted indirect branch.
 `stage_fn` receives the binding ctx alongside the handle; `exec_fn` receives a read ctx on the handle (the binding ctx rides it), so task-frame decode shares the collect path's region service.
-The typedefs in `include/rei_ext.h` (the binding-author tier) document the full contracts.
+The typedefs in `include/mizu_ext.h` (the binding-author tier) document the full contracts.
 Four of them carry the correctness guarantees:
 
 - Staging is transactional.
@@ -107,7 +107,7 @@ Four of them carry the correctness guarantees:
   An uncommitted region checkout or pin rolls back at the next verb entry or at destroy.
   A binding can abandon mid-stage (a longjmp) and leave the handle consistent.
 - A failed `read_fn` (a NULL return) consumes nothing — the slot stays for a retry.
-  Setting `REI_READ_CONSUME` first flips that: the transport consumes exactly as on success (the channel head advance and its batched publication; the pool FREE transition, task-keeper drop, and producer-keeper wake) while the verb still returns `REI_ERR`.
+  Setting `MIZU_READ_CONSUME` first flips that: the transport consumes exactly as on success (the channel head advance and its batched publication; the pool FREE transition, task-keeper drop, and producer-keeper wake) while the verb still returns `MIZU_ERR`.
   This is the foreign/corrupt-payload contract: an unreadable slot must not wedge the ring behind it.
   The binding carries its specific message in its own state; the core records no generic error for a consumed read.
 - `exec_fn` must not abandon.
@@ -115,21 +115,21 @@ Four of them carry the correctness guarantees:
   A worker that lets one escape degrades to worker death plus the reaper verdict.
   That is the hard-crash semantics, never the path for an ordinary task error.
 - `check` runs at abandon-safe points only, once per spin or park iteration.
-  A nonzero return unwinds the verb as `REI_ERR` with `REI_ERRCAT_INTERRUPTED` and consumes nothing.
+  A nonzero return unwinds the verb as `MIZU_ERR` with `MIZU_ERRCAT_INTERRUPTED` and consumes nothing.
 
 ### Staging policy
 
-`rei_stage_raw` (dual-form in `rei_ext.h`; the slow path is `stage_raw.c`) is the core-owned raw-tier reservation: the RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both first-party bindings stage by the same rules.
+`mizu_stage_raw` (dual-form in `mizu_ext.h`; the slow path is `stage_raw.c`) is the core-owned raw-tier reservation: the RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both first-party bindings stage by the same rules.
 It composes the stager services and is valid only during `stage_fn`.
 The churn signal is read at most once per stage, gated behind the zero-copy size gate.
 A NULL return hands the object to the binding's serialized tiers: a reservation failure degrades, never errors.
-Bare bytes carry no identifier, so the raw tiers pin nothing; the flat SHM_VEC reserve writes the REIH header before `rei_stage_retain_zc` stores the producer loan.
+Bare bytes carry no identifier, so the raw tiers pin nothing; the flat SHM_VEC reserve writes the MIZH header before `mizu_stage_retain_zc` stores the producer loan.
 Object eligibility (which values are raw) stays binding-side, as do the string and list-tree layouts.
 
 ### Map morsel protocol
 
 A binding's parallel map rides one fresh region per map call: a 128-byte header, the descriptor stream, an optional bare-bytes x section, the morsel state, and an optional template output area.
-The protocol is core-owned (`morsel.c`, `rei_morsel_*` in `rei_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
+The protocol is core-owned (`morsel.c`, `mizu_morsel_*` in `mizu_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
 Map regions are private to a binding install, so the two first-party bindings share one layout and keep only their magic tags.
 
 - One CLAIM word per runner ordinal packs `(generation << 2) | state`, so the lane claim and the generation fence are one atomic.
@@ -170,10 +170,10 @@ A layout-eligible object past the floor of the binding stages as SHM_VEC.
 The stage is one layout write into a spill region.
 The consumer wraps the mapped pages as a view instead of copying.
 The cross-process refcount lives in bytes [24-31] of the region header.
-The offset macros are wire format (`REI_ZC_REFCOUNT_OFF` / `REI_ZC_FLAGS_OFF` in `rei.h`); the `rei_zc_rc` / `rei_zc_flags_` accessors are core-owned binding surface (`rei_ext.h`, dual-form).
+The offset macros are wire format (`MIZU_ZC_REFCOUNT_OFF` / `MIZU_ZC_FLAGS_OFF` in `mizu.h`); the `mizu_zc_rc` / `mizu_zc_flags_` accessors are core-owned binding surface (`mizu_ext.h`, dual-form).
 The producer stores 1 at stage.
-`rei_shm_open_view` adds 1 at the wrap of the consumer: open implies counted, so add-before-consumer-done is structural.
-The `REI_OPEN_VIEW_NOCOUNT` form splits the two for a binding whose wrap can fail between map and count (an R ALTREP wrap can longjmp): open first, then `rei_zc_ref` at wrap, still before the consumer-done signal.
+`mizu_shm_open_view` adds 1 at the wrap of the consumer: open implies counted, so add-before-consumer-done is structural.
+The `MIZU_OPEN_VIEW_NOCOUNT` form splits the two for a binding whose wrap can fail between map and count (an R ALTREP wrap can longjmp): open first, then `mizu_zc_ref` at wrap, still before the consumer-done signal.
 The release of the view subtracts 1.
 The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 
@@ -198,20 +198,20 @@ The ERR publish carries the flattened envelope of the binding, framed so that th
 
 The API has three tiers (the CPython PEP 689 model):
 
-- `include/rei.h`: the stable consumer API.
+- `include/mizu.h`: the stable consumer API.
   Handles are opaque.
   Nothing public passes or returns a struct by value.
   Extensible structs carry a size field.
-  Each public operation is a real exported function (`REI_API`).
-  The shared library carries a soname that tracks `REI_VERSION_MAJOR`; the stable promise starts at 1.0.
-- `include/rei_ext.h`: the binding-author API, installed but version-pinned per minor release.
+  Each public operation is a real exported function (`MIZU_API`).
+  The shared library carries a soname that tracks `MIZU_VERSION_MAJOR`; the stable promise starts at 1.0.
+- `include/mizu_ext.h`: the binding-author API, installed but version-pinned per minor release.
   It may change on any minor bump, without deprecation, ever — including after 1.0.
   Consumers are language bindings; they rebuild (or re-vendor) per minor release.
-  Real exported functions are the rule; `static inline` is permitted only for the three dual-form offset-math accessors (`rei_parker_snapshot`, `rei_zc_rc`, `rei_zc_flags_`), each always paired with a same-named exported symbol (`src/ext.c`) so FFI consumers see everything.
-  `struct rei_shm_s` is exposed here, layout-pinned per minor release: bindings dereference it on hot paths where an accessor call would not amortize.
+  Real exported functions are the rule; `static inline` is permitted only for the three dual-form offset-math accessors (`mizu_parker_snapshot`, `mizu_zc_rc`, `mizu_zc_flags_`), each always paired with a same-named exported symbol (`src/ext.c`) so FFI consumers see everything.
+  `struct mizu_shm_s` is exposed here, layout-pinned per minor release: bindings dereference it on hot paths where an accessor call would not amortize.
 - `src/internal.h`: private, never installed.
   The handle struct definition, spin machinery, and spill/ledger/open-cache internals live here.
 
 Builds use `-fvisibility=hidden`.
-Two contracts are versioned, both documented in the `rei.h` preamble: the wire-format `REI_ABI_VERSION` and the soname.
-The wire-format structs in `rei.h` are the preamble-versioned contract, not soname-frozen.
+Two contracts are versioned, both documented in the `mizu.h` preamble: the wire-format `MIZU_ABI_VERSION` and the soname.
+The wire-format structs in `mizu.h` are the preamble-versioned contract, not soname-frozen.

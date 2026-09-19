@@ -22,7 +22,7 @@
 #  include <unistd.h>
 #endif
 
-double rei_now(void) {
+double mizu_now(void) {
 #ifdef _WIN32
   /* QueryPerformanceCounter, not GetTickCount64: µs-scale batch timing
      is blind at ~15.6 ms tick granularity. QPF is constant after boot;
@@ -60,18 +60,18 @@ double rei_now(void) {
 }
 
 #ifndef _WIN32
-static _Atomic long rei_pid_cache;
+static _Atomic long mizu_pid_cache;
 
-static void rei_pid_child(void) {
-  atomic_store_explicit(&rei_pid_cache, 0, memory_order_relaxed);
+static void mizu_pid_child(void) {
+  atomic_store_explicit(&mizu_pid_cache, 0, memory_order_relaxed);
 }
 
-static void rei_pid_atefork(void) {
-  pthread_atfork(NULL, NULL, rei_pid_child);
+static void mizu_pid_atefork(void) {
+  pthread_atfork(NULL, NULL, mizu_pid_child);
 }
 #endif
 
-long rei_self_pid(void) {
+long mizu_self_pid(void) {
 #ifdef _WIN32
   return (long) GetCurrentProcessId();
 #else
@@ -82,17 +82,17 @@ long rei_self_pid(void) {
      handlers (R's fork does); a raw-clone child is out of scope, as it
      is for every atfork guard in the process. */
   static pthread_once_t pid_once = PTHREAD_ONCE_INIT;
-  long pid = atomic_load_explicit(&rei_pid_cache, memory_order_relaxed);
+  long pid = atomic_load_explicit(&mizu_pid_cache, memory_order_relaxed);
   if (pid == 0) {
-    pthread_once(&pid_once, rei_pid_atefork);
+    pthread_once(&pid_once, mizu_pid_atefork);
     pid = (long) getpid();
-    atomic_store_explicit(&rei_pid_cache, pid, memory_order_relaxed);
+    atomic_store_explicit(&mizu_pid_cache, pid, memory_order_relaxed);
   }
   return pid;
 #endif
 }
 
-rei_death_watch *rei_death_watch_start(long pid, _Atomic int *flag,
-                                       const rei_parker *pk) {
-  return rei_death_watch_start2(pid, flag, pk, NULL, NULL);
+mizu_death_watch *mizu_death_watch_start(long pid, _Atomic int *flag,
+                                       const mizu_parker *pk) {
+  return mizu_death_watch_start2(pid, flag, pk, NULL, NULL);
 }

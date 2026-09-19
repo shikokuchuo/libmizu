@@ -20,7 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-int rei_shm_open_rw_stack(rei_shm *shm, const char *name, int populate) {
+int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
   shm->addr = NULL;
   shm->size = 0;
@@ -69,18 +69,18 @@ int rei_shm_open_rw_stack(rei_shm *shm, const char *name, int populate) {
 /* Same /dev/shm direct-open as shm.c on Linux (avoids -lrt); macOS has
    shm_open in libc. */
 #ifdef __linux__
-static int rei_shm_os_open_rw(const char *name) {
+static int mizu_shm_os_open_rw(const char *name) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
   return open(path, O_RDWR, 0);
 }
 #else
-static int rei_shm_os_open_rw(const char *name) {
+static int mizu_shm_os_open_rw(const char *name) {
   return shm_open(name, O_RDWR, 0);
 }
 #endif
 
-int rei_shm_open_rw_stack(rei_shm *shm, const char *name, int populate) {
+int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
   shm->addr = NULL;
   shm->size = 0;
@@ -90,7 +90,7 @@ int rei_shm_open_rw_stack(rei_shm *shm, const char *name, int populate) {
   shm->name[nl] = '\0';
   shm->name_len = (uint8_t) nl;
 
-  int fd = rei_shm_os_open_rw(name);
+  int fd = mizu_shm_os_open_rw(name);
   if (fd < 0) return -1;
 
   struct stat st;
@@ -142,8 +142,8 @@ int rei_shm_open_rw_stack(rei_shm *shm, const char *name, int populate) {
    per 8 MB where one populate syscall does. Linux-only; macOS has no
    mapping-time populate flag (the fallback below uses the plain open).
    NULL on failure, so the caller's gone semantics are unchanged. */
-rei_shm *rei_shm_open_ro_heap(const char *name) {
-  rei_shm *shm = malloc(sizeof(rei_shm));
+mizu_shm *mizu_shm_open_ro_heap(const char *name) {
+  mizu_shm *shm = malloc(sizeof(mizu_shm));
   if (shm == NULL) return NULL;
   shm->addr = NULL;
   shm->size = 0;
@@ -187,15 +187,15 @@ rei_shm *rei_shm_open_ro_heap(const char *name) {
 #endif /* _WIN32 */
 
 #ifndef __linux__
-rei_shm *rei_shm_open_ro_heap(const char *name) {
-  return rei_shm_open_heap(name);
+mizu_shm *mizu_shm_open_ro_heap(const char *name) {
+  return mizu_shm_open_heap(name);
 }
 #endif
 
-rei_shm *rei_shm_open_rw_heap(const char *name, int populate) {
-  rei_shm *shm = malloc(sizeof(rei_shm));
+mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate) {
+  mizu_shm *shm = malloc(sizeof(mizu_shm));
   if (shm == NULL) return NULL;
-  if (rei_shm_open_rw_stack(shm, name, populate) != 0) {
+  if (mizu_shm_open_rw_stack(shm, name, populate) != 0) {
     free(shm);
     return NULL;
   }
@@ -211,10 +211,10 @@ rei_shm *rei_shm_open_rw_heap(const char *name, int populate) {
    skips a page (16 KiB pages on arm64 macOS take four stores). Payload
    regions keep the plain create: written in full immediately, prefault
    would be a redundant pass. */
-int rei_shm_create_populate(rei_shm *shm, size_t size) {
-  int rc = rei_shm_create_stack(shm, size);
+int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
+  int rc = mizu_shm_create_stack(shm, size);
 #ifndef __linux__
-  if (rc == REI_ERRCAT_NONE) {
+  if (rc == MIZU_ERRCAT_NONE) {
     volatile unsigned char *b = (volatile unsigned char *) shm->addr;
     for (size_t off = 0; off < size; off += 4096) b[off] = 0;
   }
@@ -223,35 +223,35 @@ int rei_shm_create_populate(rei_shm *shm, size_t size) {
   /* The plain create's MADV_HUGEPAGE is inert under the stock
      shmem_enabled=[never]; a synchronous collapse works regardless, and
      the MAP_POPULATE pages already exist. Failure is benign. */
-  if (rc == REI_ERRCAT_NONE && size >= ((size_t) 2 << 20))
+  if (rc == MIZU_ERRCAT_NONE && size >= ((size_t) 2 << 20))
     (void) madvise(shm->addr, size, MADV_COLLAPSE);
 #endif
   return rc;
 }
 
-// Public writable / view opens and the zc protocol words (rei.h) --------------
+// Public writable / view opens and the zc protocol words (mizu.h) --------------
 
-rei_status rei_shm_open_rw(rei_shm **out, const char *name, int populate) {
-  *out = rei_shm_open_rw_heap(name, populate);
-  if (*out != NULL) return REI_OK;
-  rei_err_record_tls(REI_ERRCAT_OTHER, "cannot open region '%s'", name);
-  return REI_ERR;
+mizu_status mizu_shm_open_rw(mizu_shm **out, const char *name, int populate) {
+  *out = mizu_shm_open_rw_heap(name, populate);
+  if (*out != NULL) return MIZU_OK;
+  mizu_err_record_tls(MIZU_ERRCAT_OTHER, "cannot open region '%s'", name);
+  return MIZU_ERR;
 }
 
 /* The zc consumer open: page 0 read-write (the refcount word), the rest
    read-only. Lazy everywhere — a view is touched on demand, so eager PTE
    install would prefault never-read pages on the recv hot path. The
    default form performs the zc counted add itself: open implies counted,
-   so no view mapping exists without the count. REI_OPEN_VIEW_NOCOUNT
-   skips the add — the caller owns the rei_zc_ref timing then (a binding
+   so no view mapping exists without the count. MIZU_OPEN_VIEW_NOCOUNT
+   skips the add — the caller owns the mizu_zc_ref timing then (a binding
    whose wrap can fail between map and count) and must complete it before
    its consumer-done signal. */
-rei_status rei_shm_open_view_flags(rei_shm **out, const char *name,
+mizu_status mizu_shm_open_view_flags(mizu_shm **out, const char *name,
                                    uint32_t flags) {
-  rei_shm *shm = rei_shm_open_rw_heap(name, 0);
+  mizu_shm *shm = mizu_shm_open_rw_heap(name, 0);
   if (shm == NULL) {
-    rei_err_record_tls(REI_ERRCAT_OTHER, "cannot open region '%s'", name);
-    return REI_ERR;
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "cannot open region '%s'", name);
+    return MIZU_ERR;
   }
   size_t size = shm->size;
 #ifdef _WIN32
@@ -278,33 +278,33 @@ rei_status rei_shm_open_view_flags(rei_shm **out, const char *name,
     (void) mprotect((unsigned char *) shm->addr + pagesz, size - pagesz,
                     PROT_READ);
 #endif
-  if (!(flags & REI_OPEN_VIEW_NOCOUNT))
-    atomic_fetch_add_explicit(rei_zc_rc(shm->addr), 1, memory_order_acq_rel);
+  if (!(flags & MIZU_OPEN_VIEW_NOCOUNT))
+    atomic_fetch_add_explicit(mizu_zc_rc(shm->addr), 1, memory_order_acq_rel);
   *out = shm;
-  return REI_OK;
+  return MIZU_OK;
 }
 
-rei_status rei_shm_open_view(rei_shm **out, const char *name) {
-  return rei_shm_open_view_flags(out, name, 0);
+mizu_status mizu_shm_open_view(mizu_shm **out, const char *name) {
+  return mizu_shm_open_view_flags(out, name, 0);
 }
 
-void rei_zc_ref(rei_shm *shm) {
-  atomic_fetch_add_explicit(rei_zc_rc(shm->addr), 1, memory_order_acq_rel);
+void mizu_zc_ref(mizu_shm *shm) {
+  atomic_fetch_add_explicit(mizu_zc_rc(shm->addr), 1, memory_order_acq_rel);
 }
 
-void rei_zc_unref(rei_shm *shm) {
-  atomic_fetch_sub_explicit(rei_zc_rc(shm->addr), 1, memory_order_acq_rel);
+void mizu_zc_unref(mizu_shm *shm) {
+  atomic_fetch_sub_explicit(mizu_zc_rc(shm->addr), 1, memory_order_acq_rel);
 }
 
-uint32_t rei_zc_refcount(const rei_shm *shm) {
-  return atomic_load_explicit(rei_zc_rc(shm->addr), memory_order_acquire);
+uint32_t mizu_zc_refcount(const mizu_shm *shm) {
+  return atomic_load_explicit(mizu_zc_rc(shm->addr), memory_order_acquire);
 }
 
-uint32_t rei_zc_flags(const rei_shm *shm) {
-  return atomic_load_explicit(rei_zc_flags_(shm->addr), memory_order_acquire);
+uint32_t mizu_zc_flags(const mizu_shm *shm) {
+  return atomic_load_explicit(mizu_zc_flags_(shm->addr), memory_order_acquire);
 }
 
-void rei_zc_flag_refheld(rei_shm *shm) {
-  atomic_fetch_or_explicit(rei_zc_flags_(shm->addr), REI_ZC_FLAG_REFHELD,
+void mizu_zc_flag_refheld(mizu_shm *shm) {
+  atomic_fetch_or_explicit(mizu_zc_flags_(shm->addr), MIZU_ZC_FLAG_REFHELD,
                            memory_order_acq_rel);
 }

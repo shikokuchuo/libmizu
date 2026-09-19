@@ -2,12 +2,12 @@
    copies of this binary re-joining by token (fresh handles — pool handles
    do not survive fork); each child role ends in _exit. Scenarios: worker
    kill -9 mid-task -> DIED result, and stop over the dead worker answers
-   REI_OK (the death watch's off-thread reap clears the slot during the
+   MIZU_OK (the death watch's off-thread reap clears the slot during the
    wait); a killed worker's orphaned deque drains through a surviving
-   peer; owner death -> worker exit (REI_EXIT_OWNER_GONE) + orphan
+   peer; owner death -> worker exit (MIZU_EXIT_OWNER_GONE) + orphan
    teardown; submitter death -> registry-slot reclaim; stop with live
    workers through a collect_all round trip; the lame-duck linger.
-   Compiles against the installed headers (rei.h + rei_ext.h — the bytes
+   Compiles against the installed headers (mizu.h + mizu_ext.h — the bytes
    binding is ext-tier surface) with internal.h absent: the API's
    compile-time contract check.
    POSIX (fork); a stub passes elsewhere. Run via `make test-integration`. */
@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rei.h"
-#include "rei_ext.h"
+#include "mizu.h"
+#include "mizu_ext.h"
 
 #ifdef _WIN32
 
@@ -40,7 +40,7 @@ int main(void) {
 static char child_token[64];
 static int child_role;
 static uint32_t child_slot;
-static rei_worker_exit child_expect;
+static mizu_worker_exit child_expect;
 static int child_linger;
 static int go_pipe[2] = { -1, -1 };   /* parent -> child go-ahead */
 static int joined_wr = -1;            /* child -> parent join signal */
@@ -54,63 +54,63 @@ static void sleep_ms(long ms) {
 
 /* The child evaluator: echoes INLINE tasks; "die" kills the worker
    mid-task; "big" returns a 100 KB (spilled) result. */
-static int child_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
-                      size_t limit, rei_result_sink *sink, int catching,
-                      rei_read_ctx *ctx) {
+static int child_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                      size_t limit, mizu_result_sink *sink, int catching,
+                      mizu_read_ctx *ctx) {
   (void) limit; (void) catching; (void) ctx;
-  if (hdr->kind == REI_KIND_NIL) {
-    rei_bytes b = { NULL, 0 };
-    return rei_result_publish(sink, &b) >= 0 ? 0 : 1;
+  if (hdr->kind == MIZU_KIND_NIL) {
+    mizu_bytes b = { NULL, 0 };
+    return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
   }
-  assert(hdr->kind == REI_KIND_INLINE);
+  assert(hdr->kind == MIZU_KIND_INLINE);
   if (hdr->len == 3 && memcmp(payload, "die", 3) == 0)
     raise(SIGKILL);
   if (hdr->len == 3 && memcmp(payload, "big", 3) == 0) {
     static unsigned char big[100 * 1024];
     for (size_t i = 0; i < sizeof big; i++) big[i] = (unsigned char) (i * 31u);
-    rei_bytes b = { big, sizeof big };
-    return rei_result_publish(sink, &b) >= 0 ? 0 : 1;
+    mizu_bytes b = { big, sizeof big };
+    return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
   }
-  rei_bytes b = { (void *) payload, hdr->len };
-  return rei_result_publish(sink, &b) >= 0 ? 0 : 1;
+  mizu_bytes b = { (void *) payload, hdr->len };
+  return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
 }
 
-static void child_binding(rei_binding *b, int worker) {
-  rei_binding_bytes(b);
+static void child_binding(mizu_binding *b, int worker) {
+  mizu_binding_bytes(b);
   if (worker) b->exec = child_exec;
 }
 
 /* Join + run; leave, linger if asked, and exit 0 on the expected reason. */
-static void run_worker(uint32_t slot, rei_worker_exit expect, int linger) {
-  rei_binding b;
+static void run_worker(uint32_t slot, mizu_worker_exit expect, int linger) {
+  mizu_binding b;
   child_binding(&b, 1);
-  rei_pool *p;
-  if (rei_pool_worker_join(&p, child_token, slot, &b) != REI_OK) _exit(3);
+  mizu_pool *p;
+  if (mizu_pool_worker_join(&p, child_token, slot, &b) != MIZU_OK) _exit(3);
   if (joined_wr >= 0) {
     char c = 'j';
     (void) write(joined_wr, &c, 1);
   }
-  rei_worker_exit ex = rei_pool_worker_run(p);
+  mizu_worker_exit ex = mizu_pool_worker_run(p);
   if (ex != expect) _exit(4);
-  if (rei_pool_leave(p) != REI_OK) _exit(5);
+  if (mizu_pool_leave(p) != MIZU_OK) _exit(5);
   if (linger)
-    while (!rei_pool_lame_duck(p)) sleep_ms(10);
-  rei_pool_destroy(p);
+    while (!mizu_pool_lame_duck(p)) sleep_ms(10);
+  mizu_pool_destroy(p);
   _exit(0);
 }
 
 /* Nested-submit four tasks onto the own deque, wait the go-ahead, die
    with them queued. */
 static void run_nest(uint32_t slot) {
-  rei_binding b;
+  mizu_binding b;
   child_binding(&b, 1);
-  rei_pool *p;
-  if (rei_pool_worker_join(&p, child_token, slot, &b) != REI_OK) _exit(3);
+  mizu_pool *p;
+  if (mizu_pool_worker_join(&p, child_token, slot, &b) != MIZU_OK) _exit(3);
   const char *names[4] = { "n0", "n1", "n2", "n3" };
   for (int i = 0; i < 4; i++) {
-    rei_bytes tb = { (void *) names[i], 2 };
-    rei_task t;
-    if (rei_pool_submit(p, &tb, &t, 0) != REI_OK) _exit(6);
+    mizu_bytes tb = { (void *) names[i], 2 };
+    mizu_task t;
+    if (mizu_pool_submit(p, &tb, &t, 0) != MIZU_OK) _exit(6);
   }
   char c;
   if (read(go_pipe[0], &c, 1) != 1) _exit(7);
@@ -120,32 +120,32 @@ static void run_nest(uint32_t slot) {
 
 /* Attach, submit, cancel, exit — dead with a cancelled task queued. */
 static void run_submitter_cancel(void) {
-  rei_binding b;
+  mizu_binding b;
   child_binding(&b, 0);
-  rei_pool *p;
-  if (rei_pool_attach(&p, child_token, &b) != REI_OK) _exit(3);
-  rei_bytes tb = { (void *) "x", 1 };
-  rei_task t;
-  if (rei_pool_submit(p, &tb, &t, 0) != REI_OK) _exit(6);
-  if (rei_pool_cancel(p, &t) != 1) _exit(7);
+  mizu_pool *p;
+  if (mizu_pool_attach(&p, child_token, &b) != MIZU_OK) _exit(3);
+  mizu_bytes tb = { (void *) "x", 1 };
+  mizu_task t;
+  if (mizu_pool_submit(p, &tb, &t, 0) != MIZU_OK) _exit(6);
+  if (mizu_pool_cancel(p, &t) != 1) _exit(7);
   _exit(0);   /* no destroy: the death is the point */
 }
 
 /* Attach, submit, collect and check — the reclaimed slot serves. */
 static void run_submitter_echo(void) {
-  rei_binding b;
+  mizu_binding b;
   child_binding(&b, 0);
-  rei_pool *p;
-  if (rei_pool_attach(&p, child_token, &b) != REI_OK) _exit(3);
-  rei_bytes tb = { (void *) "y", 1 };
-  rei_task t;
-  if (rei_pool_submit(p, &tb, &t, 1000) != REI_OK) _exit(6);
+  mizu_pool *p;
+  if (mizu_pool_attach(&p, child_token, &b) != MIZU_OK) _exit(3);
+  mizu_bytes tb = { (void *) "y", 1 };
+  mizu_task t;
+  if (mizu_pool_submit(p, &tb, &t, 1000) != MIZU_OK) _exit(6);
   void *obj = NULL;
-  if (rei_pool_collect(p, &t, &obj, 5000) != REI_OK) _exit(7);
-  rei_bytes *rb = obj;
+  if (mizu_pool_collect(p, &t, &obj, 5000) != MIZU_OK) _exit(7);
+  mizu_bytes *rb = obj;
   int ok = rb != NULL && rb->len == 1 && memcmp(rb->data, "y", 1) == 0;
-  rei_bytes_free(rb);
-  rei_pool_destroy(p);
+  mizu_bytes_free(rb);
+  mizu_pool_destroy(p);
   _exit(ok ? 0 : 8);
 }
 
@@ -181,20 +181,20 @@ static int wait_signalled(pid_t pid) {
 
 // Harness ------------------------------------------------------------------------------
 
-static rei_pool *make_pool(uint32_t workers, uint32_t subs) {
-  rei_pool_opts opts;
-  rei_pool_opts_init(&opts);
+static mizu_pool *make_pool(uint32_t workers, uint32_t subs) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
   opts.max_workers = workers;
   opts.max_submitters = subs;
   opts.injection_cap = 8;
   opts.per_worker_cap = 8;
   opts.result_slots = 8 * subs;
   opts.slot_size = 512;
-  rei_binding b;
-  rei_binding_bytes(&b);
-  rei_pool *p;
-  assert(rei_pool_create(&p, &opts, &b) == REI_OK);
-  assert(rei_pool_token(p, child_token, sizeof child_token) == REI_OK);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *p;
+  assert(mizu_pool_create(&p, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(p, child_token, sizeof child_token) == MIZU_OK);
   return p;
 }
 
@@ -202,27 +202,27 @@ static rei_pool *make_pool(uint32_t workers, uint32_t subs) {
 
 /* Worker kill -9 mid-task: the result fails DIED (the death watch's
    off-thread reap, or the collect wake-backstop, runs the verdict), and
-   stop over the dead worker answers REI_OK — the slot is already reaped. */
+   stop over the dead worker answers MIZU_OK — the slot is already reaped. */
 static void test_worker_death(void) {
-  rei_pool *ctrl = make_pool(1, 2);
-  child_expect = REI_EXIT_SHUTDOWN;
+  mizu_pool *ctrl = make_pool(1, 2);
+  child_expect = MIZU_EXIT_SHUTDOWN;
   child_linger = 0;
   pid_t w = spawn(ROLE_WORKER, 0);
   uint32_t slot0 = 0;
-  assert(rei_pool_ready_wait(ctrl, &slot0, 1, 5000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, &slot0, 1, 5000) == MIZU_OK);
 
-  rei_bytes tb = { (void *) "die", 3 };
-  rei_task t;
-  assert(rei_pool_submit(ctrl, &tb, &t, 1000) == REI_OK);
+  mizu_bytes tb = { (void *) "die", 3 };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
   void *obj = NULL;
-  assert(rei_pool_collect(ctrl, &t, &obj, 10000) == REI_ERR);
+  assert(mizu_pool_collect(ctrl, &t, &obj, 10000) == MIZU_ERR);
   assert(obj == NULL);
-  assert(strcmp(rei_pool_error(ctrl),
+  assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
   assert(wait_signalled(w) == SIGKILL);
 
-  assert(rei_pool_stop(ctrl, 5000) == REI_OK);
-  rei_pool_destroy(ctrl);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  mizu_pool_destroy(ctrl);
   puts("ok worker_death");
 }
 
@@ -230,14 +230,14 @@ static void test_worker_death(void) {
    four nested tasks' results publish into the dead worker's submitter
    subrange. */
 static void test_orphan_deque_drain(void) {
-  rei_pool *ctrl = make_pool(2, 2);
+  mizu_pool *ctrl = make_pool(2, 2);
   assert(pipe(go_pipe) == 0);
   pid_t w0 = spawn(ROLE_NEST, 0);
-  child_expect = REI_EXIT_SHUTDOWN;
+  child_expect = MIZU_EXIT_SHUTDOWN;
   child_linger = 0;
   pid_t w1 = spawn(ROLE_WORKER, 1);
   uint32_t slots[2] = { 0, 1 };
-  assert(rei_pool_ready_wait(ctrl, slots, 2, 5000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, slots, 2, 5000) == MIZU_OK);
   assert(write(go_pipe[1], "g", 1) == 1);   /* w0 dies with a queued deque */
   close(go_pipe[0]);
   close(go_pipe[1]);
@@ -245,21 +245,21 @@ static void test_orphan_deque_drain(void) {
   assert(wait_signalled(w0) == SIGKILL);
 
   /* w1 steals and executes the four orphaned nested tasks */
-  rei_rs_row rows[16];
+  mizu_rs_row rows[16];
   int done = 0;
   for (int i = 0; i < 2000 && !done; i++) {
     uint32_t nrows = 0;
-    assert(rei_pool_tasks_get(ctrl, rows, 16, &nrows) == REI_OK);
+    assert(mizu_pool_tasks_get(ctrl, rows, 16, &nrows) == MIZU_OK);
     done = nrows == 4;
     for (uint32_t k = 0; k < nrows && k < 4; k++)
-      done = done && rows[k].status == REI_RS_OK;
+      done = done && rows[k].status == MIZU_RS_OK;
     if (!done) sleep_ms(5);
   }
   assert(done);
 
-  assert(rei_pool_stop(ctrl, 5000) == REI_OK);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
   assert(wait_exit(w1) == 0);
-  rei_pool_destroy(ctrl);
+  mizu_pool_destroy(ctrl);
   puts("ok orphan_deque_drain");
 }
 
@@ -277,20 +277,20 @@ static void test_owner_death(void) {
     close(go[1]);
     close(joined[0]);
     close(joined[1]);
-    rei_pool_opts opts;
-    rei_pool_opts_init(&opts);
+    mizu_pool_opts opts;
+    mizu_pool_opts_init(&opts);
     opts.max_workers = 1;
     opts.max_submitters = 2;
     opts.injection_cap = 8;
     opts.per_worker_cap = 8;
     opts.result_slots = 16;
     opts.slot_size = 512;
-    rei_binding b;
-    rei_binding_bytes(&b);
-    rei_pool *p;
-    if (rei_pool_create(&p, &opts, &b) != REI_OK) _exit(3);
+    mizu_binding b;
+    mizu_binding_bytes(&b);
+    mizu_pool *p;
+    if (mizu_pool_create(&p, &opts, &b) != MIZU_OK) _exit(3);
     char token[64];
-    if (rei_pool_token(p, token, sizeof token) != REI_OK) _exit(4);
+    if (mizu_pool_token(p, token, sizeof token) != MIZU_OK) _exit(4);
     if (write(tok[1], token, sizeof token) != (ssize_t) sizeof token)
       _exit(5);
     char c;
@@ -303,7 +303,7 @@ static void test_owner_death(void) {
          (ssize_t) sizeof child_token);
   close(tok[0]);
 
-  child_expect = REI_EXIT_OWNER_GONE;
+  child_expect = MIZU_EXIT_OWNER_GONE;
   child_linger = 0;
   joined_wr = joined[1];
   pid_t b_pid = spawn(ROLE_WORKER, 0);
@@ -317,32 +317,32 @@ static void test_owner_death(void) {
   assert(wait_exit(a) == 0);
   assert(wait_exit(b_pid) == 0);
 
-  rei_binding bb;
-  rei_binding_bytes(&bb);
-  rei_pool *late;
-  assert(rei_pool_attach(&late, child_token, &bb) == REI_ERR);
+  mizu_binding bb;
+  mizu_binding_bytes(&bb);
+  mizu_pool *late;
+  assert(mizu_pool_attach(&late, child_token, &bb) == MIZU_ERR);
   puts("ok owner_death");
 }
 
 /* Submitter death: the worker's CANCEL-consume probes and reaps the dead
    submitter in-line, freeing its registry slot for a fresh attach. */
 static void test_submitter_death(void) {
-  rei_pool *ctrl = make_pool(1, 2);
+  mizu_pool *ctrl = make_pool(1, 2);
   pid_t s = spawn(ROLE_SUB_CANCEL, 0);
   assert(wait_exit(s) == 0);   /* dead with a cancelled task queued */
 
-  child_expect = REI_EXIT_SHUTDOWN;
+  child_expect = MIZU_EXIT_SHUTDOWN;
   child_linger = 0;
   pid_t w = spawn(ROLE_WORKER, 0);
   uint32_t slot0 = 0;
-  assert(rei_pool_ready_wait(ctrl, &slot0, 1, 5000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, &slot0, 1, 5000) == MIZU_OK);
 
   /* the claim consumes the CANCEL and reaps the dead submitter */
   int freed = 0;
   for (int i = 0; i < 2000 && !freed; i++) {
-    rei_pool_status st;
-    assert(rei_pool_status_get(ctrl, &st) == REI_OK);
-    freed = st.sub_state[1] == REI_SUB_FREE;
+    mizu_pool_status st;
+    assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+    freed = st.sub_state[1] == MIZU_SUB_FREE;
     if (!freed) sleep_ms(5);
   }
   assert(freed);
@@ -350,43 +350,43 @@ static void test_submitter_death(void) {
   pid_t s2 = spawn(ROLE_SUB_ECHO, 0);   /* the reclaimed slot serves */
   assert(wait_exit(s2) == 0);
 
-  assert(rei_pool_stop(ctrl, 5000) == REI_OK);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
   assert(wait_exit(w) == 0);
-  rei_pool_destroy(ctrl);
+  mizu_pool_destroy(ctrl);
   puts("ok submitter_death");
 }
 
 /* Stop with live workers: a cross-process collect_all round trip, then a
    clean shutdown — both workers take their exit path inside the wait. */
 static void test_stop_live_workers(void) {
-  rei_pool *ctrl = make_pool(2, 2);
-  child_expect = REI_EXIT_SHUTDOWN;
+  mizu_pool *ctrl = make_pool(2, 2);
+  child_expect = MIZU_EXIT_SHUTDOWN;
   child_linger = 0;
   pid_t w0 = spawn(ROLE_WORKER, 0);
   pid_t w1 = spawn(ROLE_WORKER, 1);
   uint32_t slots[2] = { 0, 1 };
-  assert(rei_pool_ready_wait(ctrl, slots, 2, 5000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, slots, 2, 5000) == MIZU_OK);
 
   const char *words[4] = { "aa", "bb", "cc", "dd" };
-  rei_task ts[4];
+  mizu_task ts[4];
   for (int i = 0; i < 4; i++) {
-    rei_bytes b = { (void *) words[i], 2 };
-    assert(rei_pool_submit(ctrl, &b, &ts[i], 5000) == REI_OK);
+    mizu_bytes b = { (void *) words[i], 2 };
+    assert(mizu_pool_submit(ctrl, &b, &ts[i], 5000) == MIZU_OK);
   }
   void *vals[4] = { NULL, NULL, NULL, NULL };
   size_t err = 99;
-  assert(rei_pool_collect_all(ctrl, ts, 4, vals, &err, 10000) == REI_OK);
+  assert(mizu_pool_collect_all(ctrl, ts, 4, vals, &err, 10000) == MIZU_OK);
   assert(err == 4);
   for (int i = 0; i < 4; i++) {
-    rei_bytes *b = vals[i];
+    mizu_bytes *b = vals[i];
     assert(b->len == 2 && memcmp(b->data, words[i], 2) == 0);
-    rei_bytes_free(b);
+    mizu_bytes_free(b);
   }
 
-  assert(rei_pool_stop(ctrl, 5000) == REI_OK);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
   assert(wait_exit(w0) == 0);
   assert(wait_exit(w1) == 0);
-  rei_pool_destroy(ctrl);
+  mizu_pool_destroy(ctrl);
   puts("ok stop_live_workers");
 }
 
@@ -394,24 +394,24 @@ static void test_stop_live_workers(void) {
    result stays alive as its lifetime anchor until the collect frees the
    slot. */
 static void test_lame_duck(void) {
-  rei_pool *ctrl = make_pool(1, 2);
-  child_expect = REI_EXIT_RETIRED;
+  mizu_pool *ctrl = make_pool(1, 2);
+  child_expect = MIZU_EXIT_RETIRED;
   child_linger = 1;
   pid_t w = spawn(ROLE_WORKER, 0);
   uint32_t slot0 = 0;
-  assert(rei_pool_ready_wait(ctrl, &slot0, 1, 5000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, &slot0, 1, 5000) == MIZU_OK);
 
-  rei_bytes tb = { (void *) "big", 3 };
-  rei_task t;
-  assert(rei_pool_submit(ctrl, &tb, &t, 1000) == REI_OK);
+  mizu_bytes tb = { (void *) "big", 3 };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
   int ok = 0;
   for (int i = 0; i < 2000 && !ok; i++) {
-    ok = rei_pool_task_state(ctrl, &t) == REI_RS_OK;
+    ok = mizu_pool_task_state(ctrl, &t) == MIZU_RS_OK;
     if (!ok) sleep_ms(5);
   }
   assert(ok);
 
-  assert(rei_pool_retire(ctrl, 0) == REI_OK);
+  assert(mizu_pool_retire(ctrl, 0) == MIZU_OK);
   /* the worker retires and lingers — it cannot exit while the result is
      uncollected */
   sleep_ms(300);
@@ -419,16 +419,16 @@ static void test_lame_duck(void) {
   assert(waitpid(w, &st, WNOHANG) == 0);
 
   void *obj = NULL;
-  assert(rei_pool_collect(ctrl, &t, &obj, 5000) == REI_OK);
-  rei_bytes *b = obj;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+  mizu_bytes *b = obj;
   assert(b->len == 100 * 1024);
   assert(((unsigned char *) b->data)[0] == 0);
   assert(((unsigned char *) b->data)[99999] == (unsigned char) (99999 * 31u));
-  rei_bytes_free(b);
+  mizu_bytes_free(b);
 
   assert(wait_exit(w) == 0);   /* the linger ended once the slot freed */
-  assert(rei_pool_stop(ctrl, 5000) == REI_OK);
-  rei_pool_destroy(ctrl);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  mizu_pool_destroy(ctrl);
   puts("ok lame_duck");
 }
 

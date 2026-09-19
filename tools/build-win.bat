@@ -5,7 +5,7 @@ rem lock-free paths carry no second atomics implementation. clang-cl is
 rem preinstalled on GitHub Windows runners (LLVM).
 rem
 rem Usage: tools\build-win.bat [test]
-rem   (no args)  build rei.lib (static) and rei.dll (shared)
+rem   (no args)  build mizu.lib (static) and mizu.dll (shared)
 rem   test       also build and run the unit tier
 
 setlocal enabledelayedexpansion
@@ -22,7 +22,7 @@ rem /W4, not -Wall: clang-cl maps -Wall to /Wall (-Weverything), which
 rem misfires -Wpre-c11-compat on C11 constructs even with the standard
 rem set; /W4 maps to clang's -Wall -Wextra.
 set CFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -D_CRT_SECURE_NO_WARNINGS
-set DLLFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -DREI_SHARED -DREI_BUILDING -D_CRT_SECURE_NO_WARNINGS
+set DLLFLAGS=-nologo /std:c11 -O2 /W4 -Werror -Iinclude -Isrc -DMIZU_SHARED -DMIZU_BUILDING -D_CRT_SECURE_NO_WARNINGS
 rem Every TU is platform-guarded internally; a foreign platform's file
 rem compiles empty — so the source set is the src\*.c glob, as in the
 rem Makefile (a hand-maintained list silently drops new TUs at link).
@@ -34,21 +34,21 @@ for %%f in (src\*.c) do (
   clang-cl %CFLAGS% -c %%f -Fobuild\ || exit /b 1
 )
 
-lib -nologo -out:build\rei.lib build\*.obj || exit /b 1
+lib -nologo -out:build\mizu.lib build\*.obj || exit /b 1
 
 rem The DLL needs its own object set: dllexport is a compile-time
-rem attribute (REI_API defaults to empty — objects compiled without
-rem REI_SHARED carry no exports), and the link's default import library
-rem name would clobber the static rei.lib.
+rem attribute (MIZU_API defaults to empty — objects compiled without
+rem MIZU_SHARED carry no exports), and the link's default import library
+rem name would clobber the static mizu.lib.
 mkdir build\dll
 for %%f in (src\*.c) do (
   clang-cl %DLLFLAGS% -c %%f -Fobuild\dll\ || exit /b 1
 )
-clang-cl -nologo -LD build\dll\*.obj -Fe:build\rei.dll -link -IMPLIB:build\rei-dll.lib || exit /b 1
+clang-cl -nologo -LD build\dll\*.obj -Fe:build\mizu.dll -link -IMPLIB:build\mizu-dll.lib || exit /b 1
 
 if "%~1"=="test" (
   for %%t in (tests\unit\*.c) do (
-    clang-cl %CFLAGS% %%t build\rei.lib -Fe:build\%%~nf.exe || exit /b 1
+    clang-cl %CFLAGS% %%t build\mizu.lib -Fe:build\%%~nf.exe || exit /b 1
     build\%%~nf.exe || exit /b 1
   )
 )

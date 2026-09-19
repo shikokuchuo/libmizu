@@ -26,12 +26,12 @@
 
 enum { THREADS = 8, PER_THREAD = 64, TOTAL = THREADS * PER_THREAD };
 
-static rei_shm *regions[TOTAL];
+static mizu_shm *regions[TOTAL];
 
 static void *worker(void *arg) {
   size_t base = (size_t) (uintptr_t) arg * PER_THREAD;
   for (int i = 0; i < PER_THREAD; i++)
-    assert(rei_shm_create(&regions[base + i], 4096) == REI_OK);
+    assert(mizu_shm_create(&regions[base + i], 4096) == MIZU_OK);
   return NULL;
 }
 
@@ -48,7 +48,7 @@ static int cmp_u32(const void *a, const void *b) {
 int main(void) {
   /* Scratch registry dir: the log resolves $TMPDIR per call. */
   char scratch[PATH_MAX];
-  int sn = snprintf(scratch, sizeof(scratch), "/tmp/rei_test_reg_%ld",
+  int sn = snprintf(scratch, sizeof(scratch), "/tmp/mizu_test_reg_%ld",
                     (long) getpid());
   assert(sn > 0 && (size_t) sn < sizeof(scratch));
   assert(mkdir(scratch, 0700) == 0);
@@ -62,7 +62,7 @@ int main(void) {
 
   /* One whole 4-byte record per create, all counters distinct. */
   char logpath[PATH_MAX];
-  int ln = snprintf(logpath, sizeof(logpath), "%s/rei/rei_%x",
+  int ln = snprintf(logpath, sizeof(logpath), "%s/mizu/mizu_%x",
                     scratch, (unsigned) getpid());
   assert(ln > 0 && (size_t) ln < sizeof(logpath));
   assert(log_size(logpath) == (long) TOTAL * 4);
@@ -76,30 +76,30 @@ int main(void) {
 
   /* Tearing down the last region truncates the log in place (512
      records clear the 256-record floor). */
-  for (int i = 0; i < TOTAL; i++) rei_shm_close(regions[i], 1);
+  for (int i = 0; i < TOTAL; i++) mizu_shm_close(regions[i], 1);
   assert(log_size(logpath) == 0);
 
   /* Appends continue from the truncated end; below the floor the
      zero-crossing leaves the record be. */
-  rei_shm *one = NULL;
-  assert(rei_shm_create(&one, 4096) == REI_OK);
+  mizu_shm *one = NULL;
+  assert(mizu_shm_create(&one, 4096) == MIZU_OK);
   assert(log_size(logpath) == 4);
-  rei_shm_close(one, 1);
+  mizu_shm_close(one, 1);
   assert(log_size(logpath) == 4);
 
   /* The exit/unload teardown is a no-op while a region is live... */
-  rei_shm *two = NULL;
-  assert(rei_shm_create(&two, 4096) == REI_OK);
-  rei_log_teardown();
+  mizu_shm *two = NULL;
+  assert(mizu_shm_create(&two, 4096) == MIZU_OK);
+  mizu_log_teardown();
   assert(log_size(logpath) == 8);
 
   /* ...and removes the log and prunes the dir once the last region
      comes down (in production the reaper owns dead processes' logs). */
-  rei_shm_close(two, 1);
-  rei_log_teardown();
+  mizu_shm_close(two, 1);
+  mizu_log_teardown();
   assert(log_size(logpath) == -1);
   char regdir[PATH_MAX];
-  int rn = snprintf(regdir, sizeof(regdir), "%s/rei", scratch);
+  int rn = snprintf(regdir, sizeof(regdir), "%s/mizu", scratch);
   assert(rn > 0 && (size_t) rn < sizeof(regdir));
   struct stat st;
   assert(stat(regdir, &st) != 0);

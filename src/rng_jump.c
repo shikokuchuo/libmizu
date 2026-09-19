@@ -12,13 +12,13 @@
  *     Oriented Random-Number Package with Many Long Streams and Substreams",
  *     Operations Research, 50, 6 (2002), 1073-1075.
  *
- * The kernel ships in the core so a future rei_map can derive per-element
+ * The kernel ships in the core so a future mizu_map can derive per-element
  * streams. */
 
 #include "internal.h"
 
-#define REI_RNG_M1 4294967087ULL
-#define REI_RNG_M2 4294944443ULL
+#define MIZU_RNG_M1 4294967087ULL
+#define MIZU_RNG_M2 4294944443ULL
 
 /* Jump matrices A1^(2^127) mod m1 and A2^(2^127) mod m2 */
 static const unsigned long long A1p127[3][3] = {
@@ -46,14 +46,14 @@ static void mat_vec_mod(const unsigned long long A[3][3],
 
 /* One 2^127-step stream jump in place over a 6-word CMRG state, held as
    signed ints with values in [0, m). */
-void rei_rng_jump(int *seed) {
+void mizu_rng_jump(int *seed) {
   unsigned long long v1[3] = { (unsigned int) seed[0], (unsigned int) seed[1],
                                (unsigned int) seed[2] };
   unsigned long long v2[3] = { (unsigned int) seed[3], (unsigned int) seed[4],
                                (unsigned int) seed[5] };
   unsigned long long out1[3], out2[3];
-  mat_vec_mod(A1p127, v1, out1, REI_RNG_M1);
-  mat_vec_mod(A2p127, v2, out2, REI_RNG_M2);
+  mat_vec_mod(A1p127, v1, out1, MIZU_RNG_M1);
+  mat_vec_mod(A2p127, v2, out2, MIZU_RNG_M2);
   for (int i = 0; i < 3; i++) {
     seed[i]     = (int) out1[i];
     seed[i + 3] = (int) out2[i];

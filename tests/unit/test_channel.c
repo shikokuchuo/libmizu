@@ -11,27 +11,27 @@
 
 #include "internal.h"
 
-static void send_bytes(rei_channel *c, const void *data, size_t len) {
-  rei_bytes b = { (void *) data, len };
-  assert(rei_channel_send(c, &b) == REI_OK);
+static void send_bytes(mizu_channel *c, const void *data, size_t len) {
+  mizu_bytes b = { (void *) data, len };
+  assert(mizu_channel_send(c, &b) == MIZU_OK);
 }
 
 static void array_sink(void *ctx, size_t i, void *obj) {
   ((void **) ctx)[i] = obj;
 }
 
-static void recv_bytes(rei_channel *c, const void *expect, size_t len) {
+static void recv_bytes(mizu_channel *c, const void *expect, size_t len) {
   void *obj = NULL;
-  assert(rei_channel_recv(c, &obj, 1000) == REI_OK);
-  rei_bytes *b = obj;
+  assert(mizu_channel_recv(c, &obj, 1000) == MIZU_OK);
+  mizu_bytes *b = obj;
   assert(b->len == len);
   assert(len == 0 || memcmp(b->data, expect, len) == 0);
-  rei_bytes_free(b);
+  mizu_bytes_free(b);
 }
 
 // A modal binding wrapping the bytes stager: pin every send, or fail ----
 
-static rei_binding bytesb;
+static mizu_binding bytesb;
 static int pin_token;
 static int drops;
 static int stage_mode;               /* 0 = bytes+pin, 1 = fail, 2 = spill+fail */
@@ -42,28 +42,28 @@ static void count_drop(void *ctx, void *pin) {
   drops++;
 }
 
-static int wrap_stage(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
-                      uint32_t inline_max, rei_handle *h, void *ctx) {
+static int wrap_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                      uint32_t inline_max, mizu_handle *h, void *ctx) {
   if (stage_mode == 1) return 1;
   if (stage_mode == 2) {
     /* abandon after retaining: the checkout must roll back at the
        next verb */
-    rei_shm *shm;
-    if (rei_stage_spill_get(h, 8192, &shm) != REI_OK) return 1;
-    rei_stage_retain(h, shm);
+    mizu_shm *shm;
+    if (mizu_stage_spill_get(h, 8192, &shm) != MIZU_OK) return 1;
+    mizu_stage_retain(h, shm);
     return 1;
   }
   int rc = bytesb.stage(obj, hdr, payload, inline_max, h, ctx);
-  if (rc == 0) rei_stage_pin(h, &pin_token);
+  if (rc == 0) mizu_stage_pin(h, &pin_token);
   return rc;
 }
 
 /* A frame the bytes reader must refuse (a view tier). */
-static int stage_shm_vec(void *obj, rei_slot_hdr *hdr, uint8_t *payload,
-                         uint32_t inline_max, rei_handle *h, void *ctx) {
+static int stage_shm_vec(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                         uint32_t inline_max, mizu_handle *h, void *ctx) {
   (void) obj; (void) h; (void) ctx;
-  const char *name = "/rei_nonexistent";
-  hdr->kind = REI_KIND_SHM_VEC;
+  const char *name = "/mizu_nonexistent";
+  hdr->kind = MIZU_KIND_SHM_VEC;
   hdr->len = (uint32_t) strlen(name);
   hdr->aux = 0;
   assert(strlen(name) <= inline_max);
@@ -78,39 +78,39 @@ static int check_intr(void *ctx) {
 }
 
 int main(void) {
-  rei_binding_bytes(&bytesb);
+  mizu_binding_bytes(&bytesb);
 
-  rei_channel_opts opts;
-  rei_channel_opts_init(&opts);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
   opts.capacity = 8;                 /* small ring: the full path is cheap */
   opts.slot_size = 256;              /* inline_max = 240 */
   opts.arena_size = 64 << 10;
-  const char drop[] = "Sbootstrap";  /* a REI_DROP_SOURCE-tagged payload */
+  const char drop[] = "Sbootstrap";  /* a MIZU_DROP_SOURCE-tagged payload */
   opts.drop = (const uint8_t *) drop;
   opts.drop_size = sizeof(drop);
 
-  rei_channel *host = NULL, *peer = NULL;
-  assert(rei_channel_create(&host, &opts, &bytesb) == REI_OK);
+  mizu_channel *host = NULL, *peer = NULL;
+  assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
   char token[64];
-  assert(rei_channel_token(host, token, sizeof(token)) == REI_OK);
-  assert(rei_channel_attach(&peer, token, &bytesb) == REI_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
 
   /* the drop is staged at create and readable on the peer */
   const uint8_t *db;
   uint64_t dn;
-  rei_channel_drop(peer, &db, &dn);
+  mizu_channel_drop(peer, &db, &dn);
   assert(dn == sizeof(drop) && memcmp(db, drop, sizeof(drop)) == 0);
 
   /* a host without a peer never rendezvous: ready_wait times out */
-  rei_channel *lonely = NULL;
-  assert(rei_channel_create(&lonely, &opts, &bytesb) == REI_OK);
-  assert(rei_channel_ready_wait(lonely, 20) == REI_TIMEOUT);
-  rei_channel_destroy(lonely);
+  mizu_channel *lonely = NULL;
+  assert(mizu_channel_create(&lonely, &opts, &bytesb) == MIZU_OK);
+  assert(mizu_channel_ready_wait(lonely, 20) == MIZU_TIMEOUT);
+  mizu_channel_destroy(lonely);
 
-  assert(rei_channel_ready_set(peer) == REI_OK);
-  assert(rei_channel_ready_wait(host, 5000) == REI_OK);
-  assert(rei_channel_alive(host) == 1);
-  assert(rei_channel_alive(peer) == 1);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  assert(mizu_channel_alive(host) == 1);
+  assert(mizu_channel_alive(peer) == 1);
 
   /* INLINE round trip */
   send_bytes(host, "hello", 5);
@@ -135,63 +135,63 @@ int main(void) {
   send_bytes(host, big, 1 << 20);
   recv_bytes(peer, big, 1 << 20);
 
-  rei_channel_info info;
-  assert(rei_channel_info_get(host, &info) == REI_OK);
+  mizu_channel_info info;
+  assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 0);      /* pinned by the outstanding keeper */
   send_bytes(host, "x", 1);          /* the reap trigger: head advanced */
   recv_bytes(peer, "x", 1);
-  assert(rei_channel_info_get(host, &info) == REI_OK);
+  assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 1);      /* surrendered to the free list */
 
   send_bytes(host, big, 1 << 20);    /* pops the free list (same region) */
   recv_bytes(peer, big, 1 << 20);
   free(big);
-  assert(rei_channel_info_get(host, &info) == REI_OK);
+  assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_hits == 1);
-  assert(rei_channel_info_get(peer, &info) == REI_OK);
+  assert(mizu_channel_info_get(peer, &info) == MIZU_OK);
   assert(info.open_hits == 1);       /* the recycled name hit the cache */
 
   /* batch: one flush, order preserved */
   {
-    rei_bytes parts[4] = {
+    mizu_bytes parts[4] = {
       { "a", 1 }, { "bb", 2 }, { "ccc", 3 }, { "dddd", 4 }
     };
     void *objs[4] = { parts, parts + 1, parts + 2, parts + 3 };
     size_t accepted = 0;
-    assert(rei_channel_send_batch(host, objs, 4, &accepted) == REI_OK);
+    assert(mizu_channel_send_batch(host, objs, 4, &accepted) == MIZU_OK);
     assert(accepted == 4);
     void *got[4];
     size_t n = 0;
-    assert(rei_channel_recv_batch(peer, got, 4, &n, 1000) == REI_OK);
+    assert(mizu_channel_recv_batch(peer, got, 4, &n, 1000) == MIZU_OK);
     assert(n == 4);
     for (size_t i = 0; i < 4; i++) {
-      rei_bytes *b = got[i];
+      mizu_bytes *b = got[i];
       assert(b->len == i + 1 &&
              memcmp(b->data, parts[i].data, b->len) == 0);
-      rei_bytes_free(b);
+      mizu_bytes_free(b);
     }
   }
 
   /* batch, sink form: same drain, each message delivered as read */
   {
-    rei_bytes parts[2] = { { "e", 1 }, { "ff", 2 } };
+    mizu_bytes parts[2] = { { "e", 1 }, { "ff", 2 } };
     void *objs[2] = { parts, parts + 1 };
     size_t accepted = 0;
-    assert(rei_channel_send_batch(host, objs, 2, &accepted) == REI_OK);
+    assert(mizu_channel_send_batch(host, objs, 2, &accepted) == MIZU_OK);
     assert(accepted == 2);
     void *got[2] = { NULL, NULL };
     size_t n = 0;
-    assert(rei_channel_recv_batch_fn(peer, 4, &n, array_sink, got,
-                                     1000) == REI_OK);
+    assert(mizu_channel_recv_batch_fn(peer, 4, &n, array_sink, got,
+                                     1000) == MIZU_OK);
     assert(n == 2);
     for (size_t i = 0; i < 2; i++) {
-      rei_bytes *b = got[i];
+      mizu_bytes *b = got[i];
       assert(b->len == i + 1 &&
              memcmp(b->data, parts[i].data, b->len) == 0);
-      rei_bytes_free(b);
+      mizu_bytes_free(b);
     }
-    assert(rei_channel_recv_batch_fn(peer, 4, &n, NULL, got, 0) ==
-           REI_ERR);
+    assert(mizu_channel_recv_batch_fn(peer, 4, &n, NULL, got, 0) ==
+           MIZU_ERR);
   }
 
   /* ring full: cap 8 with nothing drained; the 9th send is refused.
@@ -199,72 +199,72 @@ int main(void) {
      so a slot frees for the sender only once the ring drains */
   for (int i = 0; i < 8; i++) send_bytes(host, "m", 1);
   {
-    rei_bytes b = { "m", 1 };
+    mizu_bytes b = { "m", 1 };
     void *obj = NULL;
-    assert(rei_channel_send(host, &b) == REI_FULL);
+    assert(mizu_channel_send(host, &b) == MIZU_FULL);
     for (int i = 0; i < 8; i++) {
-      assert(rei_channel_recv(peer, &obj, 1000) == REI_OK);
-      rei_bytes_free(obj);
+      assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+      mizu_bytes_free(obj);
     }
-    assert(rei_channel_send(host, &b) == REI_OK);
-    assert(rei_channel_recv(peer, &obj, 1000) == REI_OK);
-    rei_bytes_free(obj);
+    assert(mizu_channel_send(host, &b) == MIZU_OK);
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+    mizu_bytes_free(obj);
   }
 
   /* timeout: an empty poll returns TIMEOUT */
   {
     void *obj = NULL;
-    assert(rei_channel_recv(peer, &obj, 20) == REI_TIMEOUT);
+    assert(mizu_channel_recv(peer, &obj, 20) == MIZU_TIMEOUT);
     assert(obj == NULL);
   }
 
   /* the bytes reader refuses a view-tier frame, without consuming it */
   {
-    rei_binding vb = bytesb;
+    mizu_binding vb = bytesb;
     vb.stage = stage_shm_vec;
-    rei_channel *vhost = NULL, *vpeer = NULL;
+    mizu_channel *vhost = NULL, *vpeer = NULL;
     opts.drop = NULL;
     opts.drop_size = 0;
-    assert(rei_channel_create(&vhost, &opts, &vb) == REI_OK);
-    assert(rei_channel_token(vhost, token, sizeof(token)) == REI_OK);
-    assert(rei_channel_attach(&vpeer, token, &bytesb) == REI_OK);
-    assert(rei_channel_ready_set(vpeer) == REI_OK);
-    assert(rei_channel_ready_wait(vhost, 5000) == REI_OK);
-    rei_bytes b = { "v", 1 };
-    assert(rei_channel_send(vhost, &b) == REI_OK);
+    assert(mizu_channel_create(&vhost, &opts, &vb) == MIZU_OK);
+    assert(mizu_channel_token(vhost, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&vpeer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(vpeer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(vhost, 5000) == MIZU_OK);
+    mizu_bytes b = { "v", 1 };
+    assert(mizu_channel_send(vhost, &b) == MIZU_OK);
     void *obj = NULL;
-    assert(rei_channel_recv(vpeer, &obj, 1000) == REI_ERR);
-    assert(rei_channel_errcat(vpeer) == REI_ERRCAT_OTHER);
-    assert(rei_channel_recv(vpeer, &obj, 1000) == REI_ERR);  /* wedged */
-    rei_channel_destroy(vpeer);
-    rei_channel_destroy(vhost);
+    assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);
+    assert(mizu_channel_errcat(vpeer) == MIZU_ERRCAT_OTHER);
+    assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);  /* wedged */
+    mizu_channel_destroy(vpeer);
+    mizu_channel_destroy(vhost);
   }
 
-  /* the modal binding: stage failure surfaces as REI_ERRCAT_STAGE; an
+  /* the modal binding: stage failure surfaces as MIZU_ERRCAT_STAGE; an
      abandoned checkout rolls back at the next verb; pins drop at the
      consumer-done reap */
   {
-    rei_binding pb = bytesb;
+    mizu_binding pb = bytesb;
     pb.stage = wrap_stage;
     pb.drop = count_drop;
     drops = 0;
-    rei_channel *phost = NULL, *ppeer = NULL;
-    assert(rei_channel_create(&phost, &opts, &pb) == REI_OK);
-    assert(rei_channel_token(phost, token, sizeof(token)) == REI_OK);
-    assert(rei_channel_attach(&ppeer, token, &bytesb) == REI_OK);
-    assert(rei_channel_ready_set(ppeer) == REI_OK);
-    assert(rei_channel_ready_wait(phost, 5000) == REI_OK);
+    mizu_channel *phost = NULL, *ppeer = NULL;
+    assert(mizu_channel_create(&phost, &opts, &pb) == MIZU_OK);
+    assert(mizu_channel_token(phost, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&ppeer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(ppeer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(phost, 5000) == MIZU_OK);
 
-    rei_bytes b = { "y", 1 };
+    mizu_bytes b = { "y", 1 };
     stage_mode = 1;
-    assert(rei_channel_send(phost, &b) == REI_ERR);
-    assert(rei_channel_errcat(phost) == REI_ERRCAT_STAGE);
+    assert(mizu_channel_send(phost, &b) == MIZU_ERR);
+    assert(mizu_channel_errcat(phost) == MIZU_ERRCAT_STAGE);
 
     stage_mode = 2;                  /* retain, then abandon */
-    assert(rei_channel_send(phost, &b) == REI_ERR);
+    assert(mizu_channel_send(phost, &b) == MIZU_ERR);
     stage_mode = 0;
     send_bytes(phost, "z", 1);       /* rolls the checkout back */
-    assert(rei_channel_info_get(phost, &info) == REI_OK);
+    assert(mizu_channel_info_get(phost, &info) == MIZU_OK);
     assert(info.fl_entries == 1);
     recv_bytes(ppeer, "z", 1);
 
@@ -272,37 +272,37 @@ int main(void) {
     for (int i = 0; i < 4; i++) recv_bytes(ppeer, "p", 1);
     /* one more verb to reap past the last pin */
     void *obj = NULL;
-    assert(rei_channel_recv(phost, &obj, 0) == REI_TIMEOUT);
+    assert(mizu_channel_recv(phost, &obj, 0) == MIZU_TIMEOUT);
     assert(drops == 5);              /* "z" and the four "p" */
-    rei_channel_destroy(phost);
-    rei_channel_destroy(ppeer);
+    mizu_channel_destroy(phost);
+    mizu_channel_destroy(ppeer);
   }
 
   /* the interrupt abandon: a nonzero check unwinds the wait as
-     REI_ERR / REI_ERRCAT_INTERRUPTED, consuming nothing. On a
+     MIZU_ERR / MIZU_ERRCAT_INTERRUPTED, consuming nothing. On a
      pure-spin channel the check fires every spin cycle — no park
      latency in the test */
   {
-    rei_binding ib = bytesb;
+    mizu_binding ib = bytesb;
     ib.check = check_intr;
-    rei_channel_opts spin_opts = opts;
-    spin_opts.flags = REI_CHANNEL_SPIN;
-    rei_channel *ihost = NULL, *ipeer = NULL;
-    assert(rei_channel_create(&ihost, &spin_opts, &ib) == REI_OK);
-    assert(rei_channel_token(ihost, token, sizeof(token)) == REI_OK);
-    assert(rei_channel_attach(&ipeer, token, &bytesb) == REI_OK);
-    assert(rei_channel_ready_set(ipeer) == REI_OK);
+    mizu_channel_opts spin_opts = opts;
+    spin_opts.flags = MIZU_CHANNEL_SPIN;
+    mizu_channel *ihost = NULL, *ipeer = NULL;
+    assert(mizu_channel_create(&ihost, &spin_opts, &ib) == MIZU_OK);
+    assert(mizu_channel_token(ihost, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&ipeer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(ipeer) == MIZU_OK);
     check_calls = 0;                 /* count only the recv wait's polls */
-    assert(rei_channel_ready_wait(ihost, 5000) == REI_OK);
+    assert(mizu_channel_ready_wait(ihost, 5000) == MIZU_OK);
     void *obj = NULL;
-    assert(rei_channel_recv(ihost, &obj, 30000) == REI_ERR);
-    assert(rei_channel_errcat(ihost) == REI_ERRCAT_INTERRUPTED);
+    assert(mizu_channel_recv(ihost, &obj, 30000) == MIZU_ERR);
+    assert(mizu_channel_errcat(ihost) == MIZU_ERRCAT_INTERRUPTED);
     /* the handle is still consistent: traffic flows */
     send_bytes(ipeer, "q", 1);
     check_calls = -1000000;          /* re-arm the hook */
     recv_bytes(ihost, "q", 1);
-    rei_channel_destroy(ihost);
-    rei_channel_destroy(ipeer);
+    mizu_channel_destroy(ihost);
+    mizu_channel_destroy(ipeer);
   }
 
   /* drain-before-close: published messages of a closed peer are
@@ -310,54 +310,54 @@ int main(void) {
   send_bytes(peer, "d1", 2);
   send_bytes(peer, "d2", 2);
   send_bytes(peer, "d3", 2);
-  assert(rei_channel_close_signal(peer) == REI_OK);
+  assert(mizu_channel_close_signal(peer) == MIZU_OK);
   recv_bytes(host, "d1", 2);
   recv_bytes(host, "d2", 2);
   recv_bytes(host, "d3", 2);
   {
     void *obj = NULL;
-    assert(rei_channel_recv(host, &obj, 1000) == REI_CLOSED);
+    assert(mizu_channel_recv(host, &obj, 1000) == MIZU_CLOSED);
   }
 
   /* close rendezvous: the peer's bit is already set */
-  assert(rei_channel_close(host, 5000) == REI_OK);
-  assert(rei_channel_alive(host) == 0);   /* released handle */
-  assert(rei_channel_close(host, 0) == REI_OK);   /* idempotent */
-  rei_channel_destroy(host);              /* frees */
-  rei_channel_destroy(peer);
+  assert(mizu_channel_close(host, 5000) == MIZU_OK);
+  assert(mizu_channel_alive(host) == 0);   /* released handle */
+  assert(mizu_channel_close(host, 0) == MIZU_OK);   /* idempotent */
+  mizu_channel_destroy(host);              /* frees */
+  mizu_channel_destroy(peer);
 
   /* close timeout leaves the handle usable; a later signal rendezvous */
-  assert(rei_channel_create(&host, &opts, &bytesb) == REI_OK);
-  assert(rei_channel_token(host, token, sizeof(token)) == REI_OK);
-  assert(rei_channel_attach(&peer, token, &bytesb) == REI_OK);
-  assert(rei_channel_ready_set(peer) == REI_OK);
-  assert(rei_channel_ready_wait(host, 5000) == REI_OK);
-  assert(rei_channel_close(host, 20) == REI_TIMEOUT);
+  assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  assert(mizu_channel_close(host, 20) == MIZU_TIMEOUT);
   {
     void *obj = NULL;                /* still usable: recv drains, then
                                         reports the signalled close */
-    assert(rei_channel_recv(host, &obj, 0) == REI_CLOSED);
+    assert(mizu_channel_recv(host, &obj, 0) == MIZU_CLOSED);
   }
-  assert(rei_channel_close_signal(peer) == REI_OK);
-  assert(rei_channel_close(host, 5000) == REI_OK);
-  rei_channel_destroy(host);
-  rei_channel_destroy(peer);
+  assert(mizu_channel_close_signal(peer) == MIZU_OK);
+  assert(mizu_channel_close(host, 5000) == MIZU_OK);
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
 
   /* destroy on a live handle signals close; the peer drains + closes */
-  assert(rei_channel_create(&host, &opts, &bytesb) == REI_OK);
-  assert(rei_channel_token(host, token, sizeof(token)) == REI_OK);
-  assert(rei_channel_attach(&peer, token, &bytesb) == REI_OK);
-  assert(rei_channel_ready_set(peer) == REI_OK);
-  assert(rei_channel_ready_wait(host, 5000) == REI_OK);
+  assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
   send_bytes(host, "bye", 3);
-  rei_channel_destroy(host);         /* signals close, never blocks */
+  mizu_channel_destroy(host);         /* signals close, never blocks */
   recv_bytes(peer, "bye", 3);
   {
     void *obj = NULL;
-    assert(rei_channel_recv(peer, &obj, 1000) == REI_CLOSED);
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_CLOSED);
   }
-  assert(rei_channel_alive(peer) == 0);   /* the lock probe's verdict */
-  rei_channel_destroy(peer);
+  assert(mizu_channel_alive(peer) == 0);   /* the lock probe's verdict */
+  mizu_channel_destroy(peer);
 
   puts("test_channel: ok");
   return 0;

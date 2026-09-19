@@ -18,7 +18,7 @@ jobs:
       - run: make
       - run: make test
       - run: make test-integration
-      # The consumer contract: rei.c + rei.h + rei_ext.h alone, no
+      # The consumer contract: mizu.c + mizu.h + mizu_ext.h alone, no
       # defines — the public-only program and the ext-surface proof must
       # link and run, not just compile. The stamp check guards the
       # bare-file skew case (all three files must carry the identical
@@ -28,23 +28,23 @@ jobs:
           tools/amalgamate.sh
           for t in tests/unit/*.c; do
             cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
-              -I. -Isrc "$t" rei.c -o test_amalg
+              -I. -Isrc "$t" mizu.c -o test_amalg
             ./test_amalg
           done
-          printf '#include "rei.h"\nint main(void){return rei_version()==0;}\n' \
+          printf '#include "mizu.h"\nint main(void){return mizu_version()==0;}\n' \
             > public_only.c
           cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \
-            public_only.c rei.c -o public_only
+            public_only.c mizu.c -o public_only
           ./public_only
           cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. \
-            tests/ext_surface.c rei.c -o ext_surface_amalg
+            tests/ext_surface.c mizu.c -o ext_surface_amalg
           ./ext_surface_amalg
-          cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei.h)
-          cmp <(grep -m1 'Version:' rei.c) <(grep -m1 'Version:' rei_ext.h)
+          cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu.h)
+          cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu_ext.h)
 
-  # The shared library must export exactly the rei.h + rei_ext.h
+  # The shared library must export exactly the mizu.h + mizu_ext.h
   # surface: a missing symbol is an ABI break, an extra one is a leak
-  # past REI_API.
+  # past MIZU_API.
   exports:
     runs-on: ubuntu-latest
     steps:

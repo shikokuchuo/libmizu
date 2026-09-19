@@ -1,4 +1,4 @@
-/* Soak tier: pool contention for REI_SOAK_SECONDS (the make default is
+/* Soak tier: pool contention for MIZU_SOAK_SECONDS (the make default is
    120; nightly runs set it higher) — forked workers running the echo
    exec and forked submitters keeping a window of sequence-tagged tasks
    outstanding around one controller. Tasks ride the INLINE and SHM_RAW
@@ -64,7 +64,7 @@ static void fill(uint8_t *buf, size_t len, uint64_t seq) {
   memset(buf + 8, (uint8_t) seq, len - 8);
 }
 
-static void verify(const rei_bytes *b, size_t len, uint64_t seq) {
+static void verify(const mizu_bytes *b, size_t len, uint64_t seq) {
   assert(b->len == len);
   if (len == 0) return;
   const uint8_t *d = b->data;
@@ -80,36 +80,36 @@ static void verify(const rei_bytes *b, size_t len, uint64_t seq) {
    SHM_RAW -> the spill region's stream (resolved through the worker
    handle's open cache; the borrowed mapping stays valid until the
    publish, the task's consumer-done point). */
-static int soak_exec(const rei_slot_hdr *hdr, const uint8_t *payload,
-                     size_t limit, rei_result_sink *sink, int catching,
-                     rei_read_ctx *ctx) {
+static int soak_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                     size_t limit, mizu_result_sink *sink, int catching,
+                     mizu_read_ctx *ctx) {
   (void) limit; (void) catching;
-  rei_bytes b;
-  if (hdr->kind == REI_KIND_NIL) {
+  mizu_bytes b;
+  if (hdr->kind == MIZU_KIND_NIL) {
     b.data = NULL;
     b.len = 0;
-  } else if (hdr->kind == REI_KIND_INLINE) {
+  } else if (hdr->kind == MIZU_KIND_INLINE) {
     b.data = (void *) payload;
     b.len = hdr->len;
   } else {
-    assert(hdr->kind == REI_KIND_SHM_RAW);
-    rei_shm *shm = rei_read_region(ctx, payload, hdr->len);
+    assert(hdr->kind == MIZU_KIND_SHM_RAW);
+    mizu_shm *shm = mizu_read_region(ctx, payload, hdr->len);
     assert(shm != NULL && hdr->aux <= (uint64_t) shm->size);
     b.data = shm->addr;
     b.len = (size_t) hdr->aux;
   }
-  return rei_result_publish(sink, &b) >= 0 ? 0 : 1;
+  return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
 }
 
 static void run_worker(uint32_t slot) {
-  rei_binding b;
-  rei_binding_bytes(&b);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
   b.exec = soak_exec;
-  rei_pool *p;
-  if (rei_pool_worker_join(&p, pool_token, slot, &b) != REI_OK) _exit(3);
-  if (rei_pool_worker_run(p) != REI_EXIT_SHUTDOWN) _exit(4);
-  if (rei_pool_leave(p) != REI_OK) _exit(5);
-  rei_pool_destroy(p);
+  mizu_pool *p;
+  if (mizu_pool_worker_join(&p, pool_token, slot, &b) != MIZU_OK) _exit(3);
+  if (mizu_pool_worker_run(p) != MIZU_EXIT_SHUTDOWN) _exit(4);
+  if (mizu_pool_leave(p) != MIZU_OK) _exit(5);
+  mizu_pool_destroy(p);
   _exit(0);
 }
 
@@ -118,7 +118,7 @@ static void run_worker(uint32_t slot) {
 /* A window of outstanding tasks; removal swaps the tail in (collect_any
    ties break to the earliest position regardless). */
 struct window {
-  rei_task task[WIN_CAP];
+  mizu_task task[WIN_CAP];
   uint64_t seq[WIN_CAP];
   size_t len[WIN_CAP];
   size_t n;
@@ -132,26 +132,26 @@ static void win_remove(struct window *w, size_t i) {
 }
 
 static void run_submitter(void) {
-  rei_binding b;
-  rei_binding_bytes(&b);
-  rei_pool *p;
-  if (rei_pool_attach(&p, pool_token, &b) != REI_OK) _exit(3);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *p;
+  if (mizu_pool_attach(&p, pool_token, &b) != MIZU_OK) _exit(3);
 
   struct window w;
   w.n = 0;
   uint8_t *buf = malloc(MAX_PAYLOAD);
   uint64_t next_seq = 1;
   uint64_t submitted = 0, collected = 0, cancelled = 0;
-  double deadline = rei_now() + run_seconds;
+  double deadline = mizu_now() + run_seconds;
 
-  while (rei_now() < deadline) {
+  while (mizu_now() < deadline) {
     if (w.n < WIN_CAP) {
       size_t len = pick_len();
       if (len != 0) fill(buf, len, next_seq);
-      rei_bytes tb = { buf, len };
-      rei_task t;
-      rei_status st = rei_pool_submit(p, &tb, &t, 250);
-      if (st == REI_OK) {
+      mizu_bytes tb = { buf, len };
+      mizu_task t;
+      mizu_status st = mizu_pool_submit(p, &tb, &t, 250);
+      if (st == MIZU_OK) {
         w.task[w.n] = t;
         w.seq[w.n] = next_seq;
         w.len[w.n] = len;
@@ -159,12 +159,12 @@ static void run_submitter(void) {
         submitted++;
         if (len != 0) next_seq++;
       } else {
-        assert(st == REI_FULL);   /* ring back-pressure at the deadline */
+        assert(st == MIZU_FULL);   /* ring back-pressure at the deadline */
       }
     }
     if (w.n != 0 && rnd() % 64 == 0) {
       size_t i = rnd() % w.n;
-      if (rei_pool_cancel(p, &w.task[i]) == 1) {
+      if (mizu_pool_cancel(p, &w.task[i]) == 1) {
         win_remove(&w, i);
         cancelled++;
       }   /* 0: already running/terminal — it collects normally */
@@ -172,16 +172,16 @@ static void run_submitter(void) {
     if (w.n != 0) {
       size_t idx = 0;
       void *obj = NULL;
-      rei_status st = rei_pool_collect_any(p, w.task, w.n, &idx, &obj, 100);
-      if (st == REI_OK) {
-        rei_bytes *rb = obj;
+      mizu_status st = mizu_pool_collect_any(p, w.task, w.n, &idx, &obj, 100);
+      if (st == MIZU_OK) {
+        mizu_bytes *rb = obj;
         assert(rb != NULL);
         verify(rb, w.len[idx], w.seq[idx]);
-        rei_bytes_free(rb);
+        mizu_bytes_free(rb);
         win_remove(&w, idx);
         collected++;
       } else {
-        assert(st == REI_TIMEOUT);
+        assert(st == MIZU_TIMEOUT);
       }
     }
   }
@@ -190,43 +190,43 @@ static void run_submitter(void) {
   if (w.n != 0) {
     void **vals = calloc(w.n, sizeof(void *));
     size_t err = 0;
-    assert(rei_pool_collect_all(p, w.task, w.n, vals, &err, 60000) == REI_OK);
+    assert(mizu_pool_collect_all(p, w.task, w.n, vals, &err, 60000) == MIZU_OK);
     assert(err == w.n);
     for (size_t i = 0; i < w.n; i++) {
-      rei_bytes *rb = vals[i];
+      mizu_bytes *rb = vals[i];
       assert(rb != NULL);
       verify(rb, w.len[i], w.seq[i]);
-      rei_bytes_free(rb);
+      mizu_bytes_free(rb);
       collected++;
     }
     free(vals);
   }
   assert(submitted == collected + cancelled);
   free(buf);
-  rei_pool_destroy(p);
+  mizu_pool_destroy(p);
   _exit(0);
 }
 
 // Controller ---------------------------------------------------------------------
 
 int main(void) {
-  const char *env = getenv("REI_SOAK_SECONDS");
+  const char *env = getenv("MIZU_SOAK_SECONDS");
   run_seconds = env != NULL ? atof(env) : 120;
   assert(run_seconds > 0);
 
-  rei_pool_opts opts;
-  rei_pool_opts_init(&opts);
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
   opts.max_workers = N_WORKERS;
   opts.max_submitters = 1 + N_SUBS;
   opts.injection_cap = 256;
   opts.per_worker_cap = 256;
   opts.result_slots = 512 * (1 + N_SUBS);
   opts.slot_size = 512;
-  rei_binding b;
-  rei_binding_bytes(&b);
-  rei_pool *ctrl;
-  assert(rei_pool_create(&ctrl, &opts, &b) == REI_OK);
-  assert(rei_pool_token(ctrl, pool_token, sizeof(pool_token)) == REI_OK);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *ctrl;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, pool_token, sizeof(pool_token)) == MIZU_OK);
 
   pid_t pids[N_WORKERS + N_SUBS];
   fflush(stdout);
@@ -236,7 +236,7 @@ int main(void) {
     if (pids[i] == 0) run_worker(i);
   }
   uint32_t slots[N_WORKERS] = { 0, 1, 2, 3 };
-  assert(rei_pool_ready_wait(ctrl, slots, N_WORKERS, 30000) == REI_OK);
+  assert(mizu_pool_ready_wait(ctrl, slots, N_WORKERS, 30000) == MIZU_OK);
   for (uint32_t j = 0; j < N_SUBS; j++) {
     pids[N_WORKERS + j] = fork();
     assert(pids[N_WORKERS + j] >= 0);
@@ -255,13 +255,13 @@ int main(void) {
     assert(waitpid(pids[N_WORKERS + j], &st, 0) == pids[N_WORKERS + j]);
     assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
   }
-  assert(rei_pool_stop(ctrl, 30000) == REI_OK);
+  assert(mizu_pool_stop(ctrl, 30000) == MIZU_OK);
   for (int i = 0; i < N_WORKERS; i++) {
     int st = 0;
     assert(waitpid(pids[i], &st, 0) == pids[i]);
     assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
   }
-  rei_pool_destroy(ctrl);
+  mizu_pool_destroy(ctrl);
   printf("soak_pool: ok (%d workers x %d submitters, %.0f s)\n",
          N_WORKERS, N_SUBS, run_seconds);
   return 0;

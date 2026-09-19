@@ -10,8 +10,8 @@
 #include "internal.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  rei_pool_hdr out;
+  mizu_pool_hdr out;
   /* region_size is the fstat truth: the input models the whole region */
-  (void) rei_pool_hdr_validate(data, size, &out);
+  (void) mizu_pool_hdr_validate(data, size, &out);
   return 0;
 }

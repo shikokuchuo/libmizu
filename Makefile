@@ -1,4 +1,4 @@
-# librei — the canonical (and only) build: static and shared libraries,
+# libmizu — the canonical (and only) build: static and shared libraries,
 # the test tiers, bench, and install. Consumers integrate the vendored
 # sources or the amalgamation (tools/amalgamate.sh) with their own build
 # system. Windows builds via tools/build-win.bat (clang-cl).
@@ -25,18 +25,18 @@ UNAME := $(shell uname -s)
 SRC := $(wildcard src/*.c)
 OBJ := $(SRC:.c=.o)
 
-STATIC := librei.a
+STATIC := libmizu.a
 
-# REI_API defaults to empty (static linkage — vendored, amalgamated,
+# MIZU_API defaults to empty (static linkage — vendored, amalgamated,
 # MinGW — needs no macro); the object sets feeding the shared library
-# define REI_SHARED for the visibility attribute.
+# define MIZU_SHARED for the visibility attribute.
 ifeq ($(UNAME),Darwin)
   CFLAGS   += -fPIC
-  CPPFLAGS += -DREI_SHARED
-  SHARED  := librei.$(VERSION_MAJOR).dylib
-  SONAME_FLAG := -Wl,-install_name,$(PREFIX)/lib/librei.$(VERSION_MAJOR).dylib
+  CPPFLAGS += -DMIZU_SHARED
+  SHARED  := libmizu.$(VERSION_MAJOR).dylib
+  SONAME_FLAG := -Wl,-install_name,$(PREFIX)/lib/libmizu.$(VERSION_MAJOR).dylib
   SHARED_LD := -dynamiclib $(SONAME_FLAG)
-  SYMLINKS := librei.dylib
+  SYMLINKS := libmizu.dylib
   PC_LIBS_PRIVATE :=
 else ifneq (,$(filter MINGW% UCRT% CLANG%,$(UNAME)))
   # MSYS2/MinGW (the R package's Rtools toolchain): static lib + test
@@ -49,11 +49,11 @@ else
   # non-PIC (TLS slot in err_tls.c) in the shared link. Not MinGW: PE is
   # always PIC and gcc warns on the flag.
   CFLAGS   += -fPIC
-  CPPFLAGS += -DREI_SHARED
-  SHARED  := librei.so.$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
-  SONAME_FLAG := -Wl,-soname,librei.so.$(VERSION_MAJOR)
+  CPPFLAGS += -DMIZU_SHARED
+  SHARED  := libmizu.so.$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
+  SONAME_FLAG := -Wl,-soname,libmizu.so.$(VERSION_MAJOR)
   SHARED_LD := -shared $(SONAME_FLAG)
-  SYMLINKS := librei.so.$(VERSION_MAJOR) librei.so
+  SYMLINKS := libmizu.so.$(VERSION_MAJOR) libmizu.so
   LDLIBS += -pthread
   PC_LIBS_PRIVATE := -pthread
 endif
@@ -94,12 +94,12 @@ $(SHARED): $(OBJ)
 	$(CC) $(SHARED_LD) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
 endif
 
-src/%.o: src/%.c include/rei.h include/rei_ext.h src/internal.h
+src/%.o: src/%.c include/mizu.h include/mizu_ext.h src/internal.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 # Test tiers: unit (in-process, per-PR), integration (real fork/spawn
 # children), soak (minutes-long contention runs; nightly). Integration
-# tests compile against the installed headers (rei.h + rei_ext.h) only —
+# tests compile against the installed headers (mizu.h + mizu_ext.h) only —
 # the API's compile-time contract check; unit tests may include
 # internal.h.
 tests/unit/%: tests/unit/%.c $(STATIC)
@@ -109,7 +109,7 @@ tests/integration/%: tests/integration/%.c $(STATIC)
 	$(CC) $(CPPFLAGS) -Iinclude -std=c11 -Wall -Wextra -Wpedantic -Werror \
 	  -o $@ $< $(STATIC) $(LDLIBS)
 
-# The ext-tier contract proof: references every rei_ext.h symbol with
+# The ext-tier contract proof: references every mizu_ext.h symbol with
 # internal.h absent from the include path (-Isrc filtered out), probing
 # the exported dual-form symbols (EXT_PROBE_EXPORTS) against the static
 # lib. Carries CFLAGS/LDFLAGS like the other tiers — the sanitizer legs
@@ -130,7 +130,7 @@ test-integration: $(TEST_INT_BIN)
 	@for t in $(TEST_INT_BIN); do echo "== $$t"; ./$$t || exit 1; done
 
 # Soak: minutes-long contention runs (nightly, not per-PR). Duration in
-# seconds per binary; REI_SOAK_SECONDS overrides.
+# seconds per binary; MIZU_SOAK_SECONDS overrides.
 SOAK_SECONDS ?= 120
 
 tests/soak/%: tests/soak/%.c $(STATIC)
@@ -139,7 +139,7 @@ tests/soak/%: tests/soak/%.c $(STATIC)
 test-soak: $(TEST_SOAK_BIN)
 	@for t in $(TEST_SOAK_BIN); do \
 	  echo "== $$t"; \
-	  REI_SOAK_SECONDS=$${REI_SOAK_SECONDS:-$(SOAK_SECONDS)} ./$$t || exit 1; \
+	  MIZU_SOAK_SECONDS=$${MIZU_SOAK_SECONDS:-$(SOAK_SECONDS)} ./$$t || exit 1; \
 	done
 
 # Fuzz: libFuzzer harnesses for the parsers a crashed peer can leave
@@ -178,20 +178,20 @@ endif
 
 coverage:
 	$(MAKE) clean
-	LLVM_PROFILE_FILE="rei-%p.profraw" $(MAKE) CC=clang \
+	LLVM_PROFILE_FILE="mizu-%p.profraw" $(MAKE) CC=clang \
 	  CFLAGS="-O1 -g -fprofile-instr-generate -fcoverage-mapping" \
 	  LDFLAGS="-fprofile-instr-generate" test-unit
-	$(LLVM_PROFDATA) merge -sparse rei-*.profraw -o rei.profdata
+	$(LLVM_PROFDATA) merge -sparse mizu-*.profraw -o mizu.profdata
 	$(LLVM_COV) report $(firstword $(TEST_UNIT_BIN)) \
 	  $(addprefix -object ,$(filter-out $(firstword $(TEST_UNIT_BIN)),$(TEST_UNIT_BIN))) \
-	  -instr-profile=rei.profdata
-	rm -f rei-*.profraw rei.profdata
+	  -instr-profile=mizu.profdata
+	rm -f mizu-*.profraw mizu.profdata
 	$(MAKE) clean   # leave no instrumented objects behind
 
-# The amalgamation smoke test: generate rei.c + rei.h. CI compiles the
-# unit tests against rei.c, then links and runs a public-only program
+# The amalgamation smoke test: generate mizu.c + mizu.h. CI compiles the
+# unit tests against mizu.c, then links and runs a public-only program
 # against the pair with no defines — the consumer contract, and the
-# proof that rei.h is self-contained (the unit test includes
+# proof that mizu.h is self-contained (the unit test includes
 # internal.h, so it cannot serve as that proof).
 amalgamation:
 	tools/amalgamate.sh
@@ -199,12 +199,12 @@ amalgamation:
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib \
 	         $(DESTDIR)$(PREFIX)/lib/pkgconfig
-	cp include/rei.h include/rei_ext.h $(DESTDIR)$(PREFIX)/include/
+	cp include/mizu.h include/mizu_ext.h $(DESTDIR)$(PREFIX)/include/
 	cp $(STATIC) $(DESTDIR)$(PREFIX)/lib/$(STATIC)
 	sed -e 's|@PREFIX@|$(PREFIX)|g' \
 	    -e 's|@VERSION@|$(VERSION)|g' \
 	    -e 's|@LIBS_PRIVATE@|$(PC_LIBS_PRIVATE)|g' \
-	    librei.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/librei.pc
+	    libmizu.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/libmizu.pc
 ifneq ($(SHARED),)
 	cp $(SHARED) $(DESTDIR)$(PREFIX)/lib/$(SHARED)
 	@for l in $(SYMLINKS); do \
@@ -213,9 +213,9 @@ ifneq ($(SHARED),)
 endif
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/include/rei.h \
-	      $(DESTDIR)$(PREFIX)/include/rei_ext.h
-	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/librei.pc
+	rm -f $(DESTDIR)$(PREFIX)/include/mizu.h \
+	      $(DESTDIR)$(PREFIX)/include/mizu_ext.h
+	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/libmizu.pc
 	rm -f $(DESTDIR)$(PREFIX)/lib/$(STATIC) \
 	      $(DESTDIR)$(PREFIX)/lib/$(SHARED) $(SYMLINKS:%=$(DESTDIR)$(PREFIX)/lib/%)
 
@@ -242,5 +242,5 @@ tidy:
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
 	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface
-	rm -rf rei.c rei.h rei_ext.h rei-*.profraw rei.profdata \
+	rm -rf mizu.c mizu.h mizu_ext.h mizu-*.profraw mizu.profdata \
 	      compile_commands.json

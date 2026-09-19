@@ -10,8 +10,8 @@
 .DS_Store
 .posit/
 dev/
-/rei.c
-/rei.h
+/mizu.c
+/mizu.h
 /compile_commands.json
 /.cache/
 /build/
@@ -26,6 +26,6 @@ tests/fuzz/*
 bench/*
 !bench/*.c
 !bench/notes.md
-/rei_ext.h
+/mizu_ext.h
 tests/ext_surface
 tests/ext_surface.dSYM

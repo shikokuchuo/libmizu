@@ -18,9 +18,9 @@
 
 // Parker -----------------------------------------------------------------------
 
-int rei_parker_attach(rei_parker *pk, _Atomic uint32_t *epoch,
+int mizu_parker_attach(mizu_parker *pk, _Atomic uint32_t *epoch,
                       const char *region_name, int entity, int create) {
-  char name[REI_NAME_MAX + 16];
+  char name[MIZU_NAME_MAX + 16];
   int n = snprintf(name, sizeof(name), "%s.pk.%d", region_name, entity);
   if (n <= 0 || (size_t) n >= sizeof(name)) return -1;
   pk->epoch = epoch;
@@ -30,54 +30,54 @@ int rei_parker_attach(rei_parker *pk, _Atomic uint32_t *epoch,
   return pk->event != NULL ? 0 : -1;
 }
 
-void rei_parker_detach(rei_parker *pk) {
+void mizu_parker_detach(mizu_parker *pk) {
   if (pk->event != NULL) CloseHandle((HANDLE) pk->event);
   pk->event = NULL;
   pk->epoch = NULL;
 }
 
-int rei_park(rei_parker *pk, uint32_t snapshot, long timeout_ms) {
+int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms) {
   if (atomic_load_explicit(pk->epoch, memory_order_acquire) != snapshot)
-    return REI_PARK_WOKEN;
-  if (timeout_ms == 0) return REI_PARK_TIMEOUT;
+    return MIZU_PARK_WOKEN;
+  if (timeout_ms == 0) return MIZU_PARK_TIMEOUT;
 
   DWORD ms = timeout_ms < 0 ? INFINITE : (DWORD) timeout_ms;
   DWORD r = WaitForSingleObject((HANDLE) pk->event, ms);
-  return r == WAIT_TIMEOUT ? REI_PARK_TIMEOUT : REI_PARK_WOKEN;
+  return r == WAIT_TIMEOUT ? MIZU_PARK_TIMEOUT : MIZU_PARK_WOKEN;
 }
 
-void rei_unpark(rei_parker *pk) {
+void mizu_unpark(mizu_parker *pk) {
   atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
   SetEvent((HANDLE) pk->event);
 }
 
 // Death listener -----------------------------------------------------------------
 
-struct rei_death_watch_s {
+struct mizu_death_watch_s {
   HANDLE process;
   HANDLE wait;
   _Atomic int *flag;
-  rei_parker pk;
+  mizu_parker pk;
   int has_pk;
   void (*cb)(void *);               /* pure-C death callback (may be NULL) */
   void *cb_arg;
 };
 
-static void rei_dw_fire(struct rei_death_watch_s *w) {
+static void mizu_dw_fire(struct mizu_death_watch_s *w) {
   atomic_store_explicit(w->flag, 1, memory_order_release);
-  if (w->has_pk) rei_unpark(&w->pk);
+  if (w->has_pk) mizu_unpark(&w->pk);
   if (w->cb != NULL) w->cb(w->cb_arg);
 }
 
-static VOID CALLBACK rei_dw_cb(PVOID ctx, BOOLEAN timed_out) {
+static VOID CALLBACK mizu_dw_cb(PVOID ctx, BOOLEAN timed_out) {
   (void) timed_out;
-  rei_dw_fire((struct rei_death_watch_s *) ctx);
+  mizu_dw_fire((struct mizu_death_watch_s *) ctx);
 }
 
-rei_death_watch *rei_death_watch_start2(long pid, _Atomic int *flag,
-                                        const rei_parker *pk,
+mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
+                                        const mizu_parker *pk,
                                         void (*cb)(void *), void *cb_arg) {
-  struct rei_death_watch_s *w = calloc(1, sizeof(*w));
+  struct mizu_death_watch_s *w = calloc(1, sizeof(*w));
   if (w == NULL) return NULL;
   w->flag = flag;
   if (pk != NULL) {
@@ -92,7 +92,7 @@ rei_death_watch *rei_death_watch_start2(long pid, _Atomic int *flag,
     /* pid gone (reaped): fire immediately rather than error — matches the
        POSIX already-dead path. Access denial is a genuine failure. */
     if (GetLastError() == ERROR_INVALID_PARAMETER) {
-      rei_dw_fire(w);
+      mizu_dw_fire(w);
       return w;
     }
     free(w);
@@ -101,7 +101,7 @@ rei_death_watch *rei_death_watch_start2(long pid, _Atomic int *flag,
 
   /* An already-signalled handle (process exited between OpenProcess and
      here) fires the callback immediately. */
-  if (!RegisterWaitForSingleObject(&w->wait, w->process, rei_dw_cb, w,
+  if (!RegisterWaitForSingleObject(&w->wait, w->process, mizu_dw_cb, w,
                                    INFINITE, WT_EXECUTEONLYONCE)) {
     CloseHandle(w->process);
     free(w);
@@ -110,7 +110,7 @@ rei_death_watch *rei_death_watch_start2(long pid, _Atomic int *flag,
   return w;
 }
 
-void rei_death_watch_stop(rei_death_watch *w) {
+void mizu_death_watch_stop(mizu_death_watch *w) {
   /* Blocking unregister: returns only after any in-flight callback has
      completed, so freeing w (and the caller's flag/parker targets) is safe. */
   if (w->wait != NULL) UnregisterWaitEx(w->wait, INVALID_HANDLE_VALUE);
@@ -118,7 +118,7 @@ void rei_death_watch_stop(rei_death_watch *w) {
   free(w);
 }
 
-void rei_death_listener_teardown(void) {
+void mizu_death_listener_teardown(void) {
 }
 
 #endif /* _WIN32 */

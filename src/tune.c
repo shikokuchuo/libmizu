@@ -14,7 +14,7 @@
 #include <string.h>
 #endif
 
-void rei_tune(void) {
+void mizu_tune(void) {
 #ifdef __GLIBC__
   const char *gt = getenv("GLIBC_TUNABLES");
   if (gt != NULL && strstr(gt, "glibc.malloc") != NULL)
