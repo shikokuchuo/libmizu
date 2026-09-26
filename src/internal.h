@@ -217,21 +217,17 @@ const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
 // Payload-policy helpers ------------------------------------------------------------
 
 /* Whether a staged payload created no keeper record, so the collect-side
-   keeper-drop wake is pure cost: the immediate kinds, or a self-contained
-   codec stream inline (payload byte 0 is the codec magic — an INLINE
-   stream is never empty). Core-only: the core owns the wake gate. The
-   magic set is binding-registry surface (mizu_ext.h, DESIGN.md's codec
-   registry): a byte qualifies only if that codec's INLINE streams never
-   carry a keeper on this path — pymizu's one reference form (a BUFREF
-   task-frame leaf) rides the zc loan claim-side, so 'P' qualifies;
-   pickle (0x80) and the R native streams can reference regions, so they
-   stay out. */
+   keeper-drop wake is pure cost: the immediate kinds, or an INLINE frame
+   whose stager claimed keeperless on the wire (MIZU_AUX_F_KEEPERLESS).
+   The core reads the claim, never verifies it; clear is always correct
+   (at worst a spurious keeper-drop wake), and a wrongly-set bit defers
+   reclaim, never frees early — the keeper drop itself is recorded
+   unconditionally at collect. Core-only: the core owns the wake gate. */
 static inline MIZU_MAYBE_UNUSED int mizu_keeperless(uint32_t kind,
-                                 const unsigned char *payload) {
+                                 uint64_t aux) {
   return kind == MIZU_KIND_NIL || kind == MIZU_KIND_RAWVEC ||
     kind == MIZU_KIND_STR1 ||
-    (kind == MIZU_KIND_INLINE && (payload[0] == MIZU_CODEC_MAGIC ||
-                                 payload[0] == MIZU_PYMIZU_CODEC_MAGIC));
+    (kind == MIZU_KIND_INLINE && (aux & MIZU_AUX_F_KEEPERLESS) != 0);
 }
 
 // Spill free list, lent-region ledger, open cache, retain table (spill.c) ---------

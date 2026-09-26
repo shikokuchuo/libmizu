@@ -196,7 +196,9 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 /* A 16-byte header then payload bytes, shared by channel slots and pool
    entries / result slots. The aux/payload conventions per kind are wire
    contract (cross-language peers read them), not binding choice:
-   - INLINE: a complete serialized stream (len = stream length; aux = 0).
+   - INLINE: a complete serialized stream (len = stream length; aux bit 0
+     is MIZU_AUX_F_KEEPERLESS, the stager's keeperless claim; all other
+     aux bits zero).
    - ARENA (channel-only): one chunk in the spill arena (aux = chunk
      offset, byte length as uint64 in the payload).
    - SHM_RAW: name of a region holding the stream (len = name length,
@@ -226,6 +228,15 @@ typedef enum mizu_kind_e {
   MIZU_KIND_STR1,
   MIZU_KIND_RAWSPILL
 } mizu_kind;
+
+/* Bit 0 of the INLINE aux word: the stager's claim that staging this
+   frame committed no retain-table entry, so a pool collect need not wake
+   the producer's keeper sweep. Claim-only — the core reads but never
+   verifies it, and cores predating the flag never read INLINE aux at
+   all; clear is always correct (at worst a spurious keeper-sweep wake).
+   Only INLINE carries the claim: every other kind's aux is fully
+   assigned (see the kind docs above). */
+#define MIZU_AUX_F_KEEPERLESS UINT64_C(1)
 
 #define MIZU_STR1_NA UINT64_MAX   /* cannot alias an encoding (0-3) */
 

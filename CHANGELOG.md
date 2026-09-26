@@ -34,7 +34,14 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 - Zero-copy payload tiers with spill/ledger machinery and retain table.
 - Three-file amalgamation distribution (`mizu.c` + `mizu.h` + `mizu_ext.h`).
 - pkg-config support via `make install`.
-- `MIZU_PYMIZU_CODEC_MAGIC` in `mizu_ext.h`; the keeperless gate recognizes it.
+- `MIZU_PYMIZU_CODEC_MAGIC` in `mizu_ext.h`.
+- `MIZU_AUX_F_KEEPERLESS`, bit 0 of the INLINE aux word: a stager-authored
+  claim that staging a frame committed no retain-table entry. The pool
+  collect keeperless gate reads the header claim instead of probing
+  payload codec magics; the bytes binding and `mizu_result_publish_err`'s
+  INLINE branch stamp it. Wire-compatible without an ABI bump: old cores
+  never read INLINE aux, and a clear bit is always correct (at worst a
+  spurious keeper-sweep wake).
 - `mizu_shm_open_view_flags` with `MIZU_OPEN_VIEW_NOCOUNT`.
 - `MIZU_READ_CONSUME` read flag: a failed read with the flag set consumes
   the slot while the verb returns `MIZU_ERR`.

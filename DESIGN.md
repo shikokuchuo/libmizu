@@ -83,6 +83,14 @@ This registry is it — a header comment alone would drift.
 A binding introducing a self-describing stream claims its byte here first.
 The drop's first-byte tags (`MIZU_DROP_*` in `mizu.h`) are a disjoint context — drop region byte 0, never an INLINE payload — and share letters deliberately: `MIZU_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.
 
+### The keeperless claim
+
+`MIZU_AUX_F_KEEPERLESS` (`UINT64_C(1)`) is bit 0 of the INLINE aux word: a stager-authored claim that staging this frame committed no retain-table entry.
+The core reads the claim, never verifies it; clear is always correct (at worst a spurious keeper-sweep wake).
+A wrongly-set bit defers reclaim, never frees early: the keeper drop is recorded unconditionally at collect — only the cross-process wake is gated.
+Only INLINE has a free aux bit (ARENA: chunk offset; SHM_RAW: stream length; RAWVEC/RAWSPILL: type tags; SHM_VEC: layout tag + used bytes; REF is keeper-ful by definition; NIL/RAWVEC/STR1 are kind-statics), so the claim is INLINE-only and every other kind tests keeper-ful unless immediate.
+The channel's reap gate is a pinned-keeper counter and is untouched — the win is pool collect only.
+
 ## The binding seam
 
 The core never sees a language object.

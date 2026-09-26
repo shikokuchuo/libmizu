@@ -2468,8 +2468,8 @@ int mizu_result_publish_err(mizu_result_sink *sink, void *flattened,
   if (pool_rk_reserve(p) != 0) return -1;
   if (inline_n != 0) {
     /* the binding framed the flattened envelope INLINE: a self-contained
-       stream pins nothing — the keeperless kinds' discipline, which the
-       collect path's keeperless gate already reads off the magic byte */
+       stream pins nothing, so the frame stamps the keeperless claim for
+       the collect path's wake gate */
     if (inline_n > sink->inline_max) {
       mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
                      "inline error envelope exceeds the slot budget");
@@ -2477,7 +2477,7 @@ int mizu_result_publish_err(mizu_result_sink *sink, void *flattened,
     }
     sink->rs->ph.kind = MIZU_KIND_INLINE;
     sink->rs->ph.len = inline_n;
-    sink->rs->ph.aux = 0;
+    sink->rs->ph.aux = MIZU_AUX_F_KEEPERLESS;
   } else {
     /* below the flatten's inline guarantee (a 128-byte slot holds no
        classed condition) the tiered stage carries the envelope out of
@@ -2885,8 +2885,7 @@ static void *pool_rs_claim(mizu_pool *p, mizu_rs_hdr *rs, uint32_t idx,
                      "task handle already collected");
       return NULL;
     }
-    if (!mizu_keeperless(kind, (const unsigned char *) rs +
-                        sizeof(mizu_rs_hdr)))
+    if (!mizu_keeperless(kind, rs->ph.aux))
       pool_unpark_keeper_drop(p, w);
     return v;
   }

@@ -30,23 +30,18 @@ static void handle_reset(void) {
 int main(void) {
   handle_reset();
 
-  /* the collect-side keeperless gate: the immediate kinds and the
-     self-contained codec magics skip the keeper-drop wake; kinds that
-     carry keepers and reference-capable streams never qualify */
-  const unsigned char r_codec[1] = { MIZU_CODEC_MAGIC };
-  const unsigned char p_codec[1] = { MIZU_PYMIZU_CODEC_MAGIC };
-  const unsigned char pickle[1] = { 0x80 };
-  assert(mizu_keeperless(MIZU_KIND_NIL, NULL));
-  assert(mizu_keeperless(MIZU_KIND_RAWVEC, NULL));
-  assert(mizu_keeperless(MIZU_KIND_STR1, NULL));
-  assert(mizu_keeperless(MIZU_KIND_INLINE, r_codec));
-  assert(mizu_keeperless(MIZU_KIND_INLINE, p_codec));
-  assert(!mizu_keeperless(MIZU_KIND_INLINE, pickle));
-  assert(!mizu_keeperless(MIZU_KIND_INLINE, (const unsigned char *) "B"));
-  assert(!mizu_keeperless(MIZU_KIND_INLINE, (const unsigned char *) "X"));
-  assert(!mizu_keeperless(MIZU_KIND_SHM_RAW, r_codec));
-  assert(!mizu_keeperless(MIZU_KIND_SHM_VEC, r_codec));
-  assert(!mizu_keeperless(MIZU_KIND_RAWSPILL, r_codec));
+  /* the collect-side keeperless gate: the immediate kinds and an INLINE
+     frame stamped with the stager's keeperless claim skip the
+     keeper-drop wake; the reference-capable kinds test keeper-ful even
+     with the bit set (the claim is INLINE-only) */
+  assert(mizu_keeperless(MIZU_KIND_NIL, 0));
+  assert(mizu_keeperless(MIZU_KIND_RAWVEC, 0));
+  assert(mizu_keeperless(MIZU_KIND_STR1, 0));
+  assert(mizu_keeperless(MIZU_KIND_INLINE, MIZU_AUX_F_KEEPERLESS));
+  assert(!mizu_keeperless(MIZU_KIND_INLINE, 0));
+  assert(!mizu_keeperless(MIZU_KIND_SHM_RAW, MIZU_AUX_F_KEEPERLESS));
+  assert(!mizu_keeperless(MIZU_KIND_SHM_VEC, MIZU_AUX_F_KEEPERLESS));
+  assert(!mizu_keeperless(MIZU_KIND_RAWSPILL, MIZU_AUX_F_KEEPERLESS));
 
   /* checkout: fresh create at the pow2 size class, recorded in staging */
   mizu_shm *a = mizu_spill_region_get(&h.fl, 100);

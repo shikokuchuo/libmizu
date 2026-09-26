@@ -31,7 +31,7 @@ static int mizu_bytes_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
     memcpy(payload, b->data, n);
     hdr->kind = MIZU_KIND_INLINE;
     hdr->len = (uint32_t) n;
-    hdr->aux = 0;
+    hdr->aux = MIZU_AUX_F_KEEPERLESS;   /* bare bytes pin nothing */
     return 0;
   }
   uint64_t off;
