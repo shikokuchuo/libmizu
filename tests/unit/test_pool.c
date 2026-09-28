@@ -723,8 +723,9 @@ static void test_collect_any(void) {
   puts("ok collect_any");
 }
 
-/* collect_all: fills in input order, stopping at the first non-OK by
-   position inclusive; handles past it stay collectible; MIZU_TIMEOUT
+/* collect_all: fills in input order when all OK; on the first non-OK by
+   position it reports and consumes that handle alone — the OK results
+   ahead of it and the handles past it stay collectible; MIZU_TIMEOUT
    consumes nothing; *err_index_out == n means all OK. */
 static void test_collect_all(void) {
   pool_pair(1, 1, 8, 64, 64, 64, 512);
@@ -744,13 +745,12 @@ static void test_collect_all(void) {
   assert(mizu_pool_collect_all(ctrl, ts, 3, vals, &err, 1000) == MIZU_OK);
   err_read = 0;
   assert(err == 1);
-  mizu_bytes *b = vals[0];
-  assert(b->len == 1 && memcmp(b->data, "a", 1) == 0);
-  mizu_bytes_free(b);
-  b = vals[1];
+  /* only the reported handle is consumed and filled */
+  assert(vals[0] == NULL && vals[2] == NULL);
+  mizu_bytes *b = vals[1];
   assert(b->len == 5 && memcmp(b->data, "boom", 4) == 0);
   mizu_bytes_free(b);
-  assert(vals[2] == NULL);
+  collect_bytes(ctrl, &t1, "a", 1);   /* ahead of the error: still collectible */
   collect_bytes(ctrl, &t3, "c", 1);   /* past the error: still collectible */
 
   mizu_task t4 = submit_bytes(ctrl, "d", 1);

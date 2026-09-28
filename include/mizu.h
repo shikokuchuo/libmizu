@@ -727,10 +727,11 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
    ties among already-terminal handles break to the earliest position);
    the reported handle is consumed, the rest stay collectible.
    collect_all fills values_out in input order once every task is
-   terminal. On the first non-OK outcome by position it stops there:
-   *err_index_out is its index, values_out is filled through that index
-   inclusive (the error object rides read_fn like any value), handles
-   past it stay collectible, and *err_index_out == n means all OK.
+   terminal. On the first non-OK outcome by position it reports that
+   handle only: *err_index_out is its index, the reported handle is
+   consumed (its error object rides read_fn like any value into
+   values_out[err]), and every other handle — the OK results ahead of
+   it included — stays collectible. *err_index_out == n means all OK.
    MIZU_TIMEOUT consumes nothing: every handle stays valid. */
 MIZU_API mizu_status mizu_pool_collect(mizu_pool *, const mizu_task *,
                                     void **value_out, double timeout_ms);
@@ -743,10 +744,10 @@ MIZU_API mizu_status mizu_pool_collect_all(mizu_pool *, const mizu_task *,
                                         double timeout_ms);
 
 /* The sink-callback form of collect_all: each value is handed to sink
-   as it is claimed (input order, through the first non-OK outcome
-   inclusive), so a binding can anchor every object before the next
-   claim's read allocates. Same wait and stop-at-error semantics as the
-   array form (which is a thin adapter over this). */
+   as it is claimed (input order when all OK; the first non-OK outcome
+   alone otherwise), so a binding can anchor every object before the
+   next claim's read allocates. Same wait and stop-at-error semantics
+   as the array form (which is a thin adapter over this). */
 MIZU_API mizu_status mizu_pool_collect_all_fn(mizu_pool *, const mizu_task *,
                                            size_t n, mizu_obj_sink,
                                            void *ctx,

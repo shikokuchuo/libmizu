@@ -70,5 +70,9 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   stays at the head so the next receive reproduces the failure (and makes
   the consume decision — `MIZU_READ_CONSUME` is honoured on a single
   receive and a batch's first message only). No wire-format change.
+- `mizu_pool_collect_all_fn` on a first non-OK outcome now claims the
+  reported handle alone: the OK results ahead of it are no longer
+  consumed and dropped — every other handle stays collectible, symmetric
+  with the timeout case. No wire-format change.
 - `mizu_stage_fn` gains the binding ctx; `mizu_exec_fn` receives a read
   ctx in place of the bare binding ctx.

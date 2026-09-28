@@ -3391,22 +3391,42 @@ static mizu_status pool_collect_all_impl(mizu_pool *p, const mizu_task *tasks,
 
   pool_any_unannounce(rss, n);
 
-  /* every slot terminal: claim in input order */
+  /* Every slot terminal: scan for the first non-OK status before
+     claiming — a status is stable once terminal, so the scan races
+     nothing. With one at k, claim only slot k: the reported handle is
+     consumed, and every other handle — the OK results ahead of it
+     included — stays collectible (symmetric with the timeout case,
+     which consumes nothing). */
   size_t err = n;
-  mizu_status rc = MIZU_OK;
-  for (size_t i = 0; i < n; i++) {
-    int32_t st = atomic_load_explicit(&rss[i]->status, memory_order_acquire);
-    void *v = pool_rs_claim(p, rss[i], mizu_task_rs_index(&tasks[i]), st);
-    if (v == NULL) {
-      err = i;   /* the read failure (slot i unconsumed when retryable) */
-      rc = MIZU_ERR;
-      break;
-    }
-    if (sink != NULL) sink(ctx, i, v);   /* anchored by the binding
-                                            before the next claim reads */
-    if (st != MIZU_RS_OK) {
+  for (size_t i = 0; i < n; i++)
+    if (atomic_load_explicit(&rss[i]->status, memory_order_acquire) !=
+        MIZU_RS_OK) {
       err = i;
       break;
+    }
+  mizu_status rc = MIZU_OK;
+  if (err < n) {
+    int32_t st = atomic_load_explicit(&rss[err]->status,
+                                      memory_order_acquire);
+    void *v = pool_rs_claim(p, rss[err], mizu_task_rs_index(&tasks[err]),
+                            st);
+    if (v == NULL) {
+      rc = MIZU_ERR;   /* the read failure (slot err unconsumed when
+                          retryable) */
+    } else if (sink != NULL) {
+      sink(ctx, err, v);
+    }
+  } else {
+    for (size_t i = 0; i < n; i++) {
+      void *v = pool_rs_claim(p, rss[i], mizu_task_rs_index(&tasks[i]),
+                              MIZU_RS_OK);
+      if (v == NULL) {
+        err = i;   /* the read failure (slot i unconsumed when retryable) */
+        rc = MIZU_ERR;
+        break;
+      }
+      if (sink != NULL) sink(ctx, i, v);   /* anchored by the binding
+                                              before the next claim reads */
     }
   }
   free(rss);
