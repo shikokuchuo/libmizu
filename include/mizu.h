@@ -655,7 +655,10 @@ MIZU_API mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
    the lifetime anchor for its uncollected results: the binding loops
    lame_duck on a plain sleep (no unpark can reach a released slot)
    until it returns nonzero — shutdown or owner death ends the linger.
-   leave is the clean-exit handshake. */
+   leave is the clean-exit handshake: an announced in-flight claim (an
+   exec_fn escape left unpublished) fails as DIED there, so an orderly
+   leave after an infrastructure failure never strands a task — the
+   collector's worker-death verdict, no reaper required. */
 typedef enum mizu_worker_exit_e { MIZU_EXIT_SHUTDOWN = 0,
                                  MIZU_EXIT_OWNER_GONE,
                                  MIZU_EXIT_RETIRED,

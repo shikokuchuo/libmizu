@@ -477,6 +477,30 @@ static void test_infra_failure_and_reap(void) {
   puts("ok infra_failure_and_reap");
 }
 
+/* An orderly leave after an exec_fn infrastructure failure fails the
+   announced in-flight claim as DIED itself — no death, no reaper: the
+   collector gets the worker-death verdict and the slot frees. */
+static void test_leave_fails_in_flight(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  exec_mode = 2;
+  mizu_task t = submit_bytes(ctrl, "x", 1);
+  assert(mizu_pool_worker_run(wk) == MIZU_EXIT_ERROR);
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  mizu_pool_status st;
+  assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+  uint32_t live = 0;
+  for (int i = 1; i < 6; i++) live += st.tasks_by_state[i];
+  assert(live == 0);
+  exec_mode = 0;
+  pool_end();
+  puts("ok leave_fails_in_flight");
+}
+
 /* The unwind path: an abandoned catching = 0 eval (a binding's longjmp)
    mints the in-flight task's sink through mizu_pool_unwind_sink for the
    ERR publish; the worker loop heals and continues. */
@@ -905,6 +929,7 @@ int main(void) {
   test_nested();
   test_err_publish();
   test_infra_failure_and_reap();
+  test_leave_fails_in_flight();
   test_unwind();
   test_retire_lame_duck();
   test_orphan_drain();

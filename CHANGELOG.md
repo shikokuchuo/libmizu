@@ -74,5 +74,9 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   reported handle alone: the OK results ahead of it are no longer
   consumed and dropped — every other handle stays collectible, symmetric
   with the timeout case. No wire-format change.
+- `mizu_pool_leave` now fails the worker's announced in-flight claim as
+  DIED: an orderly leave after an exec_fn infrastructure failure no longer
+  strands the claimed task PENDING — the collector gets the worker-death
+  verdict without waiting on a reaper. No wire-format change.
 - `mizu_stage_fn` gains the binding ctx; `mizu_exec_fn` receives a read
   ctx in place of the bare binding ctx.
