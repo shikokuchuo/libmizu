@@ -118,6 +118,10 @@ Four of them carry the correctness guarantees:
   Setting `MIZU_READ_CONSUME` first flips that: the transport consumes exactly as on success (the channel head advance and its batched publication; the pool FREE transition, task-keeper drop, and producer-keeper wake) while the verb still returns `MIZU_ERR`.
   This is the foreign/corrupt-payload contract: an unreadable slot must not wedge the ring behind it.
   The binding carries its specific message in its own state; the core records no generic error for a consumed read.
+  The consume decision sits with the binding on a single receive and on a batch's first message only.
+  A batch returns every message it consumed: a read failure after the first message ends the batch with `MIZU_OK` and the prefix, the failing slot stays at the head, and the next receive reproduces the failure and decides.
+  A failed read may therefore run twice — once inside the batch, once at the next receive — so a decline must be re-runnable and leave shared state untouched (between trusted peers a re-run load may re-fire a partially executed unpickle; acceptable).
+  A mid-batch failure records no generic error either: the record would be stale against the `MIZU_OK`-with-prefix return, and the next receive reproduces and records it.
 - `exec_fn` must not abandon.
   The binding catches each task condition into the result sink.
   A worker that lets one escape degrades to worker death plus the reaper verdict.

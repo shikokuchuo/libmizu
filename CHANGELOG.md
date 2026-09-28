@@ -64,5 +64,11 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
+- `mizu_channel_recv_batch_fn` returns every message it consumed: a read
+  failure after the first message now ends the batch early with `MIZU_OK`
+  and the prefix instead of `MIZU_ERR` dropping it, and the failing slot
+  stays at the head so the next receive reproduces the failure (and makes
+  the consume decision — `MIZU_READ_CONSUME` is honoured on a single
+  receive and a batch's first message only). No wire-format change.
 - `mizu_stage_fn` gains the binding ctx; `mizu_exec_fn` receives a read
   ctx in place of the bare binding ctx.

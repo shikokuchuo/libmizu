@@ -166,7 +166,11 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      must not wedge the ring behind an unreadable slot: the binding
      carries its specific message in its own state (the core records no
      generic error for a consumed read), and a retried read sees the
-     next slot.
+     next slot. The consume decision sits with the binding on a single
+     receive and on a batch's first message; past that the core defers
+     it — a mid-batch read failure ends the batch with MIZU_OK and the
+     consumed prefix, and the next receive reproduces the failure and
+     decides.
    exec: pool workers only — run one claimed task frame and publish
      through the sink. ctx is a read ctx on the handle (outcome
      MIZU_RS_OK): decode reads ride it (mizu_read_region, ctx->gone), and
@@ -217,7 +221,9 @@ typedef int (*mizu_stage_fn)(void *obj, mizu_slot_hdr *hdr,
 /* read_fn flags (ctx->flags, zero at each read's start): CONSUME makes a
    NULL return consume the slot exactly as on success while the verb
    still returns MIZU_ERR — the foreign/corrupt-payload contract; see the
-   seam comment above. */
+   seam comment above. The flag is honoured on a single receive and on a
+   batch's first message only; past that the core defers the consume
+   decision to the next receive. */
 #define MIZU_READ_CONSUME 1u
 
 typedef struct mizu_read_ctx_s {

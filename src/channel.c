@@ -442,22 +442,30 @@ static void chan_publish_head(mizu_channel *c) {
    stay core-private). ARENA carries the chunk offset in aux and the
    stream length in the payload, channel RAWSPILL the offset in the
    payload; both ranges are bounds-checked against the arena here.
-   *rflags_out receives the read's flags (MIZU_READ_CONSUME): a consumed
-   failure records no generic handle error — the binding carries its own
-   message, and a stale generic record would mislead a later errcat. */
+   *rflags_out receives the read's flags (MIZU_READ_CONSUME). Nothing is
+   recorded here: *err_out hands the verb the would-be message — non-NULL
+   for a failure it must record (an unconsumed read_fn failure, gone or
+   not; the corrupt-payload bounds checks), NULL on success and on a
+   binding-consumed failure. The record decision sits beside the status
+   decision it depends on (recv_batch defers a mid-batch failure, and a
+   record for it would be stale against the MIZU_OK-with-prefix return
+   and mislead a later errcat); a consumed failure records no generic
+   handle error, as before — the binding carries its own message. */
 static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
-                            void **out, uint32_t *rflags_out) {
+                            void **out, uint32_t *rflags_out,
+                            const char **err_out) {
   const mizu_slot_hdr *hdr = (const mizu_slot_hdr *) sl;
   const unsigned char *payload = sl + sizeof(mizu_slot_hdr);
   const unsigned char *bytes;
   size_t limit;
 
+  *err_out = NULL;
   if (hdr->kind == MIZU_KIND_ARENA) {
     uint64_t off = hdr->aux, n;
     memcpy(&n, payload, sizeof(n));
     if (c->rx.arena == NULL || off > c->rx.arena_size ||
         n > c->rx.arena_size - off) {
-      mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "corrupt payload slot");
+      *err_out = "corrupt payload slot";
       return MIZU_ERR;
     }
     /* already mapped: no open, no syscall */
@@ -468,7 +476,7 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
     memcpy(&off, payload, sizeof(off));
     if (c->rx.arena == NULL || off > c->rx.arena_size ||
         hdr->len > c->rx.arena_size - off) {
-      mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "corrupt payload slot");
+      *err_out = "corrupt payload slot";
       return MIZU_ERR;
     }
     bytes = c->rx.arena + off;
@@ -485,9 +493,8 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
   *rflags_out = ctx.flags;
   if (obj == NULL) {
     if (!(ctx.flags & MIZU_READ_CONSUME))
-      mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
-                     ctx.gone ? "payload region vanished" :
-                                "payload read failed");
+      *err_out = ctx.gone ? "payload region vanished" :
+                            "payload read failed";
     return MIZU_ERR;
   }
   *out = obj;
@@ -615,14 +622,21 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
    is what lets the sender's reap drop the keeper pinning every region this
    message references. A failed read does not advance: the slot stays at
    the head — unless the read set MIZU_READ_CONSUME (a foreign/corrupt
-   payload that must not wedge the ring): then the advance and publish
-   happen exactly as on success and the verb still returns MIZU_ERR. */
-static mizu_status chan_consume1(mizu_channel *c, void **out) {
+   payload that must not wedge the ring) and may_consume_failure holds:
+   then the advance and publish happen exactly as on success and the verb
+   still returns MIZU_ERR. Callers pass may_consume_failure = 1 for a
+   single receive and a batch's first message; past that the consume
+   decision is deferred to the next receive. */
+static mizu_status chan_consume1(mizu_channel *c, void **out,
+                                int may_consume_failure,
+                                const char **err_out) {
   mizu_chan_ring *r = &c->rx;
   uint32_t rflags = 0;
   mizu_status st = chan_read(c, r->slots + ((uint64_t) r->lhead & r->mask) * r->slot,
-                            out, &rflags);
-  if (st != MIZU_OK && !(rflags & MIZU_READ_CONSUME)) return st;
+                            out, &rflags, err_out);
+  if (st != MIZU_OK &&
+      !(may_consume_failure && (rflags & MIZU_READ_CONSUME)))
+    return st;
   r->lhead++;
   r->unpublished++;
   if (r->unpublished >= MIZU_HEAD_PUBLISH_K || !chan_rx_avail(c))
@@ -1011,14 +1025,27 @@ mizu_status mizu_channel_recv(mizu_channel *c, void **obj_out,
   if (c == NULL || c->released) return MIZU_CLOSED;
   mizu_status st = chan_wait_msg(c, timeout_ms);
   if (st != MIZU_OK) return st;
-  return chan_consume1(c, obj_out);
+  const char *err = NULL;
+  st = chan_consume1(c, obj_out, 1, &err);
+  if (err != NULL)
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, err);
+  return st;
 }
 
 /* Up to cap messages under a single park cycle and a single batched head
    publication. Waits only for the first message; whatever else has already
-   been published comes along, and the status discipline matches recv.
-   Each message goes to the sink as it is read: a binding can anchor
-   every product before the next read allocates. */
+   been published comes along. Each message goes to the sink as it is
+   read: a binding can anchor every product before the next read
+   allocates. A batch returns every message it consumed: a read failure
+   on the first message returns MIZU_ERR as recv does, but a failure
+   after it ends the batch early with MIZU_OK and the messages read so
+   far — the failing slot stays at the head, so the next receive
+   reproduces the failure exactly (and consumes the slot if the binding
+   marks it MIZU_READ_CONSUME). MIZU_READ_CONSUME is therefore honoured
+   on a single receive and on a batch's first message only; past that the
+   consume decision defers to the next receive, and no error is recorded
+   for the deferred failure — the next receive reproduces and records
+   it. */
 mizu_status mizu_channel_recv_batch_fn(mizu_channel *c, size_t cap,
                                      size_t *n_out, mizu_obj_sink sink,
                                      void *ctx, double timeout_ms) {
@@ -1042,12 +1069,19 @@ mizu_status mizu_channel_recv_batch_fn(mizu_channel *c, size_t cap,
   size_t i = 0;
   for (; i < count; i++) {
     void *obj = NULL;
-    st = chan_consume1(c, &obj);
-    if (st != MIZU_OK) break;
+    const char *err = NULL;
+    st = chan_consume1(c, &obj, i == 0, &err);
+    if (st != MIZU_OK) {
+      if (i == 0 && err != NULL)
+        mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, err);
+      break;
+    }
     sink(ctx, i, obj);
   }
   *n_out = i;
-  return st;
+  /* a failure past the first message surfaces as MIZU_OK with the
+     consumed prefix; the failing slot is the next receive's head */
+  return st != MIZU_OK && i > 0 ? MIZU_OK : st;
 }
 
 static void chan_array_sink(void *ctx, size_t i, void *obj) {

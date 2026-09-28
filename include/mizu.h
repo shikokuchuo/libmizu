@@ -511,7 +511,15 @@ MIZU_API mizu_status mizu_channel_ready_wait(mizu_channel *, double timeout_ms);
    complete and valid — and MIZU_PEER_GONE is sticky once returned.
    recv_batch waits for the first message exactly like recv (*n_out is 0
    on a terminal status), then drains up to cap already-published
-   messages without waiting further.
+   messages without waiting further. A batch returns every message it
+   consumed: a read failure on the first message returns MIZU_ERR as
+   recv does, but a failure after it ends the batch early with MIZU_OK
+   and the messages read so far. The failing slot stays at the head, so
+   the next receive reproduces the failure exactly (and consumes the
+   slot if the binding marks it MIZU_READ_CONSUME). MIZU_READ_CONSUME
+   is therefore honoured on a single receive and on a batch's first
+   message only; past that the consume decision defers to the next
+   receive.
    Callbacks run on the calling thread; the wait parks on the caller's
    entity. */
 MIZU_API mizu_status mizu_channel_send(mizu_channel *, void *obj);

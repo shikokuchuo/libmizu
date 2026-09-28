@@ -14,12 +14,15 @@
 #include "internal.h"
 
 static mizu_binding bytesb;
+static int read_pass;       /* reads to let through before failing */
 static int read_fails;      /* outstanding forced read failures */
 static int read_consume;    /* set MIZU_READ_CONSUME on the failures */
 
 static void *consume_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
                           size_t limit, mizu_read_ctx *ctx) {
-  if (read_fails > 0) {
+  if (read_pass > 0) {
+    read_pass--;
+  } else if (read_fails > 0) {
     read_fails--;
     if (read_consume) ctx->flags |= MIZU_READ_CONSUME;
     return NULL;
@@ -115,6 +118,115 @@ static void channel_tests(void) {
   mizu_channel_destroy(peer);
 }
 
+// Batch receive ----------------------------------------------------------------
+
+/* A batch returns every message it consumed: a read failure after the
+   first message ends the batch early with MIZU_OK and the prefix, the
+   failing slot stays at the head, and the next receive reproduces the
+   failure and makes the consume decision. */
+static void batch_tests(void) {
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
+  opts.capacity = 8;
+  opts.slot_size = 256;
+  opts.arena_size = 64 << 10;
+
+  mizu_binding b;
+  make_binding(&b, NULL, NULL);
+  mizu_channel *host = NULL, *peer = NULL;
+  char token[64];
+  void *objs[4];
+  void *obj = NULL;
+  size_t n;
+
+  /* [ok, fail, ok], flag set: the batch ends early at the failure with
+     MIZU_OK and the prefix, recording nothing; the next recv reproduces
+     the failure and consumes; the one after reads the third message */
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &b) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  send_bytes(host, "a", 1);
+  send_bytes(host, "b", 1);
+  send_bytes(host, "c", 1);
+  read_pass = 1;
+  read_fails = 2;
+  read_consume = 1;
+  n = 99;
+  assert(mizu_channel_recv_batch(peer, objs, 4, &n, 1000) == MIZU_OK);
+  assert(n == 1);
+  assert(((mizu_bytes *) objs[0])->len == 1 &&
+         memcmp(((mizu_bytes *) objs[0])->data, "a", 1) == 0);
+  mizu_bytes_free(objs[0]);
+  /* no generic error record after a prefix return */
+  assert(mizu_channel_errcat(peer) == MIZU_ERRCAT_NONE);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+  /* consumed: the binding carries its message, the core records none */
+  assert(mizu_channel_errcat(peer) == MIZU_ERRCAT_NONE);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 1 &&
+         memcmp(((mizu_bytes *) obj)->data, "c", 1) == 0);
+  mizu_bytes_free(obj);
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
+
+  /* [ok, fail, ok], no flag: the batch still ends early with the prefix;
+     the next recv reproduces the failure (recording it) without
+     consuming, and with the failure cleared the same slot reads */
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &b) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  send_bytes(host, "a", 1);
+  send_bytes(host, "b", 1);
+  send_bytes(host, "c", 1);
+  read_pass = 1;
+  read_fails = 2;
+  read_consume = 0;
+  n = 99;
+  assert(mizu_channel_recv_batch(peer, objs, 4, &n, 1000) == MIZU_OK);
+  assert(n == 1);
+  mizu_bytes_free(objs[0]);
+  assert(mizu_channel_errcat(peer) == MIZU_ERRCAT_NONE);
+  obj = NULL;
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+  assert(mizu_channel_errcat(peer) == MIZU_ERRCAT_OTHER);
+  assert(obj == NULL);
+  read_fails = 0;
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 1 &&
+         memcmp(((mizu_bytes *) obj)->data, "b", 1) == 0);
+  mizu_bytes_free(obj);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  mizu_bytes_free(obj);
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
+
+  /* a failure on the first message behaves as recv: MIZU_ERR, consumed
+     per the flag */
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &b) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  send_bytes(host, "x", 1);
+  send_bytes(host, "y", 1);
+  read_pass = 0;
+  read_fails = 1;
+  read_consume = 1;
+  n = 99;
+  assert(mizu_channel_recv_batch(peer, objs, 4, &n, 1000) == MIZU_ERR);
+  assert(n == 0);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 1 &&
+         memcmp(((mizu_bytes *) obj)->data, "y", 1) == 0);
+  mizu_bytes_free(obj);
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
+}
+
 // Pool -------------------------------------------------------------------------
 
 static int exec_ctx_cookie;
@@ -195,6 +307,7 @@ static void pool_tests(void) {
 int main(void) {
   mizu_binding_bytes(&bytesb);
   channel_tests();
+  batch_tests();
   pool_tests();
   puts("test_consume: ok");
   return 0;
