@@ -5,13 +5,76 @@
 
 libmizu is a C library for lock-free shared-memory IPC.
 It provides SPSC channels and work-stealing task pools through a language-agnostic C ABI.
-Channels and pools run over POSIX shm or Win32 file mappings.
+Channels and pools run over POSIX shm or Win32 file mappings, with the hot path entirely in user space.
+
+libmizu is for runtimes that parallelize with processes rather than threads.
+It makes the communication between those processes cheap enough that work can be divided at granularities usually reserved for threads.
+Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and [pymizu](https://github.com/shikokuchuo/pymizu) (Python).
-You can write bindings in other languages against the C ABI.
-Handles are opaque.
-The surface is FFI-safe: every public operation is an exported function, with no macros or `static inline` in the public contract.
-The library also distributes as a three-file amalgamation: `mizu.c`, `mizu.h`, and `mizu_ext.h`.
+[Writing a binding](#writing-a-binding) covers other languages.
+
+## Performance
+
+Representative figures from the C bench suite (`make bench`), measured on an Apple M4 Pro (macOS, arm64).
+
+| Benchmark | Best observed |
+| --- | --- |
+| Channel round trip (nil / 64 B payload) | 0.3–0.4 µs |
+| Channel round trip (64 KiB, arena tier) | 4.0 µs |
+| Channel round trip (1 MiB, spill tier) | 50 µs |
+| Channel batch throughput (64 B, batches of 32) | 44 M msgs/s |
+| Pool submit + collect (nil payload) | 0.4 µs |
+| Pool submit + collect (4 KiB payload) | 1.0 µs |
+| Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
+
+The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](bench/notes.md).
+
+## Writing a binding
+
+A binding teaches libmizu how to turn the language's values into frames and back: the `stage` and `read` callbacks in the quickstart below, plus `exec` for pool workers.
+libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
+To start without callbacks, `mizu_binding_bytes()` gives you a ready-made binding that sends and receives byte buffers.
+
+Every operation is an exported function, so a language with a foreign function interface can call libmizu directly from the shared library without compiling any C of its own.
+Every handle is opaque, so libmizu's internals can change without breaking the binding.
+Bindings that compile C themselves can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
+
+## Quickstart
+
+This example makes a channel between two processes.
+Registering callbacks is binding-author surface, so it includes `mizu_ext.h`.
+The host:
+
+```c
+#include <mizu_ext.h>   /* mizu_binding, mizu_binding_init (implies mizu.h) */
+
+mizu_channel_opts opts;
+mizu_channel_opts_init(&opts);
+mizu_binding binding;
+mizu_binding_init(&binding);
+binding.stage = my_stage;   /* frame your objects as (hdr, payload) */
+binding.read  = my_read;    /* the receive-side materializer */
+
+mizu_channel *ch;
+mizu_channel_create(&ch, &opts, &binding);
+
+char token[64];
+mizu_channel_token(ch, token, sizeof token);
+/* spawn the peer however you like, passing the token */
+mizu_channel_ready_wait(ch, -1);                 /* block until attach */
+
+mizu_channel_send(ch, my_obj);
+void *obj;
+mizu_channel_recv(ch, &obj, -1);                 /* MIZU_OK / sentinels */
+mizu_channel_close(ch, 5000);
+```
+
+The peer attaches with `mizu_channel_attach(&ch, token, &binding)`.
+It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
+
+[`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
+[`DESIGN.md`](DESIGN.md) gives the invariants.
 
 ## API tiers
 
@@ -62,61 +125,10 @@ To generate the amalgamation, run:
 tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 ```
 
-## Quickstart
-
-This example makes a channel between two processes.
-Registering callbacks is binding-author surface, so it includes `mizu_ext.h`.
-The host:
-
-```c
-#include <mizu_ext.h>   /* mizu_binding, mizu_binding_init (implies mizu.h) */
-
-mizu_channel_opts opts;
-mizu_channel_opts_init(&opts);
-mizu_binding binding;
-mizu_binding_init(&binding);
-binding.stage = my_stage;   /* frame your objects as (hdr, payload) */
-binding.read  = my_read;    /* the receive-side materializer */
-
-mizu_channel *ch;
-mizu_channel_create(&ch, &opts, &binding);
-
-char token[64];
-mizu_channel_token(ch, token, sizeof token);
-/* spawn the peer however you like, passing the token */
-mizu_channel_ready_wait(ch, -1);                 /* block until attach */
-
-mizu_channel_send(ch, my_obj);
-void *obj;
-mizu_channel_recv(ch, &obj, -1);                 /* MIZU_OK / sentinels */
-mizu_channel_close(ch, 5000);
-```
-
-The peer attaches with `mizu_channel_attach(&ch, token, &binding)`.
-It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
-
-[`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
-[`DESIGN.md`](DESIGN.md) gives the invariants.
-
-## Performance
-
-Representative figures from the C bench suite (`make bench`), measured on an Apple M4 Pro (macOS, arm64).
-
-| Benchmark | Best observed |
-| --- | --- |
-| Channel round trip (nil / 64 B payload) | 0.3–0.4 µs |
-| Channel round trip (64 KiB, arena tier) | 4.0 µs |
-| Channel round trip (1 MiB, spill tier) | 50 µs |
-| Channel batch throughput (64 B, batches of 32) | 44 M msgs/s |
-| Pool submit + collect (nil payload) | 0.4 µs |
-| Pool submit + collect (4 KiB payload) | 1.0 µs |
-| Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
-
-The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](bench/notes.md).
-
 ## Status
 
 Pre-release.
+The API is not stable and may change at any time before a release.
 
 ## License
 
