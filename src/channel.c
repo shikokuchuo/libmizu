@@ -1184,6 +1184,13 @@ mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
    close with the process still running is alive; a released handle is not.
    The probe can mutate (sticky verdict, survivor unlink, ledger force) —
    logically a read, hence the cast. */
+/* The tx-keeper count, channel handles only (the ext-tier declaration
+   documents the pool's -1). */
+int64_t mizu_handle_keep_out(const mizu_handle *h) {
+  if (h->htype != MIZU_HTYPE_CHANNEL) return -1;
+  return ((const mizu_channel *) h)->keep_out;
+}
+
 int mizu_channel_alive(const mizu_channel *c) {
   if (c == NULL || c->released || c->verdict_dead) return 0;
   return !chan_probe_dead((mizu_channel *) c);

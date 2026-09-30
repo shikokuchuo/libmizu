@@ -30,6 +30,7 @@ mizu_death_watch_start
 mizu_death_watch_stop
 mizu_err_describe
 mizu_handle_churn
+mizu_handle_keep_out
 mizu_handle_kind
 mizu_handle_spill_info
 mizu_ix_end

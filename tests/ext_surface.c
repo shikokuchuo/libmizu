@@ -53,6 +53,7 @@ int main(void) {
   /* Handle queries. */
   refs += sink((mizu_any_fn) &mizu_handle_kind);
   refs += sink((mizu_any_fn) &mizu_handle_churn);
+  refs += sink((mizu_any_fn) &mizu_handle_keep_out);
   refs += sink((mizu_any_fn) &mizu_handle_spill_info);
 
   /* Parker, death watch, liveness, preamble. */
@@ -158,7 +159,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 97);
+  assert(refs == 98);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

@@ -165,6 +165,10 @@ enum { MIZU_HTYPE_CHANNEL = 1, MIZU_HTYPE_POOL = 2 };
    mizu_pool_dump_get). */
 MIZU_API int mizu_handle_kind(const mizu_handle *);
 MIZU_API int mizu_handle_churn(const mizu_handle *);
+/* The tx-keeper count: outstanding staging retains on a channel handle
+   (the reap gate's own count, so side-effect free). -1 for a pool
+   handle (its keepers live on both sides of every queue; no one count). */
+MIZU_API int64_t mizu_handle_keep_out(const mizu_handle *);
 MIZU_API void mizu_handle_spill_info(const mizu_handle *,
                                    uint32_t *fl_entries,
                                    uint32_t *ledger_entries);

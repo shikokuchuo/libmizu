@@ -155,6 +155,7 @@ static void pool_pair(uint32_t workers, uint32_t joined, uint32_t max_sub,
   make_binding(&b, 0);
   make_binding(&wb, 1);
   assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_handle_keep_out((const mizu_handle *) ctrl) == -1);
   assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
   assert(joined >= 1 && joined <= workers && joined <= 2);
   assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);

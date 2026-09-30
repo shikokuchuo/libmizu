@@ -116,15 +116,25 @@ int main(void) {
   send_bytes(host, "hello", 5);
   recv_bytes(peer, "hello", 5);
 
+  /* the keeperless claim costs nothing: immediate kinds grow no
+     tx-keeper count */
+  assert(mizu_handle_keep_out((const mizu_handle *) host) == 0);
+
   /* NIL round trip (the empty buffer) */
   send_bytes(host, NULL, 0);
   recv_bytes(peer, NULL, 0);
 
-  /* ARENA round trip: past the 240-byte inline budget, within the arena */
+  /* ARENA round trip: past the 240-byte inline budget, within the arena.
+     The chunk is the one retain — no keeper kind, but its bytes hold
+     until the consumer drains (aalloc ahead of afree) */
   unsigned char mid[4096];
   for (size_t i = 0; i < sizeof(mid); i++) mid[i] = (unsigned char) i;
   send_bytes(host, mid, sizeof(mid));
+  assert(mizu_handle_keep_out((const mizu_handle *) host) == 0);
   recv_bytes(peer, mid, sizeof(mid));
+
+  /* SHM_RAW: one tx keeper, reaped on the verb after consumption */
+  assert(mizu_handle_keep_out((const mizu_handle *) host) == 0);
 
   /* SHM_RAW round trip: past the arena, a spill region; then the
      free-list recycle + open-cache hit on the second pass */
@@ -133,12 +143,14 @@ int main(void) {
   for (size_t i = 0; i < (size_t) (1 << 20); i++)
     big[i] = (unsigned char) (i * 31);
   send_bytes(host, big, 1 << 20);
+  assert(mizu_handle_keep_out((const mizu_handle *) host) == 1);
   recv_bytes(peer, big, 1 << 20);
 
   mizu_channel_info info;
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 0);      /* pinned by the outstanding keeper */
   send_bytes(host, "x", 1);          /* the reap trigger: head advanced */
+  assert(mizu_handle_keep_out((const mizu_handle *) host) == 0);
   recv_bytes(peer, "x", 1);
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 1);      /* surrendered to the free list */
