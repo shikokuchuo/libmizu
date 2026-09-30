@@ -123,3 +123,78 @@ uint64_t mizu_na_apply(int type, void *dst, const void *src,
                       const uint8_t *bitmap, uint64_t n) {
   return mizu_ext_na_apply_impl(type, dst, src, bitmap, n);
 }
+
+size_t mizu_ix_put_header(unsigned char *dst) {
+  return mizu_ext_ix_put_header_impl(dst);
+}
+
+size_t mizu_ix_put_nil(unsigned char *dst) {
+  return mizu_ext_ix_put_nil_impl(dst);
+}
+
+size_t mizu_ix_put_lgl(unsigned char *dst, int value) {
+  return mizu_ext_ix_put_lgl_impl(dst, value);
+}
+
+size_t mizu_ix_put_int(unsigned char *dst, int64_t value) {
+  return mizu_ext_ix_put_int_impl(dst, value);
+}
+
+size_t mizu_ix_put_real(unsigned char *dst, double value) {
+  return mizu_ext_ix_put_real_impl(dst, value);
+}
+
+size_t mizu_ix_put_cplx(unsigned char *dst, double re, double im) {
+  return mizu_ext_ix_put_cplx_impl(dst, re, im);
+}
+
+size_t mizu_ix_put_str(unsigned char *dst, const void *s, int32_t len) {
+  return mizu_ext_ix_put_str_impl(dst, s, len);
+}
+
+size_t mizu_ix_put_bytes(unsigned char *dst, const void *data,
+                        uint64_t count) {
+  return mizu_ext_ix_put_bytes_impl(dst, data, count);
+}
+
+size_t mizu_ix_put_vec(unsigned char *dst, int wire_type, const void *data,
+                      uint64_t count) {
+  return mizu_ext_ix_put_vec_impl(dst, wire_type, data, count);
+}
+
+size_t mizu_ix_put_strv_begin(unsigned char *dst, uint64_t count) {
+  return mizu_ext_ix_put_strv_begin_impl(dst, count);
+}
+
+size_t mizu_ix_put_strelt(unsigned char *dst, const void *s, int32_t len) {
+  return mizu_ext_ix_put_strelt_impl(dst, s, len);
+}
+
+size_t mizu_ix_put_list_begin(unsigned char *dst, uint64_t count) {
+  return mizu_ext_ix_put_list_begin_impl(dst, count);
+}
+
+size_t mizu_ix_put_dict_begin(unsigned char *dst, uint64_t count) {
+  return mizu_ext_ix_put_dict_begin_impl(dst, count);
+}
+
+size_t mizu_ix_put_key(unsigned char *dst, const void *s, uint32_t len) {
+  return mizu_ext_ix_put_key_impl(dst, s, len);
+}
+
+size_t mizu_ix_put_attr(unsigned char *dst) {
+  return mizu_ext_ix_put_attr_impl(dst);
+}
+
+size_t mizu_ix_put_err(unsigned char *dst, int has_index, uint64_t index,
+                      const void *type, uint32_t type_len,
+                      const void *message, uint32_t message_len,
+                      const void *detail, uint32_t detail_len) {
+  return mizu_ext_ix_put_err_impl(dst, has_index, index, type, type_len,
+                                 message, message_len, detail, detail_len);
+}
+
+size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
+                       uint64_t ident) {
+  return mizu_ext_ix_put_task_impl(dst, target, kind, ident);
+}

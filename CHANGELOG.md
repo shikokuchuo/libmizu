@@ -13,6 +13,21 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The interchange codec's byte-level half (the execution plan's item
+  1.6a): `src/interop.c`, the validating pull cursor for the `'I'`
+  stream (`mizu_ix_open` / `mizu_ix_next` / `mizu_ix_end`, ext tier) —
+  bounds, the depth cap, UTF-8 validity, the container arity accounting
+  (a task is one element of kind-determined arity), the reserved-flag
+  rejections, and the informative unknown-tag / unknown-version /
+  unknown-kind declines ("the peer uses a newer format") in the
+  thread-local error record — plus the `mizu_ix_put_*` emit helpers
+  (dual form) a binding's two-pass walk sizes and writes through. The
+  golden conformance corpus (`tests/interop/cases.txt` → `corpus.txt`
+  via the spec-derived stdlib reference `tools/interop_corpus.py`;
+  deterministic, CI regenerates and asserts a clean diff) certifies the
+  byte grammar once here: `tests/unit/test_interop.c` drives it through
+  the cursor and re-emits it byte-for-byte, and the cursor joins the
+  fuzz tier (`tests/fuzz/fuzz_interop.c`).
 - The cross-language wire contract (the execution plan's Phase 0).
   Pre-release: `MIZU_ABI_VERSION` stays 1 (peers are same-build; an old
   reader fails safe) — this entry, like the INT64 entry's, records the

@@ -111,6 +111,30 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_channel_peer_ident);
   refs += sink((mizu_any_fn) &mizu_pool_worker_ident);
 
+  /* The interchange cursor and emit helpers (the put helpers are
+     dual-form: the header's static inlines by default, the exported
+     symbols under EXT_PROBE_EXPORTS). */
+  refs += sink((mizu_any_fn) &mizu_ix_open);
+  refs += sink((mizu_any_fn) &mizu_ix_next);
+  refs += sink((mizu_any_fn) &mizu_ix_end);
+  refs += sink((mizu_any_fn) &mizu_ix_put_header);
+  refs += sink((mizu_any_fn) &mizu_ix_put_nil);
+  refs += sink((mizu_any_fn) &mizu_ix_put_lgl);
+  refs += sink((mizu_any_fn) &mizu_ix_put_int);
+  refs += sink((mizu_any_fn) &mizu_ix_put_real);
+  refs += sink((mizu_any_fn) &mizu_ix_put_cplx);
+  refs += sink((mizu_any_fn) &mizu_ix_put_str);
+  refs += sink((mizu_any_fn) &mizu_ix_put_bytes);
+  refs += sink((mizu_any_fn) &mizu_ix_put_vec);
+  refs += sink((mizu_any_fn) &mizu_ix_put_strv_begin);
+  refs += sink((mizu_any_fn) &mizu_ix_put_strelt);
+  refs += sink((mizu_any_fn) &mizu_ix_put_list_begin);
+  refs += sink((mizu_any_fn) &mizu_ix_put_dict_begin);
+  refs += sink((mizu_any_fn) &mizu_ix_put_key);
+  refs += sink((mizu_any_fn) &mizu_ix_put_attr);
+  refs += sink((mizu_any_fn) &mizu_ix_put_err);
+  refs += sink((mizu_any_fn) &mizu_ix_put_task);
+
   /* The raw-tier staging reservation (the header inline by default, the
      exported form under EXT_PROBE_EXPORTS; the slow path is extern-only). */
   refs += sink((mizu_any_fn) &mizu_stage_raw);
@@ -134,14 +158,15 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 77);
+  assert(refs == 97);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +
     sizeof(mizu_result_sink) + sizeof(mizu_shm) + sizeof(mizu_parker) +
     sizeof(mizu_pool_sig) + sizeof(mizu_bytes) + sizeof(mizu_morsel_hdr) +
     sizeof(mizu_morsel_sizer) + sizeof(mizu_morsel_span) +
-    sizeof(mizu_mizs_geom) + sizeof(mizu_mizl_entry);
+    sizeof(mizu_mizs_geom) + sizeof(mizu_mizl_entry) + sizeof(mizu_ix) +
+    sizeof(mizu_ix_item);
   assert(sizes > 0);
 
   /* Macro surface. */
@@ -223,6 +248,32 @@ int main(void) {
   uint32_t rc_after_write;
   memcpy(&rc_after_write, mizh + MIZU_ZC_REFCOUNT_OFF, sizeof rc_after_write);
   assert(rc_after_write == 0);   /* the reserved band write zeroed it */
+
+  /* The interchange emit helpers, in either mode: the counting form and
+     the writing form agree, and the cursor reads back what was written. */
+  unsigned char ixb[64];
+  size_t off = mizu_ix_put_header(ixb);
+  off += mizu_ix_put_list_begin(ixb + off, 3);
+  off += mizu_ix_put_int(ixb + off, -7000000000LL);
+  off += mizu_ix_put_str(ixb + off, "hi", 2);
+  off += mizu_ix_put_lgl(ixb + off, 2);
+  assert(mizu_ix_put_header(NULL) + mizu_ix_put_list_begin(NULL, 3) +
+         mizu_ix_put_int(NULL, -7000000000LL) +
+         mizu_ix_put_str(NULL, "hi", 2) + mizu_ix_put_lgl(NULL, 2) == off);
+  mizu_ix cur;
+  assert(mizu_ix_open(&cur, ixb, off) == MIZU_OK);
+  mizu_ix_item it;
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_LIST &&
+         it.count == 3);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_INT);
+  int64_t back;
+  memcpy(&back, &it.u64[0], 8);
+  assert(back == -7000000000LL);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_STR1 &&
+         it.len == 2 && memcmp(it.ptr, "hi", 2) == 0);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_LGL &&
+         it.u64[0] == 2);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
 
   /* A taste of the stable tier: the proof links both headers' surface. */
   assert(mizu_version() != NULL);

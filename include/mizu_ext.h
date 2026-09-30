@@ -21,11 +21,12 @@
    consumers see the full tier.
 
    Dual-form fast paths (the CPython Py_INCREF pattern):
-   mizu_parker_snapshot, mizu_zc_rc, mizu_zc_flags_, and the wire helpers
+   mizu_parker_snapshot, mizu_zc_rc, mizu_zc_flags_, the wire helpers
    (mizu_timeout_ms, mizu_store_na_real, mizu_aux_rawspill_pool,
    mizu_aux_shm_vec, mizu_mizh_write, mizu_mizh_check,
    mizu_mizh_validity_set, mizu_mizs_geometry, mizu_mizs_check,
-   mizu_mizl_check, mizu_mizl_elem, mizu_na_build, mizu_na_apply) ship as
+   mizu_mizl_check, mizu_mizl_elem, mizu_na_build, mizu_na_apply), and the
+   interchange emit helpers (mizu_ix_put_*) ship as
    `static inline` here AND as same-named exported functions (src/ext.c).
    A C TU inlines its own copy — zero cost — while an FFI binds the
    exported symbol. This is legal C: internal and external linkage of the
@@ -1308,6 +1309,430 @@ MIZU_EXT_INLINE uint64_t mizu_na_build(int type, uint8_t *bitmap,
 MIZU_EXT_INLINE uint64_t mizu_na_apply(int type, void *dst, const void *src,
                                      const uint8_t *bitmap, uint64_t n) {
   return mizu_ext_na_apply_impl(type, dst, src, bitmap, n);
+}
+#endif
+
+// The interchange stream ('I') ---------------------------------------------------
+
+/* The byte-level half of DESIGN.md's Interchange codec section: a
+   validating pull cursor (mizu_ix_open / mizu_ix_next / mizu_ix_end, in
+   src/interop.c) and the dual-form emit helpers below, shared by every
+   binding so the wire grammar has exactly one implementation. The cursor
+   owns bounds, the depth cap, UTF-8 validity, the container arity
+   accounting (a task is one element of kind-determined arity), and the
+   informative unknown-tag / unknown-version / unknown-kind declines,
+   recording them in the thread-local error slot
+   (mizu_last_error_message). A binding keeps only a builder, allocating a
+   native object per item, and a value walk emitting through the put
+   helpers; the golden corpus (tests/interop/) certifies the grammar once
+   here. */
+
+#define MIZU_IX_VERSION 0x01u
+#define MIZU_IX_DEPTH_MAX 64
+
+/* The wire tags (DESIGN.md's tag table). */
+enum {
+  MIZU_IX_TAG_NIL   = 0x00,
+  MIZU_IX_TAG_LGL1  = 0x01,
+  MIZU_IX_TAG_INT   = 0x02,
+  MIZU_IX_TAG_REAL  = 0x03,
+  MIZU_IX_TAG_STR   = 0x04,
+  MIZU_IX_TAG_BYTES = 0x05,
+  MIZU_IX_TAG_LGLV  = 0x06,
+  MIZU_IX_TAG_INTV  = 0x07,
+  MIZU_IX_TAG_REALV = 0x08,
+  MIZU_IX_TAG_CPLXV = 0x09,
+  MIZU_IX_TAG_RAWV  = 0x0a,
+  MIZU_IX_TAG_STRV  = 0x0b,
+  MIZU_IX_TAG_LIST  = 0x0c,
+  MIZU_IX_TAG_DICT  = 0x0d,
+  MIZU_IX_TAG_I64V  = 0x0e,
+  MIZU_IX_TAG_ATTR  = 0x0f,
+  MIZU_IX_TAG_CPLX  = 0x10,
+  MIZU_IX_TAG_ERR   = 0x11,
+  MIZU_IX_TAG_TASK  = 0x12
+};
+
+/* What mizu_ix_next yields. A scalar carries its value; STR1 (the 0x04
+   scalar) and STR (a bare string: an strv element or a dict key — key is
+   1 for the latter) carry a UTF-8-validated span, na set on the -1 form
+   (keys are never na); BYTES and VEC carry a (ptr, count) span already
+   bounds-checked; STRV / LIST / DICT / ATTR are counted begins whose
+   elements arrive as following items (a dict's keys as STR items); ERR
+   carries its fields (top level only); TASK is a header item whose
+   kind-determined arity (count) of fields arrive as ordinary items. */
+enum {
+  MIZU_IX_NIL = 0,
+  MIZU_IX_LGL,          /* u64[0]: 0, 1, or 2 (NA) */
+  MIZU_IX_INT,          /* u64[0]: the i64 */
+  MIZU_IX_REAL,         /* u64[0]: the f64 bits */
+  MIZU_IX_CPLX,         /* u64[0..1]: the re / im f64 bits */
+  MIZU_IX_STR1,         /* the 0x04 string scalar */
+  MIZU_IX_STR,          /* a bare string (strv element, or dict key: key=1) */
+  MIZU_IX_BYTES,        /* the 0x05 bytes scalar */
+  MIZU_IX_VEC,          /* 0x06-0x0a, 0x0e: type is the MIZU_TYPE_* tag */
+  MIZU_IX_STRV,         /* begin: count STR items follow */
+  MIZU_IX_LIST,         /* begin: count value items follow */
+  MIZU_IX_DICT,         /* begin: count (STR key, value) pairs follow */
+  MIZU_IX_ATTR,         /* begin: one value item, then one DICT begin */
+  MIZU_IX_ERR,          /* the err fields; legal at the top level only */
+  MIZU_IX_TASK          /* header: count fields follow as ordinary items */
+};
+
+typedef struct mizu_ix_item_s {
+  uint32_t kind;        /* MIZU_IX_* */
+  uint32_t type;        /* VEC: the MIZU_TYPE_* wire type */
+  int na;               /* STR1 / STR: the -1 (NA) form */
+  int key;              /* STR: a dict key (an strv element has 0) */
+  const unsigned char *ptr;  /* STR1 / STR / BYTES / VEC: the data span */
+  uint64_t len;         /* STR1 / STR: the span's byte length */
+  uint64_t count;       /* BYTES / VEC / STRV / LIST / DICT: the element
+                           (pair) count; TASK: the field arity */
+  uint64_t u64[2];      /* LGL: u64[0] in {0, 1, 2}; INT / REAL: u64[0];
+                           CPLX: both; TASK: u64[0] = submitter identity */
+  uint32_t target;      /* TASK: the target language byte */
+  uint32_t task_kind;   /* TASK: the kind byte */
+  uint32_t err_flags;   /* ERR: bit 0 = index present */
+  uint64_t err_index;   /* ERR: valid when err_flags bit 0 is set */
+  struct { const unsigned char *ptr; uint64_t len; } err_str[3];
+                        /* ERR: type, message, detail */
+} mizu_ix_item;
+
+/* The pull cursor. Stack-allocated by the caller; the frame stack is the
+   depth cap's accounting (LIST / DICT / STRV / ATTR / TASK frames, the
+   dict's remaining counting keys and values alike). */
+typedef struct mizu_ix_s {
+  const unsigned char *p;
+  const unsigned char *end;
+  uint32_t depth;
+  int done;             /* the root value completed */
+  int err;              /* latched: all later calls fail */
+  struct {
+    uint32_t kind;      /* the MIZU_IX_* begin kind */
+    uint64_t remaining; /* items owned at this level */
+  } stack[MIZU_IX_DEPTH_MAX];
+} mizu_ix;
+
+/* Open a cursor over a whole stream: the magic and version checks, the
+   unknown version taking the informative "the peer uses a newer format"
+   decline. MIZU_OK, or MIZU_ERR with the error in the TLS slot. */
+MIZU_API mizu_status mizu_ix_open(mizu_ix *cur, const void *buf, size_t len);
+/* The next item: bounds, depth, UTF-8 and grammar checks per the spec.
+   MIZU_OK and *item filled, or MIZU_ERR with the informative text in the
+   TLS slot (an unknown tag or task kind declines as "the peer uses a
+   newer format", never a bare corrupt-stream error). */
+MIZU_API mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *item);
+/* The finishing check: exactly one value per stream — fails on a
+   truncated root value or on bytes past it. */
+MIZU_API mizu_status mizu_ix_end(mizu_ix *cur);
+
+/* The interop emit helpers' bodies (the interchange stream section
+   below): every count and value follows its tag byte directly at
+   unaligned offsets, little-endian, so writes are memcpy, never casts. */
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_header_impl(unsigned char *dst) {
+  if (dst != NULL) {
+    dst[0] = (unsigned char) MIZU_INTEROP_MAGIC;
+    dst[1] = (unsigned char) MIZU_IX_VERSION;
+  }
+  return 2;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_tag8_impl(unsigned char *dst,
+                                                uint32_t tag, uint64_t v) {
+  /* tag + one trailing u64: the vector/container/bytes wire shape */
+  if (dst != NULL) {
+    dst[0] = (unsigned char) tag;
+    memcpy(dst + 1, &v, 8);
+  }
+  return 9;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_nil_impl(unsigned char *dst) {
+  if (dst != NULL) dst[0] = MIZU_IX_TAG_NIL;
+  return 1;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_lgl_impl(unsigned char *dst,
+                                               int value) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_LGL1;
+    dst[1] = (unsigned char) value;
+  }
+  return 2;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_int_impl(unsigned char *dst,
+                                               int64_t value) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_INT;
+    memcpy(dst + 1, &value, 8);
+  }
+  return 9;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_real_impl(unsigned char *dst,
+                                                double value) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_REAL;
+    memcpy(dst + 1, &value, 8);
+  }
+  return 9;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_cplx_impl(unsigned char *dst,
+                                                double re, double im) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_CPLX;
+    memcpy(dst + 1, &re, 8);
+    memcpy(dst + 9, &im, 8);
+  }
+  return 17;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_str_impl(unsigned char *dst,
+                                               const void *s, int32_t len) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_STR;
+    memcpy(dst + 1, &len, 4);
+    if (len > 0) memcpy(dst + 5, s, (size_t) len);
+  }
+  return (size_t) 5 + (len > 0 ? (size_t) len : 0);
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_bytes_impl(unsigned char *dst,
+                                                 const void *data,
+                                                 uint64_t count) {
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_BYTES;
+    memcpy(dst + 1, &count, 8);
+    if (count != 0) memcpy(dst + 9, data, (size_t) count);
+  }
+  return (size_t) 9 + (size_t) count;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_vec_impl(unsigned char *dst,
+                                               int wire_type,
+                                               const void *data,
+                                               uint64_t count) {
+  uint32_t tag;
+  switch (wire_type) {
+  case MIZU_TYPE_LGL:  tag = MIZU_IX_TAG_LGLV;  break;
+  case MIZU_TYPE_INT:  tag = MIZU_IX_TAG_INTV;  break;
+  case MIZU_TYPE_REAL: tag = MIZU_IX_TAG_REALV; break;
+  case MIZU_TYPE_CPLX: tag = MIZU_IX_TAG_CPLXV; break;
+  case MIZU_TYPE_RAW:  tag = MIZU_IX_TAG_RAWV;  break;
+  case MIZU_TYPE_INT64: tag = MIZU_IX_TAG_I64V; break;
+  default: return 0;
+  }
+  const size_t elt = mizu_type_elt_size(wire_type);
+  if (dst != NULL) {
+    dst[0] = (unsigned char) tag;
+    memcpy(dst + 1, &count, 8);
+    if (count != 0) memcpy(dst + 9, data, (size_t) count * elt);
+  }
+  return (size_t) 9 + (size_t) count * elt;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_strv_begin_impl(unsigned char *dst,
+                                                      uint64_t count) {
+  return mizu_ext_ix_put_tag8_impl(dst, MIZU_IX_TAG_STRV, count);
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_strelt_impl(unsigned char *dst,
+                                                  const void *s,
+                                                  int32_t len) {
+  if (dst != NULL) {
+    memcpy(dst, &len, 4);
+    if (len > 0) memcpy(dst + 4, s, (size_t) len);
+  }
+  return (size_t) 4 + (len > 0 ? (size_t) len : 0);
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_list_begin_impl(unsigned char *dst,
+                                                      uint64_t count) {
+  return mizu_ext_ix_put_tag8_impl(dst, MIZU_IX_TAG_LIST, count);
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_dict_begin_impl(unsigned char *dst,
+                                                      uint64_t count) {
+  return mizu_ext_ix_put_tag8_impl(dst, MIZU_IX_TAG_DICT, count);
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_key_impl(unsigned char *dst,
+                                               const void *s, uint32_t len) {
+  if (dst != NULL) {
+    memcpy(dst, &len, 4);
+    if (len != 0) memcpy(dst + 4, s, (size_t) len);
+  }
+  return (size_t) 4 + (size_t) len;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_attr_impl(unsigned char *dst) {
+  if (dst != NULL) dst[0] = MIZU_IX_TAG_ATTR;
+  return 1;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_err_impl(unsigned char *dst,
+                                               int has_index, uint64_t index,
+                                               const void *type,
+                                               uint32_t type_len,
+                                               const void *message,
+                                               uint32_t message_len,
+                                               const void *detail,
+                                               uint32_t detail_len) {
+  if (dst != NULL) {
+    const uint16_t flags = (uint16_t) (has_index != 0);
+    dst[0] = MIZU_IX_TAG_ERR;
+    memcpy(dst + 1, &flags, 2);
+    size_t off = 3;
+    if (has_index) {
+      memcpy(dst + off, &index, 8);
+      off += 8;
+    }
+    const void *strs[3] = { type, message, detail };
+    const uint32_t lens[3] = { type_len, message_len, detail_len };
+    for (int i = 0; i < 3; i++) {
+      memcpy(dst + off, &lens[i], 4);
+      off += 4;
+      if (lens[i] != 0) {
+        memcpy(dst + off, strs[i], (size_t) lens[i]);
+        off += (size_t) lens[i];
+      }
+    }
+    return off;
+  }
+  return (size_t) 3 + (has_index ? 8 : 0) +
+         (size_t) 12 + (size_t) type_len + (size_t) message_len +
+         (size_t) detail_len;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_task_impl(unsigned char *dst,
+                                                int target, int kind,
+                                                uint64_t ident) {
+  if (dst != NULL) {
+    const uint16_t zero = 0;
+    dst[0] = MIZU_IX_TAG_TASK;
+    dst[1] = (unsigned char) target;
+    dst[2] = (unsigned char) kind;
+    memcpy(dst + 3, &zero, 2);
+    memcpy(dst + 5, &ident, 8);
+  }
+  return 13;
+}
+
+#ifdef MIZU_EXT_NO_INLINES
+MIZU_API size_t mizu_ix_put_header(unsigned char *dst);
+MIZU_API size_t mizu_ix_put_nil(unsigned char *dst);
+MIZU_API size_t mizu_ix_put_lgl(unsigned char *dst, int value);
+MIZU_API size_t mizu_ix_put_int(unsigned char *dst, int64_t value);
+MIZU_API size_t mizu_ix_put_real(unsigned char *dst, double value);
+MIZU_API size_t mizu_ix_put_cplx(unsigned char *dst, double re, double im);
+MIZU_API size_t mizu_ix_put_str(unsigned char *dst, const void *s,
+                              int32_t len);
+MIZU_API size_t mizu_ix_put_bytes(unsigned char *dst, const void *data,
+                                uint64_t count);
+MIZU_API size_t mizu_ix_put_vec(unsigned char *dst, int wire_type,
+                              const void *data, uint64_t count);
+MIZU_API size_t mizu_ix_put_strv_begin(unsigned char *dst, uint64_t count);
+MIZU_API size_t mizu_ix_put_strelt(unsigned char *dst, const void *s,
+                                 int32_t len);
+MIZU_API size_t mizu_ix_put_list_begin(unsigned char *dst, uint64_t count);
+MIZU_API size_t mizu_ix_put_dict_begin(unsigned char *dst, uint64_t count);
+MIZU_API size_t mizu_ix_put_key(unsigned char *dst, const void *s,
+                              uint32_t len);
+MIZU_API size_t mizu_ix_put_attr(unsigned char *dst);
+MIZU_API size_t mizu_ix_put_err(unsigned char *dst, int has_index,
+                              uint64_t index,
+                              const void *type, uint32_t type_len,
+                              const void *message, uint32_t message_len,
+                              const void *detail, uint32_t detail_len);
+MIZU_API size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
+                               uint64_t ident);
+#else
+/* The emit helpers: each returns its byte count, writing only when dst
+   is not NULL, so a binding's two-pass walk sizes (dst NULL) and writes
+   through the same byte-level code. The write pass relies on the size
+   pass's count, so no limit is carried. Bodies are impl delegations, the
+   dual-form single-sourcing discipline. */
+MIZU_EXT_INLINE size_t mizu_ix_put_header(unsigned char *dst) {
+  return mizu_ext_ix_put_header_impl(dst);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_nil(unsigned char *dst) {
+  return mizu_ext_ix_put_nil_impl(dst);
+}
+/* value on the wire: 0, 1, or 2 (NA). */
+MIZU_EXT_INLINE size_t mizu_ix_put_lgl(unsigned char *dst, int value) {
+  return mizu_ext_ix_put_lgl_impl(dst, value);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_int(unsigned char *dst, int64_t value) {
+  return mizu_ext_ix_put_int_impl(dst, value);
+}
+/* real and cplx take doubles and memcpy them: NaN payloads are
+   bitwise-preserved. */
+MIZU_EXT_INLINE size_t mizu_ix_put_real(unsigned char *dst, double value) {
+  return mizu_ext_ix_put_real_impl(dst, value);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_cplx(unsigned char *dst, double re,
+                                      double im) {
+  return mizu_ext_ix_put_cplx_impl(dst, re, im);
+}
+/* The 0x04 string scalar; len -1 is NA (s may then be NULL). */
+MIZU_EXT_INLINE size_t mizu_ix_put_str(unsigned char *dst, const void *s,
+                                     int32_t len) {
+  return mizu_ext_ix_put_str_impl(dst, s, len);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_bytes(unsigned char *dst,
+                                       const void *data, uint64_t count) {
+  return mizu_ext_ix_put_bytes_impl(dst, data, count);
+}
+/* The fixed-width vector tags: wire_type one of MIZU_TYPE_LGL / INT /
+   REAL / CPLX / RAW / INT64 (any other returns 0 — the bindings pass
+   only the six). */
+MIZU_EXT_INLINE size_t mizu_ix_put_vec(unsigned char *dst, int wire_type,
+                                     const void *data, uint64_t count) {
+  return mizu_ext_ix_put_vec_impl(dst, wire_type, data, count);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_strv_begin(unsigned char *dst,
+                                            uint64_t count) {
+  return mizu_ext_ix_put_strv_begin_impl(dst, count);
+}
+/* A bare strv element; len -1 is NA. */
+MIZU_EXT_INLINE size_t mizu_ix_put_strelt(unsigned char *dst, const void *s,
+                                        int32_t len) {
+  return mizu_ext_ix_put_strelt_impl(dst, s, len);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_list_begin(unsigned char *dst,
+                                            uint64_t count) {
+  return mizu_ext_ix_put_list_begin_impl(dst, count);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_dict_begin(unsigned char *dst,
+                                            uint64_t count) {
+  return mizu_ext_ix_put_dict_begin_impl(dst, count);
+}
+/* A bare dict key: never NA, so the length is unsigned. */
+MIZU_EXT_INLINE size_t mizu_ix_put_key(unsigned char *dst, const void *s,
+                                     uint32_t len) {
+  return mizu_ext_ix_put_key_impl(dst, s, len);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_attr(unsigned char *dst) {
+  return mizu_ext_ix_put_attr_impl(dst);
+}
+MIZU_EXT_INLINE size_t mizu_ix_put_err(unsigned char *dst, int has_index,
+                                     uint64_t index,
+                                     const void *type, uint32_t type_len,
+                                     const void *message,
+                                     uint32_t message_len,
+                                     const void *detail,
+                                     uint32_t detail_len) {
+  return mizu_ext_ix_put_err_impl(dst, has_index, index, type, type_len,
+                                 message, message_len, detail, detail_len);
+}
+/* The task header: target language byte, kind byte, the reserved u16
+   flags written zero, then the submitter identity. */
+MIZU_EXT_INLINE size_t mizu_ix_put_task(unsigned char *dst, int target,
+                                      int kind, uint64_t ident) {
+  return mizu_ext_ix_put_task_impl(dst, target, kind, ident);
 }
 #endif
 

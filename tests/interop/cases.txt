@@ -1,0 +1,160 @@
+# The golden conformance cases for the 'I' interchange stream (DESIGN.md's
+# Interchange codec section is the authority). One case per line:
+#   id | kind | langs | value | note
+# kinds: rt (bytes <-> value, both directions — every listed binding's home
+# is exact), dec (wire => home — the read half where a home shifts), enc
+# (value -> hex — the write half), read-err (hex or notation -> the
+# informative error; notes start "cursor:" or "builder:"), write-decline
+# (value -> the send-time decline; no corpus entry). langs: all, R, PY.
+# tools/interop_corpus.py regenerates tests/interop/corpus.txt from this
+# file — edit here, never there. A string literal never contains " => ".
+
+# --- scalars ---
+nil | rt | all | nil
+lgl-false | rt | all | lgl(0)
+lgl-true | rt | all | lgl(1)
+lgl-na | rt | R | lgl(na)
+py-lgl-na | dec | PY | lgl(na) => nil | Python reads an NA scalar as None
+int-zero | rt | all | int(0)
+int-one | rt | all | int(1)
+int-neg | rt | all | int(-1)
+int32-max | rt | all | int(2147483647)
+int32-min-plus | rt | all | int(-2147483647)
+int-neg-2^31 | rt | PY | int(-2147483648) | a plain Python int
+r-int-neg-2^31 | dec | R | int(-2147483648) => i64v[-2147483648] | R's NA sentinel excludes -2^31 from the int32 home: integer64(1)
+r-i64-neg-2^31 | enc | R | i64v[-2147483648] | integer64 writes 0x0e, never 0x02
+int32-max-plus | rt | PY | int(2147483648)
+r-int32-max-plus | dec | R | int(2147483648) => i64v[2147483648]
+int-2^53 | rt | PY | int(9007199254740992)
+r-int-2^53 | dec | R | int(9007199254740992) => i64v[9007199254740992]
+int-neg-2^53 | rt | PY | int(-9007199254740992)
+r-int-neg-2^53 | dec | R | int(-9007199254740992) => i64v[-9007199254740992]
+int64-max | rt | PY | int(9223372036854775807)
+r-int64-max | dec | R | int(9223372036854775807) => i64v[9223372036854775807]
+int64-min-plus | rt | PY | int(-9223372036854775807)
+r-int64-min-plus | dec | R | int(-9223372036854775807) => i64v[-9223372036854775807]
+int-na | rt | R | int(na) | NA_integer_ <-> 0x02 INT64_MIN
+py-int64-min | dec | PY | int(-9223372036854775808) => nil | INT64_MIN -> None
+py-int64-min-enc | enc | PY | int(-9223372036854775808) | a Python -2^63 writes 0x02 INT64_MIN (the sentinel collision: R reads NA_integer_)
+real-zero | rt | all | real(0)
+real-neg-zero | rt | all | real(bits:8000000000000000)
+real-pi | rt | all | real(3.141592653589793)
+real-inf | rt | all | real(inf)
+real-neg-inf | rt | all | real(-inf)
+real-na | rt | all | real(na) | the NA_real_ payload, bitwise both ways
+real-nan-payload | rt | all | real(bits:7ff8000000001234) | a quiet NaN payload survives the relay
+cplx | rt | all | cplx(1.5,-2.5)
+cplx-na | rt | all | cplx(na,na) | NA_complex_ bitwise; complex(nan, nan)
+str-empty | rt | all | str("")
+str-ascii | rt | all | str("hello")
+str-unicode | rt | all | str("héllo ✓")
+str-na | rt | R | str(na)
+py-str-na | dec | PY | str(na) => nil
+bytes | rt | PY | bytes(00ff7f80)
+r-bytes | dec | R | bytes(00ff7f80) => rawv[00,ff,7f,80] | R reads 0x05 as raw; re-encodes 0x0a (the rawv row)
+rawv | rt | all | rawv[00,ff,7f,80] | R raw; a Python uint8 array
+
+# --- atomic vectors (u64 counts pinned by every row) ---
+lglv | rt | all | lglv[1,0,1]
+lglv-na | rt | R | lglv[1,na,0]
+py-lglv-na | dec | PY | lglv[1,na,0] => intv[1,-2147483648,0] | lglv with NA -> int32 with INT_MIN
+lglv-empty | rt | all | lglv[]
+intv | rt | all | intv[1,2,3]
+intv-na | rt | R | intv[1,na,-3]
+py-intv-na | dec | PY | intv[1,na,-3] => realv[1,na,-3] | intv with NA -> float64, the NA_real_ payload NaN
+intv-empty | rt | all | intv[]
+realv | rt | all | realv[1.5,-2.5,0]
+realv-na | rt | all | realv[1.5,na,-2.5]
+realv-empty | rt | all | realv[]
+cplxv | rt | all | cplxv[cplx(1,2),cplx(-3.5,0)]
+cplxv-na | rt | all | cplxv[cplx(1,2),cplx(na,na)]
+cplxv-empty | rt | all | cplxv[]
+strv | rt | R | strv["a","bc","hé"]
+strv-na | rt | R | strv["a",na,"c"]
+py-strv | dec | PY | strv["a",na,"c"] => list(str("a"),nil,str("c")) | a list of str-or-None; Python re-encodes a 0x0c list
+py-strv-plain | dec | PY | strv["a","bc"] => list(str("a"),str("bc"))
+strv-empty | rt | R | strv[]
+py-strv-empty | dec | PY | strv[] => list()
+i64v | rt | all | i64v[1,-1,9223372036854775807,-9223372036854775807]
+i64v-na | rt | all | i64v[na,1] | a sentinel-carrying read: Python keeps INT64_MIN and warns
+i64v-empty | rt | all | i64v[]
+r-i64-len1 | enc | R | i64v[5] | integer64 at length 1 writes 0x0e, never 0x02
+py-i64-len1 | rt | PY | i64v[5] | a length-1 int64 array is exact
+
+# --- containers ---
+list-empty | rt | all | list()
+list-nested | rt | all | list(int(1),str("a"),list(lgl(1),real(2.5)))
+list-i64-na | rt | all | list(i64v[na],int(1)) | an integer64 NA nested in a list
+dict | rt | all | dict(a=int(1),bc=real(2.5))
+dict-empty | rt | all | dict() | R reads a named list whose names are character(0)
+dict-unicode | rt | all | dict("héllo"=int(1))
+dict-nested | rt | all | dict(x=list(int(1)),y=dict(z=nil))
+tuple | enc | PY | tuple(int(1),str("a")) | a tuple encodes 0x0c and reads back as a list (any list row pins the dec half)
+
+# --- attr shapes ---
+factor | rt | R | attr(intv[2,1,1], levels=strv["b","a"], class=strv["factor"])
+py-factor | dec | PY | attr(intv[2,1,1], levels=strv["b","a"], class=strv["factor"]) => list(str("a"),str("b"),str("b")) | a standalone factor -> a list of str-or-None
+factor-na | rt | R | attr(intv[1,na,2], levels=strv["x","y"], class=strv["factor"]) | a factor with an NA code
+py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=strv["factor"]) => list(str("x"),nil,str("y"))
+frame-1col | rt | all | attr(list(realv[1,2]), names=strv["x"], class=strv["data.frame"], row.names=intv[na,-2]) | a one-column frame, automatic row names
+frame-0row | rt | all | attr(list(intv[],strv[]), names=strv["a","b"], class=strv["data.frame"], row.names=intv[na,0]) | a zero-row frame: c(NA, 0)
+frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=strv["f"], class=strv["factor"]), i64v[5,na]), names=strv["n","f","i"], class=strv["data.frame"], row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column
+frame-int-rownames | rt | all | attr(list(realv[1,2,3]), names=strv["x"], class=strv["data.frame"], row.names=intv[10,20,30]) | integer row names (a base df[i, ] subset)
+frame-char-rownames | rt | all | attr(list(realv[1,2,3]), names=strv["x"], class=strv["data.frame"], row.names=strv["a","b","c"]) | character row names (mtcars)
+frame-cplx | dec | PY | attr(list(cplxv[cplx(1,2)]), names=strv["z"], class=strv["data.frame"], row.names=intv[na,-1]) | to_dict() carries complex128; the Arrow export raises
+mat-2x3 | rt | all | attr(realv[1,2,3,4,5,6], dim=intv[2,3]) | a 2x3 real matrix: one byte layout, Fortran order
+array-3d | rt | all | attr(intv[1,2,3,4,5,6,7,8], dim=intv[2,2,2]) | a 3-D intv array
+i64-mat | rt | all | attr(i64v[1,2,3,4], dim=intv[2,2]) | an integer64 matrix: the dict is {dim} alone
+dim-zero | rt | all | attr(intv[], dim=intv[0,3]) | a zero-extent dim
+dim-len1 | rt | R | attr(realv[1,2], dim=intv[2])
+py-dim-len1 | dec | PY | attr(realv[1,2], dim=intv[2]) => realv[1,2] | a length-1 dim reads as a plain vector (numpy cannot tell it from one)
+date | rt | all | attr(realv[19000,19001], class=strv["Date"])
+date-na | rt | all | attr(realv[19000,na], class=strv["Date"]) | NaT for NA, whole days exact both ways
+posixct-utc | rt | all | attr(realv[1700000000,1700000000.5], class=strv["POSIXct","POSIXt"], tzone=strv["UTC"]) | us-integral values relay bitwise
+posixct-na | rt | all | attr(realv[1700000000,na], class=strv["POSIXct","POSIXt"], tzone=strv["UTC"])
+posixct-naive | rt | R | attr(realv[1700000000], class=strv["POSIXct","POSIXt"]) | tzone absent, R's naive form
+py-posixct-naive | dec | PY | attr(realv[1700000000], class=strv["POSIXct","POSIXt"]) => attr(realv[1700000000], class=strv["POSIXct","POSIXt"], tzone=strv["UTC"]) | the naive read
+py-posixct-utc-enc | enc | PY | attr(realv[1700000000], class=strv["POSIXct","POSIXt"], tzone=strv["UTC"]) | a naive datetime64 writes tzone="UTC" (the absent -> UTC normalization)
+
+# --- depth ---
+depth-64 | rt | all | list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(nil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) | at the cap: accepts
+depth-65 | write-decline | all | list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(nil))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) | past the cap: both writers decline with reason depth
+depth-65-stream | read-err | all | hex 49010c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c01000000000000000c010000000000000000 | cursor: 65 nested lists exceed the depth cap
+
+# --- read-err: cursor-level (authored hex) ---
+err-unknown-tag | read-err | all | hex 49017f | cursor: unsupported interop tag 0x7F — the peer uses a newer format
+err-version | read-err | all | hex 490200 | cursor: interop format version 0x02 — the peer uses a newer format
+err-truncated | read-err | all | hex 4901020102 | cursor: an int tag with two bytes
+err-trailing | read-err | all | hex 49010000 | cursor: a valid nil, then bytes past the one value
+err-key-na | read-err | all | hex 49010d0100000000000000ffffffff | cursor: a dict key of length -1
+err-attr-attr | read-err | all | hex 49010f0f | cursor: an attr wraps an attr
+err-attr-notdict | read-err | all | hex 49010f0000 | cursor: the attr attributes are not a dict
+err-count-vec | read-err | all | hex 490106050000000000000000000000 | cursor: a vector count past the remaining bytes
+err-count-list | read-err | all | hex 49010c020000000000000000 | cursor: a list count past the remaining bytes (the pre-allocation bound)
+err-count-dict | read-err | all | hex 49010d020000000000000000 | cursor: a dict count past the remaining bytes
+err-count-strv | read-err | all | hex 49010b020000000000000004000000 | cursor: an strv element span past the end
+err-lgl-value | read-err | all | hex 49010103 | cursor: an lgl1 value past 2
+err-nested-err | read-err | all | hex 49010c0100000000000000110000000000000000000000000000 | cursor: a nested err tag
+err-err-flags | read-err | all | hex 4901110200000000000000000000000000 | cursor: unknown err flag bits set
+err-task-flags | read-err | all | hex 490112020001000000000000000000 | cursor: unknown task flag bits set
+err-task-kind | read-err | all | hex 490112026300000000000000000000 | cursor: unknown task kind 0x63 — the peer uses a newer format
+err-task-extra | read-err | all | hex 49011202000000000000000000000004000000000c00000000000000000d000000000000000000 | cursor: a task with a field too many at top level fails the finishing check
+err-dup-key | read-err | all | hex 49010d0200000000000000010000006100010000006100 | builder: a duplicate dict key
+err-bad-utf8 | read-err | all | hex 49010401000000ff | cursor: invalid UTF-8
+err-str-len-low | read-err | all | hex 490104feffffff | cursor: a string length below -1
+
+# --- read-err: builder-level (the cursor parses; the binding's builder rejects) ---
+err-frame-shape | read-err | all | attr(list(realv[1,2], realv[1]), names=strv["a","b"], class=strv["data.frame"], row.names=intv[na,-2]) | builder: a frame whose columns differ in length
+err-attr-unknown | read-err | all | attr(int(1), foo=int(2), class=strv["bar"]) | builder: an attribute set outside the whitelist
+err-date-fractional | read-err | all | attr(realv[1.5], class=strv["Date"]) | builder: a fractional Date (the R writer declines too)
+err-dim-product | read-err | all | attr(realv[1,2,3], dim=intv[2,2]) | builder: dim product mismatch
+
+# --- write-decline (no corpus entry; bytes-marked strings and object
+# --- dtypes live in the bindings' own test files — the notation carries
+# --- no encoding marks and no numpy dtype system) ---
+wd-dup-names | write-decline | all | dict(a=int(1),a=int(2)) | duplicate names
+wd-ordered-factor | write-decline | R | attr(intv[1], levels=strv["x"], class=strv["factor","ordered"]) | an ordered factor
+wd-nonstr-key | write-decline | PY | dict(1=int(2)) | a non-str dict key
+wd-surrogate | write-decline | PY | str("\uD800") | a lone surrogate
+wd-date-fractional | write-decline | R | attr(realv[1.5], class=strv["Date"]) | a fractional Date
+wd-int-overflow | write-decline | PY | int(1267650600228229401496703205376) | an int past int64 (2^90)

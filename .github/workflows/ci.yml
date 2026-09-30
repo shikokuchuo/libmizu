@@ -18,6 +18,10 @@ jobs:
       - run: make
       - run: make test
       - run: make test-integration
+      # The golden corpus is generated from the spec-authored cases:
+      # regenerating must be a clean diff, so a case edit and its
+      # fixtures arrive together.
+      - run: python3 tools/interop_corpus.py --check
       # The consumer contract: mizu.c + mizu.h + mizu_ext.h alone, no
       # defines — the public-only program and the ext-surface proof must
       # link and run, not just compile. The stamp check guards the
