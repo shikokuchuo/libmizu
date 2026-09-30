@@ -15,12 +15,13 @@
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   mizu_ix cur;
   mizu_ix_item it;
+  /* the cursor borrows the input bytes, so buf must outlive the pull loop */
+  uint8_t buf[4096 + 2];
   if (size >= 2 && data[0] == MIZU_INTEROP_MAGIC) {
     if (mizu_ix_open(&cur, data, size) != MIZU_OK) return 0;
   } else {
     /* the runner caps inputs at 4096 bytes (-max_len in the Makefile) */
     if (size > 4096) return 0;
-    uint8_t buf[4096 + 2];
     buf[0] = MIZU_INTEROP_MAGIC;
     buf[1] = MIZU_IX_VERSION;
     memcpy(buf + 2, data, size);

@@ -1419,7 +1419,9 @@ typedef struct mizu_ix_s {
 
 /* Open a cursor over a whole stream: the magic and version checks, the
    unknown version taking the informative "the peer uses a newer format"
-   decline. MIZU_OK, or MIZU_ERR with the error in the TLS slot. */
+   decline. The stream is borrowed, never copied: buf must outlive the
+   cursor, and item spans (mizu_ix_item.ptr) point into it. MIZU_OK, or
+   MIZU_ERR with the error in the TLS slot. */
 MIZU_API mizu_status mizu_ix_open(mizu_ix *cur, const void *buf, size_t len);
 /* The next item: bounds, depth, UTF-8 and grammar checks per the spec.
    MIZU_OK and *item filled, or MIZU_ERR with the informative text in the

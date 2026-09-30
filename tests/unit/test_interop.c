@@ -147,7 +147,8 @@ static void corpus_tests(void) {
   /* corpus.txt: id | hex */
   FILE *fc = fopen("tests/interop/corpus.txt", "r");
   assert(fc != NULL);
-  struct corpus_row rows[512];
+  /* static: the 4 MB array overflows Windows' 1 MB stack reserve */
+  static struct corpus_row rows[512];
   size_t nrows = 0;
   char line[MAX_LINE];
   while (fgets(line, sizeof line, fc) != NULL) {
@@ -156,8 +157,9 @@ static void corpus_tests(void) {
     assert(bar != NULL);
     *bar = '\0';
     assert(nrows < sizeof rows / sizeof rows[0]);
-    snprintf(rows[nrows].id, sizeof rows[nrows].id, "%s", line);
-    size_t idlen = strlen(rows[nrows].id);
+    size_t idlen = strlen(line);
+    assert(idlen < sizeof rows[nrows].id);
+    memcpy(rows[nrows].id, line, idlen + 1);
     while (idlen > 0 && rows[nrows].id[idlen - 1] == ' ')
       rows[nrows].id[--idlen] = '\0';
     char *hex = bar + 1;
