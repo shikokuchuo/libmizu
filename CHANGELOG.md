@@ -11,6 +11,16 @@ Versions carry an ABI contract: any wire-format change bumps
 Pre-release; no tagged version yet. On the first tag, rename this section
 to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
+### Fixed
+
+- `mizu_na_build`'s REAL and CPLX element tests now discriminate the
+  `NA_real_` payload the way R's own `ISNA` does — any NaN whose low
+  word is 1954 (`0x7A2`) — instead of matching only the quiet-bit-set
+  `MIZU_NA_REAL_BITS` exactly, so a writer's quiet-bit-clear `NA_real_`
+  (R's verbatim form, `0x7FF00000000007A2`) reads as NA on the
+  validity-bitmap paths. No ABI or wire change (the helpers are
+  unreleased, Phase 0).
+
 ### Added
 
 - The interchange codec's byte-level half (the execution plan's item

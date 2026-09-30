@@ -213,17 +213,34 @@ static void na_tests(void) {
   assert(mizu_na_apply(MIZU_TYPE_INT, di, vi, bm, 4) == 2);
   assert(memcmp(di, vi, sizeof di) == 0);
 
-  /* REAL: the NA_real_ payload is discriminated from other NaNs */
-  uint64_t vr[4] = { 0x3FF0000000000000ULL,     /* 1.0 */
+  /* REAL: the NA_real_ payload is discriminated from other NaNs, in
+     either quiet-bit form (R's verbatim NA_real_ is the clear-bit
+     twin) */
+  uint64_t vr[6] = { 0x3FF0000000000000ULL,     /* 1.0 */
                      MIZU_NA_REAL_BITS,
                      0x7FF8000000000001ULL,     /* another NaN payload */
-                     MIZU_NA_REAL_BITS };
+                     0x7FF00000000007A2ULL,     /* R's verbatim NA_real_ */
+                     0x7FF80000000007A2ULL,     /* the quiet-bit twin */
+                     0x7FF0000000000000ULL };   /* a plain NaN: a value */
   memset(bm, 0, sizeof bm);
-  assert(mizu_na_build(MIZU_TYPE_REAL, bm, vr, 4, 0) == 2);
-  assert(bm[0] == 0x05);
-  double dr[4];
-  assert(mizu_na_apply(MIZU_TYPE_REAL, dr, vr, bm, 4) == 2);
-  assert(memcmp(dr, vr, sizeof dr) == 0);
+  assert(mizu_na_build(MIZU_TYPE_REAL, bm, vr, 6, 0) == 3);
+  assert(bm[0] == 0x25);                        /* bits 0, 2, 5 set */
+  double dr[6];
+  assert(mizu_na_apply(MIZU_TYPE_REAL, dr, vr, bm, 6) == 3);
+  /* present elements verbatim; the nulls the canonical sentinel */
+  uint64_t w;
+  memcpy(&w, &dr[0], 8);
+  assert(w == vr[0]);
+  memcpy(&w, &dr[2], 8);
+  assert(w == vr[2]);
+  memcpy(&w, &dr[5], 8);
+  assert(w == vr[5]);
+  memcpy(&w, &dr[1], 8);
+  assert(w == MIZU_NA_REAL_BITS);
+  memcpy(&w, &dr[3], 8);
+  assert(w == MIZU_NA_REAL_BITS);
+  memcpy(&w, &dr[4], 8);
+  assert(w == MIZU_NA_REAL_BITS);
 
   /* CPLX: either part carrying the payload */
   uint64_t vc[4] = { MIZU_NA_REAL_BITS, 0,      /* re NA */
