@@ -577,6 +577,8 @@ def norm(v):
         return ("dict", [(k, norm(x)) for k, x in v[1]])
     if tag == "attr":
         return ("attr", norm(v[1]), [(k, norm(x)) for k, x in v[2]])
+    if tag == "task":
+        return ("task", v[1], v[2], v[3], [norm(e) for e in v[4]])
     return v
 
 
@@ -607,7 +609,8 @@ def run(cases_path, corpus_path, check=False):
             raise ValueError("line %d: want 4-5 fields" % lineno)
         cid, kind, langs, value = parts[:4]
         note = parts[4] if len(parts) == 5 else ""
-        if kind not in ("rt", "dec", "enc", "read-err", "write-decline"):
+        if kind not in ("rt", "dec", "enc", "task", "read-err",
+                        "write-decline"):
             raise ValueError("line %d: bad kind %r" % (lineno, kind))
         if langs not in ("all", "R", "PY"):
             raise ValueError("line %d: bad langs %r" % (lineno, langs))
@@ -639,6 +642,16 @@ def run(cases_path, corpus_path, check=False):
             stream = encode_stream(v)
             if decode(stream) != norm(v):
                 raise ValueError("line %d: enc decode mismatch" % lineno)
+            hex_line = stream.hex()
+        elif kind == "task":
+            v = parse(value)
+            if v[0] != "task":
+                raise ValueError("line %d: a task row's value is a task(...)"
+                                 % lineno)
+            stream = encode_stream(v)
+            if decode(stream) != norm(v):
+                raise ValueError("line %d: task self-roundtrip failed"
+                                 % lineno)
             hex_line = stream.hex()
         elif kind == "read-err":
             if value.startswith("hex "):

@@ -23,6 +23,17 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The task tag (0x12) format is normative in DESIGN.md (Phase 4): the
+  fixed-offset header (target, kind, reserved-zero flags, submitter
+  identity) with the SHM_RAW resolution rule, the misroute guard
+  ("task language mismatch"), the submitter identity as the ERR-format
+  and result-policy key with the foreign writer policy for results, the
+  no-keeperless rule for task streams, the source-kind
+  trailing-expression convention, and the neutral error stream for a
+  foreign private frame at a worker. The corpus gains `task(...)` rows
+  and the wrong-shape / not-a-value / truncation read-err rows; no code
+  change (the cursor has parsed the tag since Phase 0).
+
 - The interchange codec's byte-level half (the execution plan's item
   1.6a): `src/interop.c`, the validating pull cursor for the `'I'`
   stream (`mizu_ix_open` / `mizu_ix_next` / `mizu_ix_end`, ext tier) —

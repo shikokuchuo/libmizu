@@ -175,7 +175,7 @@ static void corpus_tests(void) {
      kind and the cursor:/builder: level of read-err rows. */
   FILE *ff = fopen("tests/interop/cases.txt", "r");
   assert(ff != NULL);
-  size_t n_rt = 0, n_cursor_err = 0, n_builder_err = 0, n_wd = 0;
+  size_t n_rt = 0, n_task = 0, n_cursor_err = 0, n_builder_err = 0, n_wd = 0;
   unsigned char out[MAX_STREAM];
   while (fgets(line, sizeof line, ff) != NULL) {
     if (line[0] == '#' || line[0] == '\n') continue;
@@ -226,20 +226,20 @@ static void corpus_tests(void) {
         n_builder_err++;
       }
     } else {
-      /* rt / dec / enc: parse to completion and re-emit to the same
-         bytes — the corpus streams are the canonical form */
+      /* rt / dec / enc / task: parse to completion and re-emit to the
+         same bytes — the corpus streams are the canonical form */
       int fail;
       size_t off = reemit(rows[r].bytes, rows[r].len, out, &fail);
       assert(!fail);
       assert(off == rows[r].len);
       assert(memcmp(out, rows[r].bytes, off) == 0);
-      n_rt++;
+      if (strcmp(kind, "task") == 0) n_task++; else n_rt++;
     }
   }
   fclose(ff);
-  assert(n_rt > 80 && n_cursor_err >= 15 && n_builder_err >= 4 && n_wd >= 5);
-  printf("interop corpus: %zu re-emitted, %zu cursor errors, %zu builder rows, %zu declines\n",
-         n_rt, n_cursor_err, n_builder_err, n_wd);
+  assert(n_rt > 80 && n_task >= 5 && n_cursor_err >= 15 && n_builder_err >= 4 && n_wd >= 5);
+  printf("interop corpus: %zu re-emitted (%zu tasks), %zu cursor errors, %zu builder rows, %zu declines\n",
+         n_rt, n_task, n_cursor_err, n_builder_err, n_wd);
 }
 
 /* The cursor rejects a bad magic, a short stream, and an unknown version

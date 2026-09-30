@@ -3,9 +3,11 @@
 #   id | kind | langs | value | note
 # kinds: rt (bytes <-> value, both directions — every listed binding's home
 # is exact), dec (wire => home — the read half where a home shifts), enc
-# (value -> hex — the write half), read-err (hex or notation -> the
-# informative error; notes start "cursor:" or "builder:"), write-decline
-# (value -> the send-time decline; no corpus entry). langs: all, R, PY.
+# (value -> hex — the write half), task (a task stream: not a value — the
+# binding's task decoder reads it and its writer re-emits the same bytes),
+# read-err (hex or notation -> the informative error; notes start "cursor:"
+# or "builder:"), write-decline (value -> the send-time decline; no corpus
+# entry). langs: all, R, PY.
 # tools/interop_corpus.py regenerates tests/interop/corpus.txt from this
 # file — edit here, never there. A string literal never contains " => ".
 
@@ -127,6 +129,14 @@ err-detail | rt | all | err("mizu_error_shm", "region create failed", "call text
 err-unicode | rt | all | err("HibásÉrték", "ügyfél hiba ✓", "nyomás") | UTF-8 in all three strings
 err-index | rt | all | err("WorkerError", "element failed", "", index=41) | the wire index is 0-based (R's field adds 1)
 
+# --- tasks (Phase 4): not values; the exec hook and the §5.1 descriptor read them ---
+task-name-r2py | task | all | task(3, 0, 30064771074, str("numpy.mean"), list(realv[1,2,3]), dict()) | an R submitter's qualified-name task for Python workers (ident = MIZU_IDENT(R, 7))
+task-name-py2r | task | all | task(2, 0, 30064771075, str("stats::quantile"), list(realv[1,2,3]), dict(probs=realv[0.25,0.5,0.75], names=lgl(0))) | a Python submitter's task for R workers (ident = MIZU_IDENT(Python, 7))
+task-source-r2py | task | all | task(3, 1, 30064771074, str("x + 1"), list(), dict(x=int(41))) | source kind, the trailing-expression convention
+task-source-py2r | task | all | task(2, 1, 30064771075, str("x * 2"), list(), dict(x=int(21))) | source kind for R workers
+task-empty | task | all | task(2, 0, 30064771075, str("base::pi"), list(), dict()) | both argument fields always present, either may be empty
+task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=strv["x","y"])), dict()) | ordinary interop values nest in the argument fields
+
 # --- read-err: cursor-level (authored hex) ---
 err-unknown-tag | read-err | all | hex 49017f | cursor: unsupported interop tag 0x7F — the peer uses a newer format
 err-version | read-err | all | hex 490200 | cursor: interop format version 0x02 — the peer uses a newer format
@@ -144,7 +154,8 @@ err-nested-err | read-err | all | hex 49010c010000000000000011000000000000000000
 err-err-flags | read-err | all | hex 4901110200000000000000000000000000 | cursor: unknown err flag bits set
 err-task-flags | read-err | all | hex 490112020001000000000000000000 | cursor: unknown task flag bits set
 err-task-kind | read-err | all | hex 490112026300000000000000000000 | cursor: unknown task kind 0x63 — the peer uses a newer format
-err-task-extra | read-err | all | hex 49011202000000000000000000000004000000000c00000000000000000d000000000000000000 | cursor: a task with a field too many at top level fails the finishing check
+err-task-extra | read-err | all | hex 49011202000000000000000000000004000000000c00000000000000000d000000000000000000 | cursor: a task with one field too many at top level fails the finishing check
+err-task-short | read-err | all | hex 4901120300000002000000070000000401000000660c0000000000000000 | cursor: a task missing a field is truncation
 err-dup-key | read-err | all | hex 49010d0200000000000000010000006100010000006100 | builder: a duplicate dict key
 err-bad-utf8 | read-err | all | hex 49010401000000ff | cursor: invalid UTF-8
 err-str-len-low | read-err | all | hex 490104feffffff | cursor: a string length below -1
@@ -154,6 +165,11 @@ err-frame-shape | read-err | all | attr(list(realv[1,2], realv[1]), names=strv["
 err-attr-unknown | read-err | all | attr(int(1), foo=int(2), class=str("bar")) | builder: an attribute set outside the whitelist
 err-date-fractional | read-err | all | attr(realv[1.5], class=str("Date")) | builder: a fractional Date (the R writer declines too)
 err-dim-product | read-err | all | attr(realv[1,2,3], dim=intv[2,2]) | builder: dim product mismatch
+err-task-value | read-err | all | task(3, 0, 30064771074, str("numpy.mean"), list(), dict()) | builder: a task is not a value
+err-task-nested | read-err | all | list(task(3, 0, 30064771074, str("f"), list(), dict()), nil) | builder: a task nested in a value is still not a value
+err-taskdec-shape | read-err | all | task(3, 0, 30064771074, int(1), list(), dict()) | builder: a kind 0/1 task wants a string code — the field tags are the builder's check
+err-taskdec-list | read-err | all | task(3, 0, 30064771074, str("f"), int(1), dict()) | builder: a kind 0/1 task wants the positional list
+err-taskdec-dict | read-err | all | task(3, 0, 30064771074, str("f"), list(), int(1)) | builder: a kind 0/1 task wants the named dict
 
 # --- write-decline (no corpus entry; bytes-marked strings and object
 # --- dtypes live in the bindings' own test files — the notation carries
