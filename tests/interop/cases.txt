@@ -135,7 +135,7 @@ task-name-py2r | task | all | task(2, 0, 30064771075, str("stats::quantile"), li
 task-source-r2py | task | all | task(3, 1, 30064771074, str("x + 1"), list(), dict(x=int(41))) | source kind, the trailing-expression convention
 task-source-py2r | task | all | task(2, 1, 30064771075, str("x * 2"), list(), dict(x=int(21))) | source kind for R workers
 task-empty | task | all | task(2, 0, 30064771075, str("base::pi"), list(), dict()) | both argument fields always present, either may be empty
-task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=strv["x","y"])), dict()) | ordinary interop values nest in the argument fields
+task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=list(str("x"),str("y")))), dict()) | ordinary interop values nest in the argument fields (a strv stays home: Python re-encodes it a 0x0c list)
 
 # --- read-err: cursor-level (authored hex) ---
 err-unknown-tag | read-err | all | hex 49017f | cursor: unsupported interop tag 0x7F — the peer uses a newer format
