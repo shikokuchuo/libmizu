@@ -98,7 +98,7 @@ factor-na | rt | R | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor"
 py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) => list(str("x"),nil,str("y"))
 frame-1col | rt | all | attr(list(realv[1,2]), names=str("x"), class=str("data.frame"), row.names=intv[na,-2]) | a one-column frame, automatic row names
 frame-0row | rt | all | attr(list(intv[],strv[]), names=strv["a","b"], class=str("data.frame"), row.names=intv[na,0]) | a zero-row frame: c(NA, 0)
-frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=strv["f"], class=str("factor")), i64v[5,na]), names=strv["n","f","i"], class=str("data.frame"), row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column
+frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=str("f"), class=str("factor")), i64v[5,na]), names=strv["n","f","i"], class=str("data.frame"), row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column
 frame-int-rownames | rt | all | attr(list(realv[1,2,3]), names=str("x"), class=str("data.frame"), row.names=intv[10,20,30]) | integer row names (a base df[i, ] subset)
 frame-char-rownames | rt | all | attr(list(realv[1,2,3]), names=str("x"), class=str("data.frame"), row.names=strv["a","b","c"]) | character row names (mtcars)
 frame-cplx | dec | PY | attr(list(cplxv[cplx(1,2)]), names=str("z"), class=str("data.frame"), row.names=intv[na,-1]) | to_dict() carries complex128; the Arrow export raises
@@ -106,8 +106,8 @@ mat-2x3 | rt | all | attr(realv[1,2,3,4,5,6], dim=intv[2,3]) | a 2x3 real matrix
 array-3d | rt | all | attr(intv[1,2,3,4,5,6,7,8], dim=intv[2,2,2]) | a 3-D intv array
 i64-mat | rt | all | attr(i64v[1,2,3,4], dim=intv[2,2]) | an integer64 matrix: the dict is {dim} alone
 dim-zero | rt | all | attr(intv[], dim=intv[0,3]) | a zero-extent dim
-dim-len1 | rt | R | attr(realv[1,2], dim=intv[2])
-py-dim-len1 | dec | PY | attr(realv[1,2], dim=intv[2]) => realv[1,2] | a length-1 dim reads as a plain vector (numpy cannot tell it from one)
+dim-len1 | rt | R | attr(realv[1,2], dim=int(2))
+py-dim-len1 | dec | PY | attr(realv[1,2], dim=int(2)) => realv[1,2] | a length-1 dim reads as a plain vector (numpy cannot tell it from one)
 date | rt | all | attr(realv[19000,19001], class=str("Date"))
 date-na | rt | all | attr(realv[19000,na], class=str("Date")) | NaT for NA, whole days exact both ways
 posixct-utc | rt | all | attr(realv[1700000000,1700000000.5], class=strv["POSIXct","POSIXt"], tzone=str("UTC")) | us-integral values relay bitwise
