@@ -659,6 +659,12 @@ mizu_status mizu_channel_create(mizu_channel **out,
                        "a channel binding needs stage and read callbacks");
     return MIZU_ERR;
   }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a channel binding needs an identity word with a "
+                       "nonzero language byte");
+    return MIZU_ERR;
+  }
   uint64_t cap = opts->capacity;
   uint64_t slot = opts->slot_size;
   uint64_t arena = opts->arena_size;
@@ -788,6 +794,12 @@ mizu_status mizu_channel_create(mizu_channel **out,
   }
   c->pk_ok = 1;
 
+  /* the host's identity word: published before the token exists */
+  atomic_store_explicit(
+    (_Atomic uint64_t *) (base + MIZU_ENTITY_OFFSET(MIZU_ENTITY_HOST) +
+                          MIZU_ENTITY_IDENT),
+    b->ident, memory_order_release);
+
   *out = c;
   return MIZU_OK;
 }
@@ -852,6 +864,12 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
   if (b == NULL || b->stage == NULL || b->read == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "a channel binding needs stage and read callbacks");
+    return MIZU_ERR;
+  }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a channel binding needs an identity word with a "
+                       "nonzero language byte");
     return MIZU_ERR;
   }
   if (!mizu_token_valid(token)) {
@@ -958,6 +976,13 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
     return MIZU_ERR;
   }
 
+  /* the peer's identity word: ready_set's release store orders it for
+     the host's ready_wait acquire */
+  atomic_store_explicit(
+    (_Atomic uint64_t *) (c->base + MIZU_ENTITY_OFFSET(MIZU_ENTITY_PEER) +
+                          MIZU_ENTITY_IDENT),
+    b->ident, memory_order_release);
+
   *out = c;
   return MIZU_OK;
 }
@@ -974,6 +999,16 @@ void mizu_channel_drop(const mizu_channel *c, const uint8_t **bytes,
   }
   *bytes = c->base + c->pre.drop_offset;
   *n = c->pre.drop_size;
+}
+
+/* The other side's identity word, read through the mapping: 0 until the
+   peer attaches (the host's rendezvous knows it once ready_wait
+   returns). */
+uint64_t mizu_channel_peer_ident(const mizu_channel *c) {
+  if (c == NULL || c->released) return 0;
+  const _Atomic uint64_t *w = (const _Atomic uint64_t *)
+    (c->base + MIZU_ENTITY_OFFSET(1 - c->side) + MIZU_ENTITY_IDENT);
+  return atomic_load_explicit(w, memory_order_acquire);
 }
 
 mizu_status mizu_channel_ready_set(mizu_channel *c) {

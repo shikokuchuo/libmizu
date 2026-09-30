@@ -43,7 +43,7 @@ static MIZU_ATOMIC(uint32_t) *morsel_claim_word(void *base,
 
 // Header layout and validation -----------------------------------------------------
 
-uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint32_t magic, uint64_t n,
+uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint64_t n,
                            uint64_t morsel_size, uint64_t desc_len,
                            uint32_t x_type, uint64_t x_len,
                            uint32_t out_type, uint64_t out_m,
@@ -53,7 +53,7 @@ uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint32_t magic, uint64_t n,
   if (desc_len < 1) return 0;
   if (claim_n < 1 || claim_n > (1u << 16)) return 0;
   memset(h, 0, sizeof *h);
-  h->magic = magic;
+  h->magic = MIZU_MORSEL_MAGIC;
   h->version = MIZU_ABI_VERSION;
   h->n = n;
   h->desc_off = sizeof(mizu_morsel_hdr);
@@ -92,13 +92,13 @@ uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint32_t magic, uint64_t n,
 }
 
 const char *mizu_morsel_hdr_check(const void *base, size_t size,
-                                 uint32_t magic, mizu_morsel_hdr *out) {
+                                 mizu_morsel_hdr *out) {
   if (size < sizeof(mizu_morsel_hdr))
     return "region is smaller than a map header";
   mizu_morsel_hdr h;
   memcpy(&h, base, sizeof h);
-  if (h.magic != magic)
-    return "bad magic: not this binding's map region";
+  if (h.magic != MIZU_MORSEL_MAGIC)
+    return "bad magic: not a map region";
   if (h.version != MIZU_ABI_VERSION)
     return "ABI version mismatch: worker and submitter were built against "
            "different mizu wire formats";

@@ -185,6 +185,12 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 #define MIZU_ENTITY_EPOCH   0
 #define MIZU_ENTITY_PARKED  4
 #define MIZU_ENTITY_REG     8
+/* Offset 16 of the 64-byte entity block: the side's identity word
+   (MIZU_IDENT in mizu_ext.h — language byte, reader-capability mask).
+   The host writes it at create, before the token exists; the peer at
+   attach, before ready_set (whose release store orders it for the host's
+   ready_wait acquire). Immutable thereafter. */
+#define MIZU_ENTITY_IDENT   16
 
 #define MIZU_OFF_HP_TAIL    ((size_t) 256)
 #define MIZU_OFF_HP_HEAD    ((size_t) 320)
@@ -240,6 +246,16 @@ typedef enum mizu_kind_e {
 
 #define MIZU_STR1_NA UINT64_MAX   /* cannot alias an encoding (0-3) */
 
+/* The string-encoding byte's values, carried by STR1's aux and the MIZS
+   block's per-string encoding section. The numbering is R's cetype_t,
+   hoisted to the wire contract (bindings pin it with a static assert). An
+   NA string's encoding byte is 0 and its span empty; the validity bit,
+   not the byte, marks it. */
+#define MIZU_CE_NATIVE 0u
+#define MIZU_CE_UTF8   1u
+#define MIZU_CE_LATIN1 2u
+#define MIZU_CE_BYTES  3u
+
 typedef struct mizu_slot_hdr_s {
   uint32_t kind;             /* mizu_kind */
   uint32_t len;
@@ -249,7 +265,11 @@ typedef struct mizu_slot_hdr_s {
 MIZU_STATIC_ASSERT(sizeof(mizu_slot_hdr) == 16, "mizu_slot_hdr is the wire format");
 
 /* Wire type tags, fixed by the wire format (RAWVEC aux, MIZU* layout
-   headers). Bindings map their own element types onto these. */
+   headers). Bindings map their own element types onto these. The numbers
+   are libmizu-owned and frozen from the first release: they descend from
+   R's SEXPTYPE space by history, never by dependency — a future SEXPTYPE
+   joins the wire only by an explicit allocation here, as INT64 = 32
+   already did. */
 typedef enum mizu_type_e {
   MIZU_TYPE_LGL = 10,         /* int32 logical; INT_MIN is the missing sentinel */
   MIZU_TYPE_INT = 13,         /* int32; INT_MIN is the missing sentinel */
@@ -284,8 +304,58 @@ MIZU_API size_t mizu_type_elt_size(int type);
 // Wire format: MIZH / MIZS / MIZL region layouts ---------------------------------
 
 /* Region magics (first 4 bytes): atomic vector, string vector, list tree.
-   Every layout opens with a 64-byte header; bytes [24-63] are reserved
-   (written zero) — the zc protocol owns [24-31]. */
+   Every layout opens with a 64-byte header; bytes [24-63] were reserved
+   (written zero) — the zc protocol owns [24-31], and the two words below
+   are now assigned: the format flags word and the validity section.
+
+   Header bytes [32-35] are the format flags word. Bit 0 is the S4 object
+   bit, which the layouts otherwise cannot carry; every other bit is
+   reserved zero. This is a format word, not a negotiation word: a reader
+   rejects a set bit it does not know as a corrupt or newer region (the
+   identity word's reserved bits are the opposite — ignored). */
+#define MIZU_HDR_FLAGS_OFF ((size_t) 32)
+#define MIZU_HDR_FLAG_S4   1u
+
+/* Header bytes [40-47] and [48-55] are the optional validity-bitmap
+   section of every MIZH and MIZL header (nested MIZL included; MIZS
+   carries its bitmap in the string block instead): an i64 offset and an
+   i64 null count, three states. {0, 0}: absent — a pre-section region,
+   the core's flat reserve, or a same-language write; the reader's lazy
+   fallback. {0, -1}: known-NA-free (no section materialized). Else the
+   offset of a 64-byte-aligned section: for MIZH a ceil(n / 8)-byte
+   LSB-first bitmap (1 = present, the MIZS string block's convention);
+   for MIZL a table of n {i64 offset, i64 null count} leaf entries, one
+   per directory entry — a VECSXP or STRSXP entry's pair is {0, 0} (the
+   nested header / the string block carries its own), and [48-55] is the
+   total null count across that header's remaining leaves. Reserved-zero
+   means absent, so a pre-dating reader simply never looks; the section
+   needs no capability bit. */
+#define MIZU_HDR_VALID_OFF   ((size_t) 40)
+#define MIZU_HDR_VALID_COUNT ((size_t) 48)
+
+/* MIZH (atomic vector): [4-7] i32 wire type, [8-15] i64 element count,
+   [16-23] i64 attrs blob size; bare element bytes at 64, the attrs blob
+   trailing. MIZS (string vector): [4-7] i32 attrs blob size, [8-15] i64
+   string count, [16-23] i64 string-block byte size; the string block at
+   64, the attrs blob trailing it. The string block (also the form of an
+   MIZL STRSXP leaf): a ceil(n / 8)-byte validity bitmap, (n + 1) i64
+   offsets, n encoding bytes (MIZU_CE_*), and the packed string bytes —
+   each section 64-byte aligned from the block start. The first, second
+   and fourth are Arrow large_utf8's three buffers verbatim; the encoding
+   section is R's per-CHARSXP mark. MIZL (list tree): [4-7] i32 element
+   count n, [8-15] i64 attrs blob offset, [16-23] i64 attrs blob size;
+   then n 32-byte directory entries, each { i64 data_offset (64-byte
+   aligned), i64 data_size, i32 sexptype, i32 attrs_size, i64 length }.
+   The entry's data is the bare element bytes (an atomic leaf), a string
+   block (STRSXP), a nested MIZL (VECSXP) or a serialized stream
+   (sexptype 0); the leaf's attrs blob is the last attrs_size bytes of
+   data_size. Bit 30 of the entry's sexptype is the leaf's S4 bit; the
+   remainder is a listed tag — 0 (serialized), the atomic tags, STR, VEC,
+   and 32 (MIZU_TYPE_INT64 is legal on MIZL leaves). Tag 33 is reserved
+   (a remote, per-column REF leaf): no writer emits it, and a reader
+   meeting it declines as a corrupt or newer region. */
+#define MIZU_MIZL_S4 0x40000000
+
 #define MIZU_MAGIC_VEC   0x4D495A48u  /* "MIZH" */
 #define MIZU_MAGIC_STR   0x4D495A53u  /* "MIZS" */
 #define MIZU_MAGIC_LIST  0x4D495A4Cu  /* "MIZL" */
@@ -311,7 +381,13 @@ typedef struct mizu_pool_hdr_s {
   uint64_t owner_pid;        /* the workers' death-listener watch target */
   uint64_t livedir_offset;
   uint64_t livedir_size;
-  uint8_t  pad[8];
+  /* The workers' identity word (MIZU_IDENT in mizu_ext.h): 0 until the
+     first worker join CASes its binding's word in; a join whose word
+     differs fails, an exact match proceeds. Set for the pool's lifetime —
+     never reset, so homogeneity is per pool, not per worker generation.
+     The one field written after create: read it through the mapping,
+     never the validated handle copy, which is stale the moment it lands. */
+  MIZU_ATOMIC(uint64_t) worker_ident;
 } mizu_pool_hdr;
 
 MIZU_STATIC_ASSERT(sizeof(mizu_pool_hdr) == 64, "mizu_pool_hdr is the wire format");

@@ -16,6 +16,7 @@ mizu_channel_errcat
 mizu_channel_error
 mizu_channel_info_get
 mizu_channel_opts_init
+mizu_channel_peer_ident
 mizu_channel_ready_set
 mizu_channel_ready_wait
 mizu_channel_recv
@@ -38,7 +39,12 @@ mizu_live_dir
 mizu_live_open
 mizu_live_try
 mizu_mizh_check
+mizu_mizh_validity_set
 mizu_mizh_write
+mizu_mizl_check
+mizu_mizl_elem
+mizu_mizs_check
+mizu_mizs_geometry
 mizu_morsel_abandon
 mizu_morsel_cancel_get
 mizu_morsel_cancel_set
@@ -52,6 +58,8 @@ mizu_morsel_next
 mizu_morsel_reset
 mizu_morsel_sizer_init
 mizu_morsel_span_of
+mizu_na_apply
+mizu_na_build
 mizu_now
 mizu_park
 mizu_parker_attach
@@ -91,6 +99,7 @@ mizu_pool_task_state
 mizu_pool_tasks_get
 mizu_pool_token
 mizu_pool_unwind_sink
+mizu_pool_worker_ident
 mizu_pool_worker_join
 mizu_pool_worker_run
 mizu_preamble_validate

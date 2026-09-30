@@ -81,8 +81,10 @@ static void check_region(const char *name, uint32_t name_len,
   assert(mizu_shm_open(&shm, buf) == MIZU_OK);
   if (shm_vec) {
     int type = 0;
-    int64_t n_elems = 0;
-    assert(mizu_mizh_check(shm->addr, shm->size, &type, &n_elems) == 0);
+    int64_t n_elems = 0, valid[2] = { 1, 1 };
+    assert(mizu_mizh_check(shm->addr, shm->size, &type, &n_elems,
+                           valid) == 0);
+    assert(valid[0] == 0 && valid[1] == 0);
     assert(type == o->wire_type);
     assert(n_elems == (int64_t) (o->n / mizu_type_elt_size(o->wire_type)));
     /* the producer loan, stored by retain_zc */

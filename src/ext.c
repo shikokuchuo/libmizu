@@ -79,23 +79,47 @@ void mizu_mizh_write(void *base, int wire_type, int64_t n_elems) {
 }
 
 int mizu_mizh_check(const void *base, size_t size,
-                   int *wire_type, int64_t *n_elems) {
-  if (size < MIZU_HEADER_SIZE) return -1;
-  uint32_t magic;
-  int32_t t32;
-  int64_t len, attrs;
-  memcpy(&magic, base, 4);
-  if (magic != MIZU_MAGIC_VEC) return -1;
-  memcpy(&t32, (const unsigned char *) base + 4, 4);
-  memcpy(&len, (const unsigned char *) base + 8, 8);
-  memcpy(&attrs, (const unsigned char *) base + 16, 8);
-  const size_t elt = mizu_type_elt_size(t32);
-  if (elt == 0 || len < 0 || attrs < 0 ||
-      len > ((int64_t) size - (int64_t) MIZU_HEADER_SIZE) / (int64_t) elt ||
-      attrs > (int64_t) size - (int64_t) MIZU_HEADER_SIZE -
-              len * (int64_t) elt)
-    return -1;
-  *wire_type = t32;
-  *n_elems = len;
-  return 0;
+                   int *wire_type, int64_t *n_elems, int64_t valid[2]) {
+  return mizu_ext_mizh_check_impl(base, size, wire_type, n_elems, valid);
+}
+
+void mizu_mizh_validity_set(void *base, int64_t off, int64_t count) {
+  memcpy((unsigned char *) base + MIZU_HDR_VALID_OFF, &off, 8);
+  memcpy((unsigned char *) base + MIZU_HDR_VALID_COUNT, &count, 8);
+}
+
+mizu_mizs_geom mizu_mizs_geometry(int64_t n) {
+  mizu_mizs_geom g;
+  g.validity = 0;
+  g.offsets  = (int64_t) MIZU_ALIGN64((uint64_t) (n + 7) / 8);
+  g.encoding = g.offsets + (int64_t) MIZU_ALIGN64(8 * ((uint64_t) n + 1));
+  g.data     = g.encoding + (int64_t) MIZU_ALIGN64((uint64_t) n);
+  return g;
+}
+
+int mizu_mizs_check(const void *base, size_t size, int64_t *n,
+                   int64_t *str_size, int64_t *attrs_size) {
+  return mizu_ext_mizs_check_impl(base, size, n, str_size, attrs_size);
+}
+
+int mizu_mizl_check(const void *base, size_t size, int64_t *n,
+                   int64_t *attrs_off, int64_t *attrs_size,
+                   int64_t valid[2]) {
+  return mizu_ext_mizl_check_impl(base, size, n, attrs_off, attrs_size,
+                                 valid);
+}
+
+int mizu_mizl_elem(const void *base, size_t size, int64_t i,
+                  mizu_mizl_entry *elem) {
+  return mizu_ext_mizl_elem_impl(base, size, i, elem);
+}
+
+uint64_t mizu_na_build(int type, uint8_t *bitmap, const void *src,
+                      uint64_t n, uint64_t bit_off) {
+  return mizu_ext_na_build_impl(type, bitmap, src, n, bit_off);
+}
+
+uint64_t mizu_na_apply(int type, void *dst, const void *src,
+                      const uint8_t *bitmap, uint64_t n) {
+  return mizu_ext_na_apply_impl(type, dst, src, bitmap, n);
 }

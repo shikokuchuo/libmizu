@@ -22,6 +22,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
 #include "internal.h"
 
 // Pool state ----------------------------------------------------------------------
@@ -209,6 +210,9 @@ const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
   if (region_size < 64)
     return "region is smaller than a pool header";
   mizu_pool_hdr h;
+  /* the memcpy covers worker_ident: a plain read racing a joiner's CAS,
+     harmless — nothing reads the copied word; the getter and the join
+     CAS address it in the mapping */
   memcpy(&h, region, sizeof(h));
   if (h.magic != MIZU_POOL_MAGIC)
     return "bad magic: not a mizu pool region";
@@ -459,6 +463,12 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
   if (b == NULL || b->stage == NULL || b->read == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "a pool binding needs stage and read callbacks");
+    return MIZU_ERR;
+  }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a pool binding needs an identity word with a "
+                       "nonzero language byte");
     return MIZU_ERR;
   }
   uint64_t maxw = opts->max_workers;
@@ -936,6 +946,12 @@ mizu_status mizu_pool_worker_join(mizu_pool **out, const char *token,
                        "a pool binding needs stage and read callbacks");
     return MIZU_ERR;
   }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a pool binding needs an identity word with a "
+                       "nonzero language byte");
+    return MIZU_ERR;
+  }
   mizu_pool *p = pool_open_common(token, b, 1);
   if (p == NULL) return MIZU_ERR;
   p->role = MIZU_ROLE_WORKER;
@@ -966,6 +982,33 @@ mizu_status mizu_pool_worker_join(mizu_pool **out, const char *token,
     pool_failed(p, 0);
     return MIZU_ERR;
   }
+
+  /* Pool homogeneity: the first join fixes the pool's worker identity
+     word; an exact whole-word match joins, anything else fails here —
+     before the slot CAS, so a failed join touched no slot state and only
+     released its lock. One binding build carries one word, so a mismatch
+     is always a language mismatch. The word is addressed in the mapping
+     (it is written after create, so the validated handle copy is stale),
+     and the failure ordering is acquire: a same-language joiner whose
+     CAS lost still carries the winner's word ahead of its own LIVE. The
+     word is never reset: homogeneity is per pool, not per worker
+     generation — including a first joiner whose CAS won but whose join
+     then failed, which has still fixed the pool's language. */
+  _Atomic uint64_t *wid = (_Atomic uint64_t *)
+    (p->base + offsetof(mizu_pool_hdr, worker_ident));
+  uint64_t word = 0;
+  if (!atomic_compare_exchange_strong_explicit(wid, &word, b->ident,
+                                               memory_order_acq_rel,
+                                               memory_order_acquire) &&
+      word != b->ident) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                   "pool workers are language %u — a language %u worker "
+                   "cannot join",
+                   (unsigned) (uint8_t) word, (unsigned) (uint8_t) b->ident);
+    pool_failed(p, 0);
+    return MIZU_ERR;
+  }
+
   mizu_wk_slot *me = &p->wk[slot];
   int32_t expected = MIZU_WK_FREE;
   if (!atomic_compare_exchange_strong_explicit(&me->status, &expected,
@@ -1105,12 +1148,27 @@ int mizu_pool_lame_duck(mizu_pool *p) {
 
 // Submitter join ------------------------------------------------------------------------
 
+/* The workers' identity word, read through the mapping: 0 until the
+   first join, never reset afterwards. */
+uint64_t mizu_pool_worker_ident(const mizu_pool *p) {
+  if (p == NULL || p->released) return 0;
+  const _Atomic uint64_t *w = (const _Atomic uint64_t *)
+    (p->base + offsetof(mizu_pool_hdr, worker_ident));
+  return atomic_load_explicit(w, memory_order_acquire);
+}
+
 mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
                            const mizu_binding *b) {
   *out = NULL;
   if (b == NULL || b->stage == NULL || b->read == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "a pool binding needs stage and read callbacks");
+    return MIZU_ERR;
+  }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a pool binding needs an identity word with a "
+                       "nonzero language byte");
     return MIZU_ERR;
   }
   mizu_pool *p = pool_open_common(token, b, 0);

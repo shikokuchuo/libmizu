@@ -23,7 +23,9 @@
    Dual-form fast paths (the CPython Py_INCREF pattern):
    mizu_parker_snapshot, mizu_zc_rc, mizu_zc_flags_, and the wire helpers
    (mizu_timeout_ms, mizu_store_na_real, mizu_aux_rawspill_pool,
-   mizu_aux_shm_vec, mizu_mizh_write, mizu_mizh_check) ship as
+   mizu_aux_shm_vec, mizu_mizh_write, mizu_mizh_check,
+   mizu_mizh_validity_set, mizu_mizs_geometry, mizu_mizs_check,
+   mizu_mizl_check, mizu_mizl_elem, mizu_na_build, mizu_na_apply) ship as
    `static inline` here AND as same-named exported functions (src/ext.c).
    A C TU inlines its own copy — zero cost — while an FFI binds the
    exported symbol. This is legal C: internal and external linkage of the
@@ -97,6 +99,44 @@ extern "C" {
    contexts. */
 #define MIZU_CODEC_MAGIC 0x52u   /* 'R' */
 #define MIZU_PYMIZU_CODEC_MAGIC 0x50u   /* 'P' */
+#define MIZU_INTEROP_MAGIC 0x49u   /* 'I': the interchange stream (DESIGN.md's
+                                      Interchange codec section) */
+
+// Language and capability registries ----------------------------------------------
+
+/* The language registry: the identity word's byte 0, the pool's worker
+   identity word, and each binding's handle-level peer_lang. Append-only:
+   a value, once shipped, is never reassigned (the byte is
+   equality-compared, so a reassignment fails behaviorally, as false join
+   rejections across mixed builds). 0 is "none" — no peer attached yet, a
+   pool no worker has joined — never a stored binding identity: a binding
+   whose identity word has a zero language byte is rejected at create,
+   attach and join. */
+#define MIZU_LANG_NONE   0u
+#define MIZU_LANG_BYTES  1u   /* the core's bytes binding and test bindings */
+#define MIZU_LANG_R      2u
+#define MIZU_LANG_PYTHON 3u
+
+/* Reader capabilities: a 32-bit mask, one bit per layout or format
+   extension a reader implements beyond the baseline (MIZH atomic and
+   INT64 views, 'I' format 0x01 as specified in DESIGN.md's Interchange
+   codec section). Readers ignore bits they do not know — they never
+   reject them; absent means unsupported, and a writer stages a layout or
+   tag only for a peer that sets its bit. A bit names a byte layout, not a
+   feature: an incompatible change to a gated layout, tag or shape
+   allocates a new bit and retires the old, which is never reassigned.
+   Features that always land together in every binding share a bit. */
+#define MIZU_CAP_MIZS  (1u << 0)   /* reads MIZS string layouts */
+#define MIZU_CAP_ATTRS (1u << 1)   /* reads an 'I' attribute blob on a
+                                      layout root or MIZL leaf */
+#define MIZU_CAP_MIZL  (1u << 2)   /* wraps a generic MIZL tree as views */
+
+/* The identity word: the language in bits 0-7, the 32-bit capability mask
+   in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
+   (a negotiation word, so a later field needs no reader taught to skip
+   it). The pool word's exact-match join compares the whole word. */
+#define MIZU_IDENT(lang, caps) \
+  ((uint64_t) (uint8_t) (lang) | ((uint64_t) (uint32_t) (caps) << 32))
 
 // Handle views -------------------------------------------------------------------
 
@@ -261,10 +301,24 @@ typedef struct mizu_binding_s {
   mizu_sweep_fn sweep;   /* idle cache drop; usually NULL */
   mizu_drop_fn  drop;    /* pin release; NULL when the binding never pins */
   void        *ctx;     /* opaque to the core */
+  uint64_t     ident;   /* MIZU_IDENT word; a zero language byte is
+                           rejected at create, attach and join */
 } mizu_binding;
 
 /* Zero and size-stamp a binding struct. Call before filling the fn pointers. */
 MIZU_API void mizu_binding_init(mizu_binding *);
+
+/* The identity words (the language registry above). Each channel side
+   publishes its binding's ident in its entity block: the host at create,
+   the peer at attach before ready_set. mizu_channel_peer_ident reads the
+   other side's word through the mapping (0 until the peer attaches: a
+   host knows its peer's identity once ready_wait returns). A pool's
+   first worker join CASes its word into the pool header — an exact match
+   joins, a differing word fails — and mizu_pool_worker_ident reads that
+   word through the mapping (0 until the first join; never reset for the
+   pool's lifetime). */
+MIZU_API uint64_t mizu_channel_peer_ident(const mizu_channel *);
+MIZU_API uint64_t mizu_pool_worker_ident(const mizu_pool *);
 
 /* Core services for a stager (per handle), valid only during a stage_fn
    call — staging is single-threaded per handle role, so at most one
@@ -583,11 +637,18 @@ enum { MIZU_MORSEL_X_DESC = 0, MIZU_MORSEL_X_RAW };
 #define MIZU_MORSEL_T_TARGET  200e-6
 #define MIZU_MORSEL_BATCH_CAP 64
 
+/* The one map-region magic: "MIZM" read as hex, the core's magic packing
+   (MIZU_MAGIC, the pool magic, MIZH/MIZS/MIZL). The morsel module stamps
+   and checks it itself — the descriptor's codec identity rides the
+   descriptor stream's own first byte, so the magic carried nothing else,
+   and no path can hand a runner another binding's region. */
+#define MIZU_MORSEL_MAGIC 0x4D495A4Du
+
 /* The 128-byte region header. Not pool wire format — it rides its own
    region, keyed by the same ABI version — but the same rules apply: the
    struct is the layout, 64-byte-aligned sections follow it. */
 typedef struct mizu_morsel_hdr_s {
-  uint32_t magic;          /* the binding's tag */
+  uint32_t magic;          /* MIZU_MORSEL_MAGIC */
   uint32_t version;        /* MIZU_ABI_VERSION */
   uint32_t flags;          /* reserved, 0 */
   uint32_t x_kind;         /* MIZU_MORSEL_X_* */
@@ -615,16 +676,15 @@ MIZU_STATIC_ASSERT(sizeof(mizu_morsel_hdr) == 128,
    land 64-aligned in order: descriptor, x, morsel state, output. Returns the
    region size, 0 on invalid geometry or overflow (the binding raises its own
    error). The caller memcpys the header into the fresh region. */
-MIZU_API uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint32_t magic,
+MIZU_API uint64_t mizu_morsel_layout(mizu_morsel_hdr *h,
                                    uint64_t n, uint64_t morsel_size,
                                    uint64_t desc_len, uint32_t x_type,
                                    uint64_t x_len, uint32_t out_type,
                                    uint64_t out_m, uint32_t claim_n);
-/* Validate a region's header against the mapping size and the binding's
-   magic, including section placement. Returns NULL and fills *out (when
-   non-NULL) on success, else a static message. Runs once per mapping. */
+/* Validate a region's header against the mapping size, including section
+   placement. Returns NULL and fills *out (when non-NULL) on success, else
+   a static message. Runs once per mapping. */
 MIZU_API const char *mizu_morsel_hdr_check(const void *base, size_t size,
-                                         uint32_t magic,
                                          mizu_morsel_hdr *out);
 
 /* Batch-sizing state: process-private, never wire state, reset at each
@@ -761,7 +821,363 @@ MIZU_EXT_INLINE MIZU_ATOMIC(uint32_t) *mizu_zc_flags_(void *base) {
    like the zc accessors above (see the banner): the timeout unit
    conversion, the NA_real_ store (for a binding filling converted output
    without R headers), the aux packing of the pool RAWSPILL and SHM_VEC
-   kinds and its decode pair, and the flat MIZH header write/check. */
+   kinds and its decode pair, the flat MIZH header write/check, the MIZS /
+   MIZL layout checks, the validity-section setter, and the NA sentinel
+   <-> bitmap primitives (one NA-test implementation behind both
+   bindings' validity paths, so two bindings' bitmaps cannot drift apart
+   from the sentinels they describe). The layout layouts themselves are
+   mizu.h's MIZH / MIZS / MIZL documentation. */
+
+/* The MIZS string block's four section offsets from a string count
+   (mizu.h documents the block). data doubles as the size of everything
+   before the string bytes. */
+typedef struct mizu_mizs_geom_s {
+  int64_t validity;
+  int64_t offsets;
+  int64_t encoding;
+  int64_t data;
+} mizu_mizs_geom;
+
+/* One MIZL directory entry plus its validity-table pair (mizu.h documents
+   the 32-byte entry): mizu_mizl_elem's out-param. sexptype is the wire
+   value — MIZU_MIZL_S4 is the S4 bit, the remainder a listed tag. */
+typedef struct mizu_mizl_entry_s {
+  int64_t data_offset;   /* 64-byte aligned */
+  int64_t data_size;
+  int32_t sexptype;
+  int32_t attrs_size;
+  int64_t length;
+  int64_t valid[2];      /* {0, 0} absent, {0, -1} known-NA-free, else
+                            {bitmap offset, null count} */
+} mizu_mizl_entry;
+
+/* The string block's section offsets for n strings (each section 64-byte
+   aligned from the block start). Dual form, like the helpers below. */
+#ifdef MIZU_EXT_NO_INLINES
+MIZU_API mizu_mizs_geom mizu_mizs_geometry(int64_t n);
+#else
+MIZU_EXT_INLINE mizu_mizs_geom mizu_mizs_geometry(int64_t n) {
+  mizu_mizs_geom g;
+  g.validity = 0;
+  g.offsets  = (int64_t) MIZU_ALIGN64((uint64_t) (n + 7) / 8);
+  g.encoding = g.offsets + (int64_t) MIZU_ALIGN64(8 * ((uint64_t) n + 1));
+  g.data     = g.encoding + (int64_t) MIZU_ALIGN64((uint64_t) n);
+  return g;
+}
+#endif
+
+/* The [32-35] format flags word admits only the assigned S4 bit. */
+MIZU_EXT_INLINE int mizu_ext_flags_known(const void *base) {
+  uint32_t flags;
+  memcpy(&flags, (const unsigned char *) base + MIZU_HDR_FLAGS_OFF, 4);
+  return (flags & ~MIZU_HDR_FLAG_S4) == 0;
+}
+
+/* The three-state validity pair of an MIZH header or one MIZL leaf-table
+   entry: {0, 0} absent, {0, -1} known-NA-free, or a 64-byte-aligned
+   offset whose ceil(n / 8)-byte bitmap fits the region, 0 <= count <= n. */
+MIZU_EXT_INLINE int mizu_ext_valid_ok(int64_t off, int64_t count,
+                                     uint64_t n, size_t size) {
+  if (off == 0) return count == 0 || count == -1;
+  if (count < 0 || (uint64_t) count > n || (off & 63) != 0) return 0;
+  const uint64_t bytes = (n + 7) / 8;
+  return (uint64_t) off <= (uint64_t) size &&
+         bytes <= (uint64_t) size - (uint64_t) off;
+}
+
+/* A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a
+   listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64.
+   The reserved remote leaf (33) rejects with anything else unlisted. */
+MIZU_EXT_INLINE int mizu_ext_mizl_tag_ok(int32_t sexptype) {
+  switch (sexptype & ~(int32_t) MIZU_MIZL_S4) {
+  case 0:
+  case MIZU_TYPE_LGL:
+  case MIZU_TYPE_INT:
+  case MIZU_TYPE_REAL:
+  case MIZU_TYPE_CPLX:
+  case MIZU_TYPE_STR:
+  case MIZU_TYPE_VEC:
+  case MIZU_TYPE_RAW:
+  case MIZU_TYPE_INT64:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+/* One per-element NA test per NA-capable wire type (anything else is
+   never null): INT32_MIN for LGL and INT, INT64_MIN, the NA_real_
+   payload discriminated from other NaNs, the CPLX pair either part. */
+MIZU_EXT_INLINE int mizu_ext_na_at(int type, const void *src, uint64_t i) {
+  const unsigned char *p = (const unsigned char *) src;
+  uint64_t bits, re, im;
+  int32_t v32;
+  int64_t v64;
+  switch (type) {
+  case MIZU_TYPE_LGL:
+  case MIZU_TYPE_INT:
+    memcpy(&v32, p + 4 * i, 4);
+    return v32 == MIZU_NA_INT32;
+  case MIZU_TYPE_REAL:
+    memcpy(&bits, p + 8 * i, 8);
+    return bits == MIZU_NA_REAL_BITS;
+  case MIZU_TYPE_CPLX:
+    memcpy(&re, p + 16 * i, 8);
+    memcpy(&im, p + 16 * i + 8, 8);
+    return re == MIZU_NA_REAL_BITS || im == MIZU_NA_REAL_BITS;
+  case MIZU_TYPE_INT64:
+    memcpy(&v64, p + 8 * i, 8);
+    return v64 == MIZU_NA_INT64;
+  default:
+    return 0;
+  }
+}
+
+/* Write the wire type's missing sentinel over element i (the CPLX pair
+   both parts). */
+MIZU_EXT_INLINE void mizu_ext_na_store(int type, void *dst, uint64_t i) {
+  unsigned char *p = (unsigned char *) dst;
+  const int32_t na32 = MIZU_NA_INT32;
+  const int64_t na64 = MIZU_NA_INT64;
+  const uint64_t nabits = MIZU_NA_REAL_BITS;
+  switch (type) {
+  case MIZU_TYPE_LGL:
+  case MIZU_TYPE_INT:
+    memcpy(p + 4 * i, &na32, 4);
+    break;
+  case MIZU_TYPE_REAL:
+    memcpy(p + 8 * i, &nabits, 8);
+    break;
+  case MIZU_TYPE_CPLX:
+    memcpy(p + 16 * i, &nabits, 8);
+    memcpy(p + 16 * i + 8, &nabits, 8);
+    break;
+  case MIZU_TYPE_INT64:
+    memcpy(p + 8 * i, &na64, 8);
+    break;
+  default:
+    break;
+  }
+}
+
+/* One MIZL directory entry's checks, shared by mizu_mizl_check's pass and
+   mizu_mizl_elem: alignment and extent, the attrs tail, the listed tag,
+   and the length against the leaf kind — the string block's fixed
+   sections for STR, the element extent for an atomic leaf. Fills *e
+   except the valid pair. */
+MIZU_EXT_INLINE int mizu_ext_mizl_ent(const void *base, size_t size,
+                                     int64_t i, mizu_mizl_entry *e) {
+  const unsigned char *dir = (const unsigned char *) base +
+    MIZU_HEADER_SIZE + 32 * (size_t) i;
+  memcpy(&e->data_offset, dir, 8);
+  memcpy(&e->data_size, dir + 8, 8);
+  memcpy(&e->sexptype, dir + 16, 4);
+  memcpy(&e->attrs_size, dir + 20, 4);
+  memcpy(&e->length, dir + 24, 8);
+  if (e->data_offset < 0 || (e->data_offset & 63) != 0 ||
+      e->data_size < 0 ||
+      (uint64_t) e->data_offset > (uint64_t) size ||
+      (uint64_t) e->data_size >
+        (uint64_t) size - (uint64_t) e->data_offset ||
+      e->attrs_size < 0 || (int64_t) e->attrs_size > e->data_size)
+    return -1;
+  if (!mizu_ext_mizl_tag_ok(e->sexptype)) return -1;
+  const int32_t tag = e->sexptype & ~(int32_t) MIZU_MIZL_S4;
+  const int64_t body = e->data_size - (int64_t) e->attrs_size;
+  const size_t elt = mizu_type_elt_size(tag);
+  if (elt != 0) {
+    if (e->length < 0 || e->length > body / (int64_t) elt) return -1;
+  } else if (tag == MIZU_TYPE_STR) {
+    if (e->length < 0 || e->length > ((int64_t) 1 << 50) ||
+        mizu_mizs_geometry(e->length).data > body)
+      return -1;
+  } else if (tag == MIZU_TYPE_VEC) {
+    if (e->length < 0) return -1;
+  }
+  return 0;
+}
+
+/* The bodies behind the larger dual-form functions below: both the
+   header inline and the exported symbol in src/ext.c are one-line
+   delegations to these, so the two forms cannot drift apart. */
+
+MIZU_EXT_INLINE int mizu_ext_mizh_check_impl(const void *base, size_t size,
+                                            int *wire_type, int64_t *n_elems,
+                                            int64_t valid[2]) {
+  if (size < MIZU_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t t32;
+  int64_t len, attrs, voff, vcount;
+  memcpy(&magic, base, 4);
+  if (magic != MIZU_MAGIC_VEC) return -1;
+  memcpy(&t32, (const unsigned char *) base + 4, 4);
+  memcpy(&len, (const unsigned char *) base + 8, 8);
+  memcpy(&attrs, (const unsigned char *) base + 16, 8);
+  memcpy(&voff, (const unsigned char *) base + MIZU_HDR_VALID_OFF, 8);
+  memcpy(&vcount, (const unsigned char *) base + MIZU_HDR_VALID_COUNT, 8);
+  const size_t elt = mizu_type_elt_size(t32);
+  if (elt == 0 || len < 0 || attrs < 0 ||
+      len > ((int64_t) size - (int64_t) MIZU_HEADER_SIZE) / (int64_t) elt ||
+      attrs > (int64_t) size - (int64_t) MIZU_HEADER_SIZE -
+              len * (int64_t) elt)
+    return -1;
+  if (!mizu_ext_flags_known(base) ||
+      !mizu_ext_valid_ok(voff, vcount, (uint64_t) len, size))
+    return -1;
+  *wire_type = t32;
+  *n_elems = len;
+  valid[0] = voff;
+  valid[1] = vcount;
+  return 0;
+}
+
+MIZU_EXT_INLINE int mizu_ext_mizs_check_impl(const void *base, size_t size,
+                                            int64_t *n, int64_t *str_size,
+                                            int64_t *attrs_size) {
+  if (size < MIZU_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t attrs;
+  int64_t count, block;
+  memcpy(&magic, base, 4);
+  if (magic != MIZU_MAGIC_STR) return -1;
+  memcpy(&attrs, (const unsigned char *) base + 4, 4);
+  memcpy(&count, (const unsigned char *) base + 8, 8);
+  memcpy(&block, (const unsigned char *) base + 16, 8);
+  if (attrs < 0 || count < 0 || count > ((int64_t) 1 << 50) || block < 0)
+    return -1;
+  if (!mizu_ext_flags_known(base)) return -1;
+  const int64_t fixed = mizu_mizs_geometry(count).data;
+  if (fixed > block ||
+      block > (int64_t) size - (int64_t) MIZU_HEADER_SIZE ||
+      (int64_t) attrs >
+        (int64_t) size - (int64_t) MIZU_HEADER_SIZE - block)
+    return -1;
+  *n = count;
+  *str_size = block;
+  *attrs_size = attrs;
+  return 0;
+}
+
+MIZU_EXT_INLINE int mizu_ext_mizl_check_impl(const void *base, size_t size,
+                                            int64_t *n, int64_t *attrs_off,
+                                            int64_t *attrs_size,
+                                            int64_t valid[2]) {
+  if (size < MIZU_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t n32;
+  int64_t aoff, asz, voff, vcount;
+  memcpy(&magic, base, 4);
+  if (magic != MIZU_MAGIC_LIST) return -1;
+  memcpy(&n32, (const unsigned char *) base + 4, 4);
+  memcpy(&aoff, (const unsigned char *) base + 8, 8);
+  memcpy(&asz, (const unsigned char *) base + 16, 8);
+  memcpy(&voff, (const unsigned char *) base + MIZU_HDR_VALID_OFF, 8);
+  memcpy(&vcount, (const unsigned char *) base + MIZU_HDR_VALID_COUNT, 8);
+  if (n32 < 0 ||
+      (uint64_t) (uint32_t) n32 >
+        ((uint64_t) size - (uint64_t) MIZU_HEADER_SIZE) / 32)
+    return -1;
+  if (aoff < 0 || asz < 0 ||
+      (uint64_t) aoff > (uint64_t) size ||
+      (uint64_t) asz > (uint64_t) size - (uint64_t) aoff)
+    return -1;
+  if (!mizu_ext_flags_known(base)) return -1;
+  uint64_t sum = 0;
+  for (int64_t i = 0; i < (int64_t) n32; i++) {
+    mizu_mizl_entry e;
+    if (mizu_ext_mizl_ent(base, size, i, &e) != 0) return -1;
+    const int32_t tag = e.sexptype & ~(int32_t) MIZU_MIZL_S4;
+    if (mizu_type_elt_size(tag) != 0) sum += (uint64_t) e.length;
+  }
+  if (voff == 0) {
+    if (vcount != 0 && vcount != -1) return -1;
+  } else {
+    const uint64_t bytes = (uint64_t) (uint32_t) n32 * 16;
+    if (vcount < 0 || (uint64_t) vcount > sum || (voff & 63) != 0 ||
+        (uint64_t) voff > (uint64_t) size ||
+        bytes > (uint64_t) size - (uint64_t) voff)
+      return -1;
+  }
+  *n = n32;
+  *attrs_off = aoff;
+  *attrs_size = asz;
+  valid[0] = voff;
+  valid[1] = vcount;
+  return 0;
+}
+
+MIZU_EXT_INLINE int mizu_ext_mizl_elem_impl(const void *base, size_t size,
+                                           int64_t i,
+                                           mizu_mizl_entry *elem) {
+  if (size < MIZU_HEADER_SIZE) return -1;
+  uint32_t magic;
+  int32_t n32;
+  int64_t voff, vcount;
+  memcpy(&magic, base, 4);
+  if (magic != MIZU_MAGIC_LIST) return -1;
+  memcpy(&n32, (const unsigned char *) base + 4, 4);
+  if (n32 < 0 || i < 0 || i >= (int64_t) n32 ||
+      (uint64_t) (uint32_t) n32 >
+        ((uint64_t) size - (uint64_t) MIZU_HEADER_SIZE) / 32)
+    return -1;
+  if (!mizu_ext_flags_known(base)) return -1;
+  if (mizu_ext_mizl_ent(base, size, i, elem) != 0) return -1;
+  memcpy(&voff, (const unsigned char *) base + MIZU_HDR_VALID_OFF, 8);
+  memcpy(&vcount, (const unsigned char *) base + MIZU_HDR_VALID_COUNT, 8);
+  if (voff == 0) {
+    if (vcount != 0 && vcount != -1) return -1;
+    elem->valid[0] = 0;
+    elem->valid[1] = vcount;
+    return 0;
+  }
+  if ((voff & 63) != 0) return -1;
+  const uint64_t bytes = (uint64_t) (uint32_t) n32 * 16;
+  if ((uint64_t) voff > (uint64_t) size ||
+      bytes > (uint64_t) size - (uint64_t) voff)
+    return -1;
+  const unsigned char *tab = (const unsigned char *) base + voff;
+  int64_t loff, lcount;
+  memcpy(&loff, tab + 16 * (size_t) i, 8);
+  memcpy(&lcount, tab + 16 * (size_t) i + 8, 8);
+  if (!mizu_ext_valid_ok(loff, lcount, (uint64_t) elem->length, size))
+    return -1;
+  elem->valid[0] = loff;
+  elem->valid[1] = lcount;
+  return 0;
+}
+
+MIZU_EXT_INLINE uint64_t mizu_ext_na_build_impl(int type, uint8_t *bitmap,
+                                               const void *src, uint64_t n,
+                                               uint64_t bit_off) {
+  uint64_t nulls = 0;
+  for (uint64_t i = 0; i < n; i++) {
+    const uint64_t bit = bit_off + i;
+    if (mizu_ext_na_at(type, src, i)) {
+      bitmap[bit >> 3] &= (uint8_t) ~(1u << (bit & 7));
+      nulls++;
+    } else {
+      bitmap[bit >> 3] |= (uint8_t) (1u << (bit & 7));
+    }
+  }
+  return nulls;
+}
+
+MIZU_EXT_INLINE uint64_t mizu_ext_na_apply_impl(int type, void *dst,
+                                               const void *src,
+                                               const uint8_t *bitmap,
+                                               uint64_t n) {
+  const size_t elt = mizu_type_elt_size(type);
+  if (elt == 0) return 0;
+  if (dst != src) memcpy(dst, src, (size_t) n * elt);
+  uint64_t nulls = 0;
+  for (uint64_t i = 0; i < n; i++) {
+    if (((bitmap[i >> 3] >> (i & 7)) & 1) == 0) {
+      mizu_ext_na_store(type, dst, i);
+      nulls++;
+    }
+  }
+  return nulls;
+}
 
 #ifdef MIZU_EXT_NO_INLINES
 MIZU_API double mizu_timeout_ms(double seconds);
@@ -772,7 +1188,20 @@ MIZU_API int mizu_aux_type(uint64_t aux);
 MIZU_API uint64_t mizu_aux_hi(uint64_t aux);
 MIZU_API void mizu_mizh_write(void *base, int wire_type, int64_t n_elems);
 MIZU_API int mizu_mizh_check(const void *base, size_t size,
-                           int *wire_type, int64_t *n_elems);
+                           int *wire_type, int64_t *n_elems, int64_t valid[2]);
+MIZU_API void mizu_mizh_validity_set(void *base, int64_t off,
+                                   int64_t count);
+MIZU_API int mizu_mizs_check(const void *base, size_t size, int64_t *n,
+                           int64_t *str_size, int64_t *attrs_size);
+MIZU_API int mizu_mizl_check(const void *base, size_t size, int64_t *n,
+                           int64_t *attrs_off, int64_t *attrs_size,
+                           int64_t valid[2]);
+MIZU_API int mizu_mizl_elem(const void *base, size_t size, int64_t i,
+                           mizu_mizl_entry *elem);
+MIZU_API uint64_t mizu_na_build(int type, uint8_t *bitmap, const void *src,
+                              uint64_t n, uint64_t bit_off);
+MIZU_API uint64_t mizu_na_apply(int type, void *dst, const void *src,
+                              const uint8_t *bitmap, uint64_t n);
 #else
 /* seconds (a binding's convention; <= 0 polls, non-finite waits
    indefinitely) to the core's timeout_ms (0 polls, < 0 indefinite). */
@@ -817,29 +1246,68 @@ MIZU_EXT_INLINE void mizu_mizh_write(void *base, int wire_type,
   memset((unsigned char *) base + 24, 0, MIZU_HEADER_SIZE - 24);
 }
 /* Validate the MIZH header at base: region size, magic, a known atomic
-   wire type, and the element/attribute extents against the region size —
-   0 on success, -1 on any rejection. Attribute policy (whether the word
-   at [16, 24) may be nonzero, and what it means) stays binding-side. */
+   wire type, the element/attribute extents against the region size, the
+   format flags word, and the validity section (handed back through
+   valid) — 0 on success, -1 on any rejection. Attribute policy (whether
+   the word at [16, 24) may be nonzero, and what it means) stays
+   binding-side. */
 MIZU_EXT_INLINE int mizu_mizh_check(const void *base, size_t size,
-                                  int *wire_type, int64_t *n_elems) {
-  if (size < MIZU_HEADER_SIZE) return -1;
-  uint32_t magic;
-  int32_t t32;
-  int64_t len, attrs;
-  memcpy(&magic, base, 4);
-  if (magic != MIZU_MAGIC_VEC) return -1;
-  memcpy(&t32, (const unsigned char *) base + 4, 4);
-  memcpy(&len, (const unsigned char *) base + 8, 8);
-  memcpy(&attrs, (const unsigned char *) base + 16, 8);
-  const size_t elt = mizu_type_elt_size(t32);
-  if (elt == 0 || len < 0 || attrs < 0 ||
-      len > ((int64_t) size - (int64_t) MIZU_HEADER_SIZE) / (int64_t) elt ||
-      attrs > (int64_t) size - (int64_t) MIZU_HEADER_SIZE -
-              len * (int64_t) elt)
-    return -1;
-  *wire_type = t32;
-  *n_elems = len;
-  return 0;
+                                  int *wire_type, int64_t *n_elems,
+                                  int64_t valid[2]) {
+  return mizu_ext_mizh_check_impl(base, size, wire_type, n_elems, valid);
+}
+/* Stamp the validity pair of an MIZH or MIZL header (the one write site):
+   {0, 0} absent, {0, -1} known-NA-free, or the section offset and null
+   count. */
+MIZU_EXT_INLINE void mizu_mizh_validity_set(void *base, int64_t off,
+                                          int64_t count) {
+  memcpy((unsigned char *) base + MIZU_HDR_VALID_OFF, &off, 8);
+  memcpy((unsigned char *) base + MIZU_HDR_VALID_COUNT, &count, 8);
+}
+/* Validate the MIZS header at base against the region: magic, the format
+   flags word, and the string block's fixed sections plus the two end
+   offsets (the block's and the attrs blob's) — 0 on success, -1 on any
+   rejection. The block's own validity bitmap serves where MIZH / MIZL
+   carry the header section, so there is no valid out-param. */
+MIZU_EXT_INLINE int mizu_mizs_check(const void *base, size_t size,
+                                  int64_t *n, int64_t *str_size,
+                                  int64_t *attrs_size) {
+  return mizu_ext_mizs_check_impl(base, size, n, str_size, attrs_size);
+}
+/* Validate the MIZL header at base and its directory's extent against
+   the region: magic, the format flags word, every entry (mizu_ext_mizl_ent),
+   and the header's validity pair — whose count totals the nulls across
+   the leaves, so the directory entry count does not bound it; the sum of
+   the atomic leaves' lengths does. 0 on success, -1 on any rejection. */
+MIZU_EXT_INLINE int mizu_mizl_check(const void *base, size_t size,
+                                  int64_t *n, int64_t *attrs_off,
+                                  int64_t *attrs_size, int64_t valid[2]) {
+  return mizu_ext_mizl_check_impl(base, size, n, attrs_off, attrs_size,
+                                 valid);
+}
+/* One bounds-checked MIZL directory entry (index i), with its
+   validity-table pair: a {0, 0}/{0, -1} header state covers every leaf;
+   otherwise the table's entry i is validated by the MIZH rule against
+   the leaf's length. 0 on success, -1 on any rejection. */
+MIZU_EXT_INLINE int mizu_mizl_elem(const void *base, size_t size, int64_t i,
+                                 mizu_mizl_entry *elem) {
+  return mizu_ext_mizl_elem_impl(base, size, i, elem);
+}
+/* The sentinels-to-bitmap scan: bit (bit_off + i) of bitmap records
+   element i of src, 1 = present (the MIZS string block's convention);
+   a type with no missing sentinel is all-present. Returns the null
+   count. */
+MIZU_EXT_INLINE uint64_t mizu_na_build(int type, uint8_t *bitmap,
+                                     const void *src, uint64_t n,
+                                     uint64_t bit_off) {
+  return mizu_ext_na_build_impl(type, bitmap, src, n, bit_off);
+}
+/* The bitmap-to-sentinels copy: n elements land at dst, the clear bits'
+   elements written as the wire type's missing sentinel. Returns the
+   null count. */
+MIZU_EXT_INLINE uint64_t mizu_na_apply(int type, void *dst, const void *src,
+                                     const uint8_t *bitmap, uint64_t n) {
+  return mizu_ext_na_apply_impl(type, dst, src, bitmap, n);
 }
 #endif
 

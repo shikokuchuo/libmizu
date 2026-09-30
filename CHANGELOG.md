@@ -13,6 +13,46 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The cross-language wire contract (the execution plan's Phase 0).
+  Pre-release: `MIZU_ABI_VERSION` stays 1 (peers are same-build; an old
+  reader fails safe) — this entry, like the INT64 entry's, records the
+  exception to the header's bump-on-any-wire-change rule.
+  - The registries: `'I'` (0x49, `MIZU_INTEROP_MAGIC`) joins the codec
+    registry (pickle 0x80 listed with it, and readers dispatch on the
+    first byte of every serialize tier); the `MIZU_LANG_*` language
+    registry (0 none / 1 bytes / 2 R / 3 Python); the `MIZU_CAP_*`
+    reader-capability bits (MIZS, ATTRS, MIZL — a bit names a byte
+    layout, never reassigned); the `MIZU_IDENT()` identity word
+    (language in bits 0-7, capabilities in bits 32-63, reserved bits
+    8-31 ignored). Reserved, with formats to follow in their own phases:
+    `'I'` tags 0x11 (err) and 0x12 (task), and MIZL directory-entry
+    sexptype tag 33 (the remote leaf). The `MIZU_TYPE_*` numbers are
+    frozen from the first release (SEXPTYPE origin is history).
+  - Identity words on the wire: each channel side publishes its
+    binding's word in its entity block (`MIZU_ENTITY_IDENT`; the host at
+    create, the peer at attach before `ready_set`); the pool header's
+    `pad[8]` becomes `worker_ident`, fixed by the first worker join's
+    CAS and exact-match ever after (a differing word fails the join; the
+    word is never reset). `mizu_binding` gains the `ident` field; a zero
+    language byte is rejected at create, attach and join — the bytes
+    binding declares `MIZU_IDENT(MIZU_LANG_BYTES, 0)`. New getters
+    `mizu_channel_peer_ident()` / `mizu_pool_worker_ident()` read the
+    words through the mapping.
+  - The optional validity-bitmap section: header words [40-47]/[48-55]
+    of every MIZH and MIZL header — {0, 0} absent, {0, -1}
+    known-NA-free, else a 64-byte-aligned bitmap (MIZH) or leaf-entry
+    table (MIZL). The layout headers are now documented in mizu.h: the
+    format flags word at [32-35] (bit 0 S4; an unknown set bit rejects),
+    the MIZS string block, the 32-byte MIZL directory entry (64-aligned
+    `data_offset`; S4 bit 30; tag 32 legal; tag 33 reserved), and the
+    `MIZU_CE_*` encoding constants beside `MIZU_STR1_NA`.
+  - New ext-tier symbols (dual form): `mizu_mizh_validity_set`,
+    `mizu_mizs_geometry`, `mizu_mizs_check`, `mizu_mizl_check`,
+    `mizu_mizl_elem` — every check rejects a misaligned directory
+    `data_offset`, an unknown flags-word bit and an unlisted sexptype —
+    and the `mizu_na_build` / `mizu_na_apply` sentinel<->bitmap
+    primitives (one NA-test implementation behind both bindings'
+    validity paths).
 - `MIZU_TYPE_INT64` wire tag (32) for int64 payloads; INT64_MIN is the
   missing sentinel. Pre-release: `MIZU_ABI_VERSION` stays 1 (peers are
   same-build; an old reader fails safe — elt size 0 is a corrupt-slot
@@ -64,6 +104,13 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
+- `mizu_morsel_layout` / `mizu_morsel_hdr_check` lose the magic
+  parameter: the morsel module stamps and checks the one core-owned
+  `MIZU_MORSEL_MAGIC` (0x4D495A4D — mizu's value, so only pymizu's map
+  regions change magic; the descriptor's codec identity rides the
+  descriptor stream's own first byte). Ext-tier signature change.
+- `mizu_mizh_check` gains the `valid` out-param (the MIZH validity
+  section, bounds-checked and handed back). Ext-tier signature change.
 - `mizu_channel_recv_batch_fn` returns every message it consumed: a read
   failure after the first message now ends the batch early with `MIZU_OK`
   and the prefix instead of `MIZU_ERR` dropping it, and the failing slot

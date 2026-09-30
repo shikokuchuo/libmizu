@@ -99,6 +99,17 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_aux_hi);
   refs += sink((mizu_any_fn) &mizu_mizh_write);
   refs += sink((mizu_any_fn) &mizu_mizh_check);
+  refs += sink((mizu_any_fn) &mizu_mizh_validity_set);
+  refs += sink((mizu_any_fn) &mizu_mizs_geometry);
+  refs += sink((mizu_any_fn) &mizu_mizs_check);
+  refs += sink((mizu_any_fn) &mizu_mizl_check);
+  refs += sink((mizu_any_fn) &mizu_mizl_elem);
+  refs += sink((mizu_any_fn) &mizu_na_build);
+  refs += sink((mizu_any_fn) &mizu_na_apply);
+
+  /* The identity words. */
+  refs += sink((mizu_any_fn) &mizu_channel_peer_ident);
+  refs += sink((mizu_any_fn) &mizu_pool_worker_ident);
 
   /* The raw-tier staging reservation (the header inline by default, the
      exported form under EXT_PROBE_EXPORTS; the slow path is extern-only). */
@@ -123,13 +134,14 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 68);
+  assert(refs == 77);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +
     sizeof(mizu_result_sink) + sizeof(mizu_shm) + sizeof(mizu_parker) +
     sizeof(mizu_pool_sig) + sizeof(mizu_bytes) + sizeof(mizu_morsel_hdr) +
-    sizeof(mizu_morsel_sizer) + sizeof(mizu_morsel_span);
+    sizeof(mizu_morsel_sizer) + sizeof(mizu_morsel_span) +
+    sizeof(mizu_mizs_geom) + sizeof(mizu_mizl_entry);
   assert(sizes > 0);
 
   /* Macro surface. */
@@ -140,16 +152,28 @@ int main(void) {
   assert(MIZU_OPEN_CACHE_MAX == 16);
   assert(MIZU_CODEC_MAGIC == 'R');
   assert(MIZU_PYMIZU_CODEC_MAGIC == 'P');
+  assert(MIZU_INTEROP_MAGIC == 'I');
+  assert(MIZU_MORSEL_MAGIC == 0x4D495A4Du);
   assert(MIZU_HTYPE_CHANNEL != MIZU_HTYPE_POOL);
   assert(MIZU_PARK_WOKEN != MIZU_PARK_TIMEOUT);
   assert(MIZU_LIVE_ACQUIRED != MIZU_LIVE_HELD);
+
+  /* The registries and the identity word. */
+  assert(MIZU_LANG_NONE == 0 && MIZU_LANG_BYTES == 1 && MIZU_LANG_R == 2 &&
+         MIZU_LANG_PYTHON == 3);
+  assert(MIZU_CAP_MIZS == 1u && MIZU_CAP_ATTRS == 2u && MIZU_CAP_MIZL == 4u);
+  assert(MIZU_IDENT(MIZU_LANG_R, MIZU_CAP_MIZS | MIZU_CAP_MIZL) ==
+         ((uint64_t) 2 | ((uint64_t) 5 << 32)));
+  assert((uint8_t) MIZU_IDENT(MIZU_LANG_PYTHON, 0) == MIZU_LANG_PYTHON);
+  assert(MIZU_CE_NATIVE == 0 && MIZU_CE_UTF8 == 1 && MIZU_CE_LATIN1 == 2 &&
+         MIZU_CE_BYTES == 3);
 
   /* mizu_binding_init zeroes and size-stamps. */
   mizu_binding b;
   memset(&b, 0xff, sizeof b);
   mizu_binding_init(&b);
   assert(b.size == sizeof b && b.stage == NULL && b.read == NULL &&
-         b.exec == NULL && b.ctx == NULL);
+         b.exec == NULL && b.ctx == NULL && b.ident == 0);
 
   /* The dual forms compute the wire-format offsets, in either mode. */
   unsigned char region[MIZU_HEADER_SIZE];
@@ -189,8 +213,13 @@ int main(void) {
   mizu_mizh_write(mizh, MIZU_TYPE_REAL, 3);
   int wtype = 0;
   int64_t nelem = 0;
-  assert(mizu_mizh_check(mizh, sizeof mizh, &wtype, &nelem) == 0);
+  int64_t valid[2] = { 1, 1 };
+  assert(mizu_mizh_check(mizh, sizeof mizh, &wtype, &nelem, valid) == 0);
   assert(wtype == MIZU_TYPE_REAL && nelem == 3);
+  assert(valid[0] == 0 && valid[1] == 0);   /* absent */
+  mizu_mizh_validity_set(mizh, 0, -1);      /* known-NA-free */
+  assert(mizu_mizh_check(mizh, sizeof mizh, &wtype, &nelem, valid) == 0 &&
+         valid[0] == 0 && valid[1] == -1);
   uint32_t rc_after_write;
   memcpy(&rc_after_write, mizh + MIZU_ZC_REFCOUNT_OFF, sizeof rc_after_write);
   assert(rc_after_write == 0);   /* the reserved band write zeroed it */

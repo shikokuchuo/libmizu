@@ -49,32 +49,33 @@ int main(void) {
   memset(mizh, 0xAA, sizeof mizh);
   mizu_mizh_write(mizh, MIZU_TYPE_INT, 42);
   int type = 0;
-  int64_t n = 0;
-  assert(mizu_mizh_check(mizh, sizeof mizh, &type, &n) == 0);
+  int64_t n = 0, valid[2];
+  assert(mizu_mizh_check(mizh, sizeof mizh, &type, &n, valid) == 0);
   assert(type == MIZU_TYPE_INT && n == 42);
   for (size_t i = 24; i < MIZU_HEADER_SIZE; i++)
     assert(mizh[i] == 0);   /* the reserved band, zc words included */
 
   /* Rejections: size, magic, type, extent. */
-  assert(mizu_mizh_check(mizh, MIZU_HEADER_SIZE - 1, &type, &n) == -1);
+  assert(mizu_mizh_check(mizh, MIZU_HEADER_SIZE - 1, &type, &n, valid) ==
+         -1);
   unsigned char bad[256];
   memcpy(bad, mizh, sizeof bad);
   bad[0] ^= 0xFF;   /* magic */
-  assert(mizu_mizh_check(bad, sizeof bad, &type, &n) == -1);
+  assert(mizu_mizh_check(bad, sizeof bad, &type, &n, valid) == -1);
   memcpy(bad, mizh, sizeof bad);
   bad[4] = 7;       /* no such atomic wire type */
-  assert(mizu_mizh_check(bad, sizeof bad, &type, &n) == -1);
+  assert(mizu_mizh_check(bad, sizeof bad, &type, &n, valid) == -1);
   memcpy(bad, mizh, sizeof bad);
   mizu_mizh_write(bad, MIZU_TYPE_REAL, 1 << 20);   /* 8 MB into 128 B */
-  assert(mizu_mizh_check(bad, sizeof bad, &type, &n) == -1);
+  assert(mizu_mizh_check(bad, sizeof bad, &type, &n, valid) == -1);
   memcpy(bad, mizh, sizeof bad);
   bad[16] = 0xFF;   /* attrs_size past the region */
-  assert(mizu_mizh_check(bad, sizeof bad, &type, &n) == -1);
+  assert(mizu_mizh_check(bad, sizeof bad, &type, &n, valid) == -1);
   /* a negative element count rejects */
   memcpy(bad, mizh, sizeof bad);
   int64_t neg = -1;
   memcpy(bad + 8, &neg, 8);
-  assert(mizu_mizh_check(bad, sizeof bad, &type, &n) == -1);
+  assert(mizu_mizh_check(bad, sizeof bad, &type, &n, valid) == -1);
 
   printf("test_wire: OK\n");
   return 0;

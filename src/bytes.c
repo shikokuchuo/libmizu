@@ -134,6 +134,7 @@ void mizu_binding_bytes(mizu_binding *b) {
   mizu_binding_init(b);
   b->stage = mizu_bytes_stage;
   b->read = mizu_bytes_read;
+  b->ident = MIZU_IDENT(MIZU_LANG_BYTES, 0);
 }
 
 void mizu_bytes_free(mizu_bytes *b) {
