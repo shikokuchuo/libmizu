@@ -28,6 +28,14 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   byte grammar once here: `tests/unit/test_interop.c` drives it through
   the cursor and re-emits it byte-for-byte, and the cursor joins the
   fuzz tier (`tests/fuzz/fuzz_interop.c`).
+- The err tag (0x11) is normative (the execution plan's Phase 2):
+  DESIGN.md's interchange codec section specifies its internals — the
+  top-level-only error value (u16 flags, the optional u64 element
+  index, the three bare strings type / message / detail) and the
+  bounded writer: each string truncates at a UTF-8 boundary past its
+  share of the slot's inline budget, so the frame fits by construction,
+  stamps INLINE with the keeperless claim, and cannot fail. The golden
+  corpus pins the first err round-trip fixtures.
 - The cross-language wire contract (the execution plan's Phase 0).
   Pre-release: `MIZU_ABI_VERSION` stays 1 (peers are same-build; an old
   reader fails safe) — this entry, like the INT64 entry's, records the
