@@ -188,7 +188,7 @@ A channel receives an error stream as a **value**, not a raised condition (senti
 |---|---|---|---|
 | 0 | qualified name | code (0x04 str), positional (0x0c list), named (0x0d dict) | Phase 4 (§4.0) |
 | 1 | source | code (0x04 str), positional (0x0c list), named (0x0d dict) | Phase 4 (§4.0) |
-| 2 | runner | region_name (0x04 str), generation (0x02 int), seed (0x00 nil, or 0x0e i64v[2] = (seed, offset)) | Phase 5 (§5.0) |
+| 2 | runner | region_name (0x04 str), generation (0x02 int: the runner ordinal in the high 32 bits, the morsel generation in the low 32 — one i64 because the registry row has three fields and both numbers ride it; a counter never approaches 2^63), seed (0x00 nil, or 0x0e i64v[2] = (seed, offset)) | Phase 5 (§5.0) |
 
 The field *tags* are the builder's check, not the cursor's: the cursor counts items and validates each as an ordinary value, and a field of the wrong tag fails the task in the exec hook with the informative error stream (§4.0). The cursor parses every registry row from 1.6a, the phase column saying only when a writer may emit it.
 
@@ -348,7 +348,10 @@ Object eligibility (which values are raw) stays binding-side, as do the string a
 
 A binding's parallel map rides one fresh region per map call: a 128-byte header, the descriptor stream, an optional bare-bytes x section, the morsel state, and an optional template output area.
 The protocol is core-owned (`morsel.c`, `mizu_morsel_*` in `mizu_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
-Map regions are private to a binding install, so the two first-party bindings share one layout and keep only their magic tags.
+The one magic is `MIZU_MORSEL_MAGIC`, stamped and checked by the module itself; the descriptor's codec identity rides the descriptor stream's own first byte (R_Serialize, pickle, or `'I'`), which is where each binding's reader dispatches.
+A cross-language map (Phase 5) is this same region with the `'I'` descriptor form — one stream, `list[task, x | nil]`: the f spec nested as a kind 0/1 task tag, the list-x values as a bare 0x0c list (nil when the raw section carries them) — and kind-2 runner tasks in place of private runner frames.
+The worker's exec hook dispatches kind 2 to its own binding's native runner loop, so the runner is always same-language as the worker.
+The runner's *result* shape stays binding-private, and a foreign collect normalizes: mizu's runners publish `(morsel starts, morsel counts, values)` triples, pymizu's publish `(element ranges, values)` pairs; element ranges and morsel pairs convert through the region's morsel size, so the lost-set scan and the splice work over either.
 
 - One CLAIM word per runner ordinal packs `(generation << 2) | state`, so the lane claim and the generation fence are one atomic.
   A check-then-CAS would leave a TOCTOU window against reset's re-arm.

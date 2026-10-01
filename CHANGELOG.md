@@ -23,6 +23,18 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The task kind registry's kind 2 (runner) row and the cross-language
+  map's wire forms are normative in DESIGN.md (Phase 5): the runner's
+  fields — region name, the ordinal and morsel generation packed in one
+  i64 (ordinal the high 32 bits), the seed as nil or the
+  `(seed, offset)` i64 pair — the `'I'` map descriptor
+  (`list[task, x | nil]`, the f spec nested as a kind 0/1 task tag), the
+  one `MIZU_MORSEL_MAGIC` with the descriptor's codec identity riding
+  its own first byte, the per-binding runner result shapes with the
+  foreign-collect normalization rule, and the per-element map error's
+  index on the err tag. No code change (the cursor has parsed kind 2
+  since Phase 0); the implementing phases are the bindings'.
+
 - The task tag (0x12) format is normative in DESIGN.md (Phase 4): the
   fixed-offset header (target, kind, reserved-zero flags, submitter
   identity) with the SHM_RAW resolution rule, the misroute guard
