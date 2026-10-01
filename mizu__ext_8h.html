@@ -201,6 +201,10 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_MIZL</b>&#160;&#160;&#160;(1u &lt;&lt; 2)</td></tr>
 <tr class="memdesc:a90183d0d2a1e4c9579c7ffd0c867c53b"><td class="mdescLeft">&#160;</td><td class="mdescRight">wraps a generic MIZL tree as views <br /></td></tr>
 <tr class="separator:a90183d0d2a1e4c9579c7ffd0c867c53b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a64243340f39b4a99e3609639388390e4" id="r_a64243340f39b4a99e3609639388390e4"><td class="memItemLeft" align="right" valign="top"><a id="a64243340f39b4a99e3609639388390e4" name="a64243340f39b4a99e3609639388390e4"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_TASKREF</b>&#160;&#160;&#160;(1u &lt;&lt; 3)</td></tr>
+<tr class="memdesc:a64243340f39b4a99e3609639388390e4"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads 0x13 ref leaves: task arguments by reference (task streams and the map descriptor, which shares the value grammar) <br /></td></tr>
+<tr class="separator:a64243340f39b4a99e3609639388390e4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5b840ab0de642c2462a22c967295f6e2" id="r_a5b840ab0de642c2462a22c967295f6e2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a5b840ab0de642c2462a22c967295f6e2">MIZU_IDENT</a>(lang,  caps)&#160;&#160;&#160;  ((uint64_t) (uint8_t) (lang) | ((uint64_t) (uint32_t) (caps) &lt;&lt; 32))</td></tr>
 <tr class="memdesc:a5b840ab0de642c2462a22c967295f6e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The identity word: the language in bits 0-7, the 32-bit capability mask in bits 32-63, bits 8-31 reserved — written zero and ignored by readers (a negotiation word, so a later field needs no reader taught to skip it).  <br /></td></tr>
 <tr class="separator:a5b840ab0de642c2462a22c967295f6e2"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -364,6 +368,7 @@ Enumerations</h2></td></tr>
 &#160;&#160;<b>MIZU_IX_TAG_CPLX</b> = 0x10
 , <b>MIZU_IX_TAG_ERR</b> = 0x11
 , <b>MIZU_IX_TAG_TASK</b> = 0x12
+, <b>MIZU_IX_TAG_REF</b> = 0x13
 <br />
  }</td></tr>
 <tr class="memdesc:abc6126af1d45847bc59afa0aa3216b04"><td class="mdescLeft">&#160;</td><td class="mdescRight">The wire tags (DESIGN.md's tag table). <br /></td></tr>
@@ -387,6 +392,7 @@ Enumerations</h2></td></tr>
 &#160;&#160;<a class="el" href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06ca1bdbc1f727b4698019b649aed6368df3">MIZU_IX_ATTR</a>
 , <a class="el" href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06cab98f0e55a8428d0e8ef7d899882df668">MIZU_IX_ERR</a>
 , <a class="el" href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06ca5659885ed2ef4a89449e506dccafdb15">MIZU_IX_TASK</a>
+, <a class="el" href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06cadb69c0f115861ccc8a5201faf1db6106">MIZU_IX_REF</a>
 <br />
  }</td></tr>
 <tr class="memdesc:adc29c2ff13d900c2f185ee95427fb06c"><td class="mdescLeft">&#160;</td><td class="mdescRight">What mizu_ix_next yields.  <a href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06c">More...</a><br /></td></tr>
@@ -726,6 +732,8 @@ static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_ix_
 <tr class="memitem:a182e509b9e8e19bc58db6d1e2fb1e28e" id="r_a182e509b9e8e19bc58db6d1e2fb1e28e"><td class="memItemLeft" align="right" valign="top"><a id="a182e509b9e8e19bc58db6d1e2fb1e28e" name="a182e509b9e8e19bc58db6d1e2fb1e28e"></a>
 static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_ix_put_task_impl</b> (unsigned char *dst, int target, int kind, uint64_t ident)</td></tr>
 <tr class="separator:a182e509b9e8e19bc58db6d1e2fb1e28e"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a3fa20460a185e097b94db0a376944cef" id="r_a3fa20460a185e097b94db0a376944cef"><td class="memItemLeft" align="right" valign="top">static size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a3fa20460a185e097b94db0a376944cef">mizu_ext_ix_put_ref_impl</a> (unsigned char *dst, const void *name, uint32_t name_len)</td></tr>
+<tr class="separator:a3fa20460a185e097b94db0a376944cef"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8f8ebf548f9d8431203f17f38c562f8e" id="r_a8f8ebf548f9d8431203f17f38c562f8e"><td class="memItemLeft" align="right" valign="top">static size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a8f8ebf548f9d8431203f17f38c562f8e">mizu_ix_put_header</a> (unsigned char *dst)</td></tr>
 <tr class="memdesc:a8f8ebf548f9d8431203f17f38c562f8e"><td class="mdescLeft">&#160;</td><td class="mdescRight">The emit helpers: each returns its byte count, writing only when dst is not NULL, so a binding's two-pass walk sizes (dst NULL) and writes through the same byte-level code.  <br /></td></tr>
 <tr class="separator:a8f8ebf548f9d8431203f17f38c562f8e"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -784,6 +792,10 @@ static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_put_
 static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_put_task</b> (unsigned char *dst, int target, int kind, uint64_t ident)</td></tr>
 <tr class="memdesc:abae1748ab530c415cd03c8652687957f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The task header: target language byte, kind byte, the reserved u16 flags written zero, then the submitter identity. <br /></td></tr>
 <tr class="separator:abae1748ab530c415cd03c8652687957f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a476ed331ba270a008580a3721b43471f" id="r_a476ed331ba270a008580a3721b43471f"><td class="memItemLeft" align="right" valign="top"><a id="a476ed331ba270a008580a3721b43471f" name="a476ed331ba270a008580a3721b43471f"></a>
+static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_put_ref</b> (unsigned char *dst, const void *name, uint32_t name_len)</td></tr>
+<tr class="memdesc:a476ed331ba270a008580a3721b43471f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The ref leaf: the region identifier span (1-255 bytes; 0 returns 0). <br /></td></tr>
+<tr class="separator:a476ed331ba270a008580a3721b43471f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a92dadd61d4b9bdc6e739de7d4008837d" id="r_a92dadd61d4b9bdc6e739de7d4008837d"><td class="memItemLeft" align="right" valign="top"><a id="a92dadd61d4b9bdc6e739de7d4008837d" name="a92dadd61d4b9bdc6e739de7d4008837d"></a>
 double&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_now</b> (void)</td></tr>
 <tr class="memdesc:a92dadd61d4b9bdc6e739de7d4008837d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Monotonic seconds (the spin/deadline clock) and the current pid (cached, with an atfork reset). <br /></td></tr>
@@ -1286,7 +1298,7 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </div><div class="memdoc">
 
 <p>What mizu_ix_next yields. </p>
-<p>A scalar carries its value; STR1 (the 0x04 scalar) and STR (a bare string: an strv element or a dict key — key is 1 for the latter) carry a UTF-8-validated span, na set on the -1 form (keys are never na); BYTES and VEC carry a (ptr, count) span already bounds-checked; STRV / LIST / DICT / ATTR are counted begins whose elements arrive as following items (a dict's keys as STR items); ERR carries its fields (top level only); TASK is a header item whose kind-determined arity (count) of fields arrive as ordinary items. </p>
+<p>A scalar carries its value; STR1 (the 0x04 scalar) and STR (a bare string: an strv element or a dict key — key is 1 for the latter) carry a UTF-8-validated span, na set on the -1 form (keys are never na); BYTES and VEC carry a (ptr, count) span already bounds-checked; STRV / LIST / DICT / ATTR are counted begins whose elements arrive as following items (a dict's keys as STR items); ERR carries its fields (top level only); TASK is a header item whose kind-determined arity (count) of fields arrive as ordinary items; REF carries the region identifier span (ptr, len), bounds-checked with the content opaque to the cursor (the resolver owns the identifier rules). </p>
 <table class="fieldtable">
 <tr><th colspan="2">Enumerator</th></tr><tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06cab0f41c9248f34f0b1579a7ac746ceb6a" name="adc29c2ff13d900c2f185ee95427fb06cab0f41c9248f34f0b1579a7ac746ceb6a"></a>MIZU_IX_LGL&#160;</td><td class="fielddoc"><p>u64[0]: 0, 1, or 2 (NA) </p>
 </td></tr>
@@ -1315,6 +1327,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 <tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06cab98f0e55a8428d0e8ef7d899882df668" name="adc29c2ff13d900c2f185ee95427fb06cab98f0e55a8428d0e8ef7d899882df668"></a>MIZU_IX_ERR&#160;</td><td class="fielddoc"><p>the err fields; legal at the top level only </p>
 </td></tr>
 <tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06ca5659885ed2ef4a89449e506dccafdb15" name="adc29c2ff13d900c2f185ee95427fb06ca5659885ed2ef4a89449e506dccafdb15"></a>MIZU_IX_TASK&#160;</td><td class="fielddoc"><p>header: count fields follow as ordinary items </p>
+</td></tr>
+<tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06cadb69c0f115861ccc8a5201faf1db6106" name="adc29c2ff13d900c2f185ee95427fb06cadb69c0f115861ccc8a5201faf1db6106"></a>MIZU_IX_REF&#160;</td><td class="fielddoc"><p>the 0x13 region identifier span (ptr, len) </p>
 </td></tr>
 </table>
 
@@ -2813,7 +2827,7 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </div><div class="memdoc">
 
 <p>Open a cursor over a whole stream: the magic and version checks, the unknown version taking the informative "the peer uses a newer format" decline. </p>
-<p>The stream is borrowed, never copied: buf must outlive the cursor, and item spans (<a class="el" href="structmizu__ix__item__s.html#ab63210023a4df67da9acc1ccea6fa22d" title="STR1 / STR / BYTES / VEC: the data span.">mizu_ix_item.ptr</a>) point into it. MIZU_OK, or MIZU_ERR with the error in the TLS slot. </p>
+<p>The stream is borrowed, never copied: buf must outlive the cursor, and item spans (<a class="el" href="structmizu__ix__item__s.html#ab63210023a4df67da9acc1ccea6fa22d" title="STR1 / STR / BYTES / VEC / REF: the data span.">mizu_ix_item.ptr</a>) point into it. MIZU_OK, or MIZU_ERR with the error in the TLS slot. </p>
 
 </div>
 </div>
@@ -2889,6 +2903,49 @@ newer format", never a bare corrupt-stream error). </p>
 </table>
 </div><div class="memdoc">
 <p>tag + one trailing u64: the vector/container/bytes wire shape</p>
+
+</div>
+</div>
+<a id="a3fa20460a185e097b94db0a376944cef" name="a3fa20460a185e097b94db0a376944cef"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a3fa20460a185e097b94db0a376944cef">&#9670;&#160;</a></span>mizu_ext_ix_put_ref_impl()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">static size_t mizu_ext_ix_put_ref_impl </td>
+          <td>(</td>
+          <td class="paramtype">unsigned char *&#160;</td>
+          <td class="paramname"><em>dst</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const void *&#160;</td>
+          <td class="paramname"><em>name</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint32_t&#160;</td>
+          <td class="paramname"><em>name_len</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+<p>tag + u8 length + identifier bytes; 0 is malformed on the wire, so the helper refuses it the put_vec way (0 returned, nothing written)</p>
 
 </div>
 </div>
