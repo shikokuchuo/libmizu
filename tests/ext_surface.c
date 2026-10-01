@@ -135,6 +135,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_ix_put_attr);
   refs += sink((mizu_any_fn) &mizu_ix_put_err);
   refs += sink((mizu_any_fn) &mizu_ix_put_task);
+  refs += sink((mizu_any_fn) &mizu_ix_put_ref);
 
   /* The raw-tier staging reservation (the header inline by default, the
      exported form under EXT_PROBE_EXPORTS; the slow path is extern-only). */
@@ -159,7 +160,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 98);
+  assert(refs == 99);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +
@@ -274,6 +275,18 @@ int main(void) {
          it.len == 2 && memcmp(it.ptr, "hi", 2) == 0);
   assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_LGL &&
          it.u64[0] == 2);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* The ref emit helper, in either mode: the counting form and the
+     writing form agree, and the cursor reads back the identifier span. */
+  off = mizu_ix_put_header(ixb);
+  off += mizu_ix_put_ref(ixb + off, "mizu_ab", 8);
+  assert(mizu_ix_put_header(NULL) + mizu_ix_put_ref(NULL, "mizu_ab", 8) ==
+         off);
+  assert(mizu_ix_put_ref(ixb, "mizu_ab", 0) == 0);
+  assert(mizu_ix_open(&cur, ixb, off) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_REF &&
+         it.len == 8 && memcmp(it.ptr, "mizu_ab", 8) == 0);
   assert(mizu_ix_end(&cur) == MIZU_OK);
 
   /* A taste of the stable tier: the proof links both headers' surface. */

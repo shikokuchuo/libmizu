@@ -131,7 +131,8 @@ class _Parser:
         self.ws()
         for name in ("lglv", "intv", "realv", "cplxv", "rawv", "strv",
                      "i64v", "list", "tuple", "dict", "attr", "lgl", "int",
-                     "real", "cplx", "str", "bytes", "err", "task", "nil"):
+                     "real", "cplx", "str", "bytes", "err", "task", "ref",
+                     "nil"):
             if self.s.startswith(name, self.i):
                 self.i += len(name)
                 break
@@ -149,6 +150,14 @@ class _Parser:
             return self.err()
         if name == "task":
             return self.task()
+        if name == "ref":
+            # the identifier is opaque bytes to the cursor and to this
+            # generator (the resolver owns the content rules), so the
+            # node carries them undecoded
+            self.expect("(")
+            b = _utf8(self.string())
+            self.expect(")")
+            return ("ref", b)
         self.expect("(")
         if name == "lgl":
             tok = self.token(")")
@@ -382,6 +391,11 @@ def encode(v, depth=0):
         return b"\x12" + bytes([target, kind]) + b"\x00\x00" + \
             struct.pack("<Q", ident) + \
             b"".join(encode(f, depth + 1) for f in fields)
+    if tag == "ref":
+        b = v[1]
+        if not 1 <= len(b) <= 255:
+            raise Decline("a ref identifier length outside 1..255")
+        return b"\x13" + bytes([len(b)]) + b
     raise Decline("unknown notation node %r" % (tag,))
 
 
@@ -516,6 +530,11 @@ class _Reader:
             return ("task", target, kind, ident,
                     [self.value(depth + 1)
                      for _ in range(TASK_ARITY[kind])])
+        if tag == 0x13:
+            n = self.take(1)[0]
+            if n == 0:
+                raise IxError("a ref identifier is empty")
+            return ("ref", self.take(n))
         raise IxError("unsupported interop tag 0x%02X" % tag)
 
     def vec(self, tag):

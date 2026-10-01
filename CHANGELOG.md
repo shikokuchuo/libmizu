@@ -23,6 +23,23 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The ref leaf (`'I'` tag 0x13) is normative in DESIGN.md (the
+  follow-ups plan's F1 — task arguments by reference): u8 length (1–255)
+  plus the view layer's identifier bytes, an ordinary value in the
+  cursor's grammar (the cursor checks the length and bounds only), taken
+  by the task-stream exec decode, the map descriptor reader and the
+  collect-side result reader, and declined informatively everywhere
+  else. The task prose gains the retain protocol: the submit-side pin to
+  the worker's counted-add handoff (no keeperless claim on a
+  ref-carrying frame), the worker's emitted-set release discipline after
+  the outcome write, the consumer-death rule for a kill mid-task, and
+  the single-checkout SHM_VEC constraint with its size-pass-first
+  resolution. Emission gates on the new `MIZU_CAP_TASKREF` capability
+  bit (bit 3). New dual-form emit helper `mizu_ix_put_ref`; the cursor
+  gains the 0x13 case; the corpus pins task rows with ref arguments, the
+  builder decline at a channel value site, and the empty / truncated
+  cursor rows.
+
 - The task kind registry's kind 2 (runner) row and the cross-language
   map's wire forms are normative in DESIGN.md (Phase 5): the runner's
   fields — region name, the ordinal and morsel generation packed in one

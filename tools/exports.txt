@@ -48,6 +48,7 @@ mizu_ix_put_lgl
 mizu_ix_put_list_begin
 mizu_ix_put_nil
 mizu_ix_put_real
+mizu_ix_put_ref
 mizu_ix_put_str
 mizu_ix_put_strelt
 mizu_ix_put_strv_begin

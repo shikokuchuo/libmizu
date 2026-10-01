@@ -137,6 +137,14 @@ task-source-py2r | task | all | task(2, 1, 30064771075, str("x * 2"), list(), di
 task-empty | task | all | task(2, 0, 30064771075, str("base::pi"), list(), dict()) | both argument fields always present, either may be empty
 task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=list(str("x"),str("y")))), dict()) | ordinary interop values nest in the argument fields (a strv stays home: Python re-encodes it a 0x0c list)
 
+# --- refs (F1): a region identifier as an ordinary value leaf ---
+task-ref-positional | task | all | task(3, 0, 30064771074, str("numpy.mean"), list(ref("mizu_a1b2c3d4e5f6")), dict()) | a view re-sent as a positional argument (REF)
+task-ref-named | task | all | task(2, 0, 30064771075, str("stats::quantile"), list(realv[1,2]), dict(x=ref("mizu_a1b2c3d4e5f6"))) | a fresh SHM_VEC value's ref in the named dict
+task-ref-nested | task | all | task(3, 1, 30064771074, str("sum(xs)"), list(), dict(xs=list(ref("mizu_f6e5d4c3b2a1"), ref("mizu_f6e5d4c3b2a1")))) | refs nest in the argument trees; two refs to one region
+err-ref-value | read-err | all | ref("mizu_a1b2c3d4e5f6") | builder: a ref at a channel value site declines (the channel readers have no ref case)
+err-ref-empty | read-err | all | hex 49011300 | cursor: an empty ref identifier
+err-ref-trunc | read-err | all | hex 490113056d697a75 | cursor: a ref identifier span past the end
+
 # --- read-err: cursor-level (authored hex) ---
 err-unknown-tag | read-err | all | hex 49017f | cursor: unsupported interop tag 0x7F — the peer uses a newer format
 err-version | read-err | all | hex 490200 | cursor: interop format version 0x02 — the peer uses a newer format

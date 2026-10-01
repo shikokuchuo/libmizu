@@ -111,6 +111,9 @@ static size_t reemit(const unsigned char *in, size_t n, unsigned char *out,
       off += mizu_ix_put_task(out + off, (int) it.target,
                               (int) it.task_kind, it.u64[0]);
       break;
+    case MIZU_IX_REF:
+      off += mizu_ix_put_ref(out + off, it.ptr, (uint32_t) it.len);
+      break;
     default:
       *fail = 1;
       return 0;
@@ -331,6 +334,47 @@ static void err_task_tests(void) {
   assert(strstr(mizu_last_error_message(), "newer format") != NULL);
 }
 
+/* The ref leaf (0x13): the identifier span is opaque to the cursor —
+   length and bounds only. */
+static void ref_tests(void) {
+  unsigned char buf[64];
+  size_t off = mizu_ix_put_header(buf);
+  const char id[] = "mizu_a1b2c3d4e5f6";
+  off += mizu_ix_put_ref(buf + off, id, (uint32_t) (sizeof id - 1));
+  mizu_ix cur;
+  mizu_ix_item it;
+  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK);
+  assert(it.kind == MIZU_IX_REF && it.len == sizeof id - 1);
+  assert(memcmp(it.ptr, id, sizeof id - 1) == 0);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* the emitter refuses an empty or over-long identifier (0, nothing
+     written) in both passes */
+  assert(mizu_ix_put_ref(buf, id, 0) == 0);
+  assert(mizu_ix_put_ref(NULL, id, 0) == 0);
+  assert(mizu_ix_put_ref(buf, id, 256) == 0);
+  assert(mizu_ix_put_ref(NULL, id, 256) == 0);
+
+  /* the cursor rejects an empty identifier and a truncated span (the
+     corpus pins both) */
+  unsigned char empty[] = { 'I', 0x01, 0x13, 0x00 };
+  assert(mizu_ix_open(&cur, empty, sizeof empty) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "ref identifier is empty") != NULL);
+  unsigned char trunc[] = { 'I', 0x01, 0x13, 0x05, 'm', 'i', 'z', 'u' };
+  assert(mizu_ix_open(&cur, trunc, sizeof trunc) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "truncated") != NULL);
+
+  /* no UTF-8 rule: arbitrary bytes pass */
+  unsigned char bin[] = { 'I', 0x01, 0x13, 0x02, 0xff, 0x00 };
+  assert(mizu_ix_open(&cur, bin, sizeof bin) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_REF &&
+         it.len == 2 && it.ptr[0] == 0xff && it.ptr[1] == 0x00);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+}
+
 /* done semantics: one value per stream, then next/end report the rest. */
 static void done_tests(void) {
   unsigned char buf[16];
@@ -427,6 +471,7 @@ static void roundtrip_tests(void) {
 int main(void) {
   open_tests();
   err_task_tests();
+  ref_tests();
   done_tests();
   roundtrip_tests();
   corpus_tests();

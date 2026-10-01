@@ -378,6 +378,24 @@ mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *it) {
     if (ix_push(cur, MIZU_IX_TASK, it->count) != MIZU_OK) return MIZU_ERR;
     break;
   }
+  case MIZU_IX_TAG_REF: {
+    /* u8 length (1..255) + identifier bytes; the content rules stay with
+       the resolver — the cursor checks the length and bounds only */
+    if (!ix_has(cur, 1))
+      IX_FAIL(cur, "truncated interop stream");
+    const uint32_t nlen = cur->p[0];
+    cur->p++;
+    if (nlen == 0)
+      IX_FAIL(cur, "malformed interop stream: a ref identifier is empty");
+    if (!ix_has(cur, nlen))
+      IX_FAIL(cur, "truncated interop stream");
+    it->kind = MIZU_IX_REF;
+    it->ptr = cur->p;
+    it->len = nlen;
+    cur->p += nlen;
+    ix_complete(cur);
+    break;
+  }
   default:
     IX_FAIL(cur, "unsupported interop tag 0x%02X — the peer uses a newer format",
             tag);

@@ -132,6 +132,9 @@ extern "C" {
 #define MIZU_CAP_ATTRS (1u << 1)   /**< reads an 'I' attribute blob on a
    layout root or MIZL leaf */
 #define MIZU_CAP_MIZL  (1u << 2)   /**< wraps a generic MIZL tree as views */
+#define MIZU_CAP_TASKREF (1u << 3) /**< reads 0x13 ref leaves: task
+   arguments by reference (task streams and the map descriptor, which
+   shares the value grammar) */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -1362,7 +1365,8 @@ enum {
   MIZU_IX_TAG_ATTR  = 0x0f,
   MIZU_IX_TAG_CPLX  = 0x10,
   MIZU_IX_TAG_ERR   = 0x11,
-  MIZU_IX_TAG_TASK  = 0x12
+  MIZU_IX_TAG_TASK  = 0x12,
+  MIZU_IX_TAG_REF   = 0x13
 };
 
 /** What mizu_ix_next yields. A scalar carries its value; STR1 (the 0x04
@@ -1372,7 +1376,9 @@ enum {
    bounds-checked; STRV / LIST / DICT / ATTR are counted begins whose
    elements arrive as following items (a dict's keys as STR items); ERR
    carries its fields (top level only); TASK is a header item whose
-   kind-determined arity (count) of fields arrive as ordinary items. */
+   kind-determined arity (count) of fields arrive as ordinary items; REF
+   carries the region identifier span (ptr, len), bounds-checked with the
+   content opaque to the cursor (the resolver owns the identifier rules). */
 enum {
   MIZU_IX_NIL = 0,
   MIZU_IX_LGL,          /**< u64[0]: 0, 1, or 2 (NA) */
@@ -1388,7 +1394,8 @@ enum {
   MIZU_IX_DICT,         /**< begin: count (STR key, value) pairs follow */
   MIZU_IX_ATTR,         /**< begin: one value item, then one DICT begin */
   MIZU_IX_ERR,          /**< the err fields; legal at the top level only */
-  MIZU_IX_TASK          /**< header: count fields follow as ordinary items */
+  MIZU_IX_TASK,         /**< header: count fields follow as ordinary items */
+  MIZU_IX_REF           /**< the 0x13 region identifier span (ptr, len) */
 };
 
 typedef struct mizu_ix_item_s {
@@ -1396,8 +1403,8 @@ typedef struct mizu_ix_item_s {
   uint32_t type;        /**< VEC: the MIZU_TYPE_* wire type */
   int na;               /**< STR1 / STR: the -1 (NA) form */
   int key;              /**< STR: a dict key (an strv element has 0) */
-  const unsigned char *ptr;  /**< STR1 / STR / BYTES / VEC: the data span */
-  uint64_t len;         /**< STR1 / STR: the span's byte length */
+  const unsigned char *ptr;  /**< STR1 / STR / BYTES / VEC / REF: the data span */
+  uint64_t len;         /**< STR1 / STR / REF: the span's byte length */
   uint64_t count;       /**< BYTES / VEC / STRV / LIST / DICT: the element
    (pair) count; TASK: the field arity */
   uint64_t u64[2];      /**< LGL: u64[0] in {0, 1, 2}; INT / REAL: u64[0];
@@ -1635,6 +1642,20 @@ MIZU_EXT_INLINE size_t mizu_ext_ix_put_task_impl(unsigned char *dst,
   return 13;
 }
 
+MIZU_EXT_INLINE size_t mizu_ext_ix_put_ref_impl(unsigned char *dst,
+                                                const void *name,
+                                                uint32_t name_len) {
+  /** tag + u8 length + identifier bytes; 0 is malformed on the wire, so
+     the helper refuses it the put_vec way (0 returned, nothing written) */
+  if (name_len == 0 || name_len > 255) return 0;
+  if (dst != NULL) {
+    dst[0] = MIZU_IX_TAG_REF;
+    dst[1] = (unsigned char) name_len;
+    memcpy(dst + 2, name, (size_t) name_len);
+  }
+  return (size_t) 2 + name_len;
+}
+
 #ifdef MIZU_EXT_NO_INLINES
 MIZU_API size_t mizu_ix_put_header(unsigned char *dst);
 MIZU_API size_t mizu_ix_put_nil(unsigned char *dst);
@@ -1663,6 +1684,8 @@ MIZU_API size_t mizu_ix_put_err(unsigned char *dst, int has_index,
                               const void *detail, uint32_t detail_len);
 MIZU_API size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
                                uint64_t ident);
+MIZU_API size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
+                              uint32_t name_len);
 #else
 /** The emit helpers: each returns its byte count, writing only when dst
    is not NULL, so a binding's two-pass walk sizes (dst NULL) and writes
@@ -1747,6 +1770,11 @@ MIZU_EXT_INLINE size_t mizu_ix_put_err(unsigned char *dst, int has_index,
 MIZU_EXT_INLINE size_t mizu_ix_put_task(unsigned char *dst, int target,
                                       int kind, uint64_t ident) {
   return mizu_ext_ix_put_task_impl(dst, target, kind, ident);
+}
+/** The ref leaf: the region identifier span (1-255 bytes; 0 returns 0). */
+MIZU_EXT_INLINE size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
+                                     uint32_t name_len) {
+  return mizu_ext_ix_put_ref_impl(dst, name, name_len);
 }
 #endif
 

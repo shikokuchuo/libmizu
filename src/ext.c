@@ -198,3 +198,8 @@ size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
                        uint64_t ident) {
   return mizu_ext_ix_put_task_impl(dst, target, kind, ident);
 }
+
+size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
+                      uint32_t name_len) {
+  return mizu_ext_ix_put_ref_impl(dst, name, name_len);
+}

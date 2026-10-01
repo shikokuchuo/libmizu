@@ -111,6 +111,7 @@ Three small registries ride the identity word:
   `MIZU_CAP_MIZS` (bit 0): reads MIZS layouts.
   `MIZU_CAP_ATTRS` (bit 1): reads an `'I'` attribute blob on a layout root or MIZL leaf, and homes the whitelisted shapes there.
   `MIZU_CAP_MIZL` (bit 2): wraps a generic MIZL tree as a `list` of views — and as a `dict` when the reader also sets `MIZU_CAP_ATTRS`, since a names blob is an attribute blob.
+  `MIZU_CAP_TASKREF` (bit 3): reads 0x13 ref leaves — task arguments by reference (task streams and the map descriptor, which shares the value grammar).
   A binding sets the bits for what its reader implements in that release.
   The rest are reserved: a later `'I'` tag or a later attr shape takes a bit, so writers emit it only to readers that set it.
 - **The identity word**: `MIZU_IDENT(lang, caps)`, a u64 with the language in bits 0–7, the 32-bit capability mask in bits 32–63, and bits 8–31 reserved: written zero, and *ignored* by readers.
@@ -146,7 +147,7 @@ Format words reject what they do not know; negotiation words tolerate it: the re
 
 ### The format
 
-The err tag's internals (Phase 2), the layout attribute blob's `'I'` form (Phase 3) and the task tag's internals (Phase 4) are normative below; the remote-leaf entry's semantics land in a later phase.
+The err tag's internals (Phase 2), the layout attribute blob's `'I'` form (Phase 3), the task tag's internals (Phase 4) and the ref leaf (F1 — task arguments by reference) are normative below; the remote-leaf entry's semantics land in a later phase.
 Until then the one remaining reserved number — the MIZL remote-leaf directory-entry sexptype tag 33 — has no writer: the layout checks reject it, and each binding's reader declines it informatively as a corrupt or newer region, the same shape as an unknown tag.
 
 Invariants — the spine every interop decision hangs from: (1) a reader never meets a stream it cannot identify (the first-byte registry; an unlisted byte is an informative decline); (2) a writer never sends a value its peer cannot read (the identity word and capability mask; a decline fails at send); (3) same-language handles keep their private codecs (the fastest and most complete path; interop *value* streams appear on foreign handles only — the two same-language uses are §3.5's layout attribute blob, an `'I'` encoding inside a region, and the err stream a peer shim sends for an uncaught error on every channel, Phase 2 item 4 — neither is a value the stage hook chose); (4) no silent downgrades (an unknown tag or a reserved flag bit is an informative error, never a misparse or a coercion); (5) relays shift containers, never values (each far-side home shift is documented, and the corpus pins every one).
@@ -170,6 +171,7 @@ Byte 0: `'I'` (0x49). Byte 1: format version (0x01). Then exactly one value: a s
 | 0x10 cplx | f64 re bits + f64 im bits | `complex(1)` (`NA_complex_` bitwise — the 0x03 rule) | `complex` (NA arrives as `complex(nan, nan)`) |
 | 0x11 err | u16 flags (bit 0 = index present; other bits reserved zero, a set one is malformed) + [u64 index] + three bare strings (i32 length ≥ 0 + UTF-8, no tag byte): type, message, detail | a `mizu_error_remote` condition (fields `remote_type`, `message`, `detail`, and `index` when present) — a value, legal at a stream's top level only (Phase 2) | `TaskError` / `MizuError` with `remote_type` / `remote_traceback`; top level only |
 | 0x12 task | u8 target + u8 kind + u16 flags (reserved zero; a set bit is malformed — the field exists so a later header addition is a flag, never a moved identity) + u64 submitter identity, then the fields of its kind in registry order (the task kind registry below), each a tagged item, bare — no count and no wrapping container | not a value: the exec hook takes it at the top of an entry payload and the map descriptor reader as the descriptor's first element (§4.0, §5.1); every other builder reports "a task is not a value" | same |
+| 0x13 ref | u8 name_len (1–255 — 0 is malformed) + the identifier bytes: the view layer's identifier string (a region name, optionally name + path for a view into a tree), opaque to the cursor, which checks the length and bounds only | a view over the referenced region — the task-stream exec decode, the map descriptor reader and the collect-side result reader take it (F1); every other builder declines informatively | same |
 
 Tagged versus bare: every value and every task field is a tagged item. The only bare fields are strings whose position fixes their type — dict keys and the err tag's three strings — so the cursor never meets an untyped value, and neither can be NA.
 
@@ -213,6 +215,27 @@ There is no name registry: a qualified name resolves through the worker's own na
 Source kind evaluates the source in a fresh namespace with the named arguments bound as names, and the result is the trailing expression's value if the source ends with one, else NULL/None — one rule, both languages.
 
 A task frame that is not a task stream and whose first byte is another binding's magic — `'P'` or pickle's 0x80 at an R worker, `'R'` or an R_Serialize `'B'`/`'X'` at a Python worker, the same registry test the channel read hooks run — publishes a neutral error stream ("task in a foreign private codec") instead of a private ERR the submitter could not read.
+
+**Task arguments by reference: the ref leaf.**
+A 0x13 ref leaf in a task stream's argument fields carries an argument by reference instead of by value: the identifier of an object already in shm.
+Two emission cases share the one leaf and the one resolve: a received view re-sent as an argument (the emitter ORs REFHELD into the region's flags word at emit — the identifier has escaped by reference), and a fresh layout-eligible value past the zero-copy floor (one layout write into the stage's single spill checkout, the producer-loan store, the leaf carrying the fresh region's name).
+The reader resolves the identifier to a view with the counted add inside its decode, before the claim completes; which loan the emitter held is the only difference between the cases.
+The leaf is an ordinary value in the cursor's grammar — it nests in the argument list and dict like any node — and builders without a case for it (the channel value readers, both directions) decline informatively and consume the payload, never a wedge.
+Growth is by tags, so the version byte stays 0x01: a reader without the tag declines informatively, which for a task stream fails the task with an error stream — no wedge.
+To spare that round trip a submitter emits 0x13 only to a pool whose worker word sets `MIZU_CAP_TASKREF`: a spec carrying a ref-eligible argument to any other pool declines locally at submit, naming the remedy.
+A ref emission also filters on the peer's capability mask per the view's layout (the §1.1 filter behavior): an attributed or MIZL view refs only to a peer that can read it, else the value write — a missing reader feature declines locally, insufficient layout caps degrade to a copy.
+The fresh-value case rides the staging seam's single checkout: a stream carrying a checkout must otherwise fit the inline budget — it cannot also spill SHM_RAW.
+So a spec whose pre-scan finds a ref-eligible argument runs the size pass ahead of any byte write, picks the first layout-eligible argument in document order (positional, then named, depth-first) such that the remainder of the stream fits the inline budget, and records the choice for the write pass; with no such candidate the write runs by value from the start and spills SHM_RAW as ever.
+Eligibility is a pure function of the value, the floor and the handle's churn flag, and no verbs run between the passes, so the two passes cannot disagree.
+A checkout failure mid-write abandons the stage and retries with the argument in its copy form — never a partial stream (the core rolls an uncommitted checkout back at the next verb entry).
+
+The retain protocol mirrors the REF tier's handoff on both sides.
+The submit side pins: a REF emission leaves the emitter's own view object holding the region's count, and without a pin the region could recycle under an identifier in flight — so the stage pins the emitting spec (every view the argument trees carry) into the retain table, and a frame that can carry a ref never stamps the keeperless claim (a pinned loan is a retain-table entry, unlike a checkout loan).
+The worker's counted add lands inside its decode, before the claim completes; the pin releases at the claim-side release point, and the count never reaches zero in between.
+The worker side releases deterministically: a GC-managed binding would otherwise linger the decoded argument views' adds across tasks, so the exec hook records every by-reference emission its outcome write makes — the result write or the ERR flatten, one list, every emission funnelling through the one mark from whatever graph position — and, once the outcome stream is written, force-releases each decoded argument view absent from the list.
+A view the write emitted keeps its loan: the publish pins the result value, and the submitter's collect-side add lands before the worker's consumer-done releases that pin — the same handoff on the worker side.
+A worker death mid-task leaks one count per decoded ref — the consumer-death rule of the retain table — and the regions are REFHELD, so a later producer death verdict leaks and unlinks rather than recycles into reuse.
+The map descriptor shares the value grammar, so a view x crosses to foreign workers by the same leaf: the worker's map-context cache holds the resolved view between morsels, and the idle sweep or teardown releases it.
 
 The attr tag is the one form for every attributed value, inline and zero-copy alike: the same 0x0d attribute dict is the attribute blob of an MIZH/MIZS/MIZL layout from Phase 3 (§3.5), so a data.frame's inline and region-backed forms share one grammar, one qualification function (`mizu_interop_attrs_qualify`, §1.1) and one shape builder per binding. Attribute values are ordinary values, and an attributed value nests where R nests one (a factor column inside a frame's column list, a `dimnames` list with names), but an attr never directly wraps an attr: R has one attribute set per object, and the cursor rejects the double wrap as malformed. The shape whitelist is the *foreign* reader's contract and part of the format-0x01 baseline:
 
@@ -349,7 +372,7 @@ Object eligibility (which values are raw) stays binding-side, as do the string a
 A binding's parallel map rides one fresh region per map call: a 128-byte header, the descriptor stream, an optional bare-bytes x section, the morsel state, and an optional template output area.
 The protocol is core-owned (`morsel.c`, `mizu_morsel_*` in `mizu_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
 The one magic is `MIZU_MORSEL_MAGIC`, stamped and checked by the module itself; the descriptor's codec identity rides the descriptor stream's own first byte (R_Serialize, pickle, or `'I'`), which is where each binding's reader dispatches.
-A cross-language map (Phase 5) is this same region with the `'I'` descriptor form — one stream, `list[task, x | nil]`: the f spec nested as a kind 0/1 task tag, the list-x values as a bare 0x0c list (nil when the raw section carries them) — and kind-2 runner tasks in place of private runner frames.
+A cross-language map (Phase 5) is this same region with the `'I'` descriptor form — one stream, `list[task, x | nil]`: the f spec nested as a kind 0/1 task tag, the list-x values as a bare 0x0c list (nil when the raw section carries them, a 0x13 ref leaf when x is a received view — F1's D6: the descriptor shares the value grammar, so a view x crosses by reference and the worker's map context holds the resolved view between morsels) — and kind-2 runner tasks in place of private runner frames.
 The worker's exec hook dispatches kind 2 to its own binding's native runner loop, so the runner is always same-language as the worker.
 The runner's *result* shape stays binding-private, and a foreign collect normalizes: mizu's runners publish `(morsel starts, morsel counts, values)` triples, pymizu's publish `(element ranges, values)` pairs; element ranges and morsel pairs convert through the region's morsel size, so the lost-set scan and the splice work over either.
 
