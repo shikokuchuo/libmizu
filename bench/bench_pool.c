@@ -27,7 +27,7 @@ int main(void) {
    is valid until the publish, the task's consumer-done point). */
 static int bench_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
                       size_t limit, mizu_result_sink *sink, int catching,
-                      void *ctx) {
+                      mizu_read_ctx *ctx) {
   (void) limit; (void) catching; (void) ctx;
   mizu_bytes b;
   if (hdr->kind == MIZU_KIND_NIL) {
