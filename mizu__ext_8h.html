@@ -205,6 +205,10 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_TASKREF</b>&#160;&#160;&#160;(1u &lt;&lt; 3)</td></tr>
 <tr class="memdesc:a64243340f39b4a99e3609639388390e4"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads 0x13 ref leaves: task arguments by reference (task streams and the map descriptor, which shares the value grammar) <br /></td></tr>
 <tr class="separator:a64243340f39b4a99e3609639388390e4"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a8a7fcc7457c2b0299347dd1ef6dc32dc" id="r_a8a7fcc7457c2b0299347dd1ef6dc32dc"><td class="memItemLeft" align="right" valign="top"><a id="a8a7fcc7457c2b0299347dd1ef6dc32dc" name="a8a7fcc7457c2b0299347dd1ef6dc32dc"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_MIZL_REF</b>&#160;&#160;&#160;(1u &lt;&lt; 4)</td></tr>
+<tr class="memdesc:a8a7fcc7457c2b0299347dd1ef6dc32dc"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads MIZL remote leaves — directory tag 33 <br /></td></tr>
+<tr class="separator:a8a7fcc7457c2b0299347dd1ef6dc32dc"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5b840ab0de642c2462a22c967295f6e2" id="r_a5b840ab0de642c2462a22c967295f6e2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a5b840ab0de642c2462a22c967295f6e2">MIZU_IDENT</a>(lang,  caps)&#160;&#160;&#160;  ((uint64_t) (uint8_t) (lang) | ((uint64_t) (uint32_t) (caps) &lt;&lt; 32))</td></tr>
 <tr class="memdesc:a5b840ab0de642c2462a22c967295f6e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The identity word: the language in bits 0-7, the 32-bit capability mask in bits 32-63, bits 8-31 reserved — written zero and ignored by readers (a negotiation word, so a later field needs no reader taught to skip it).  <br /></td></tr>
 <tr class="separator:a5b840ab0de642c2462a22c967295f6e2"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -587,7 +591,7 @@ static int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_valid_
 <tr class="memdesc:a507f0468577715cc1345b5d4e825fc59"><td class="mdescLeft">&#160;</td><td class="mdescRight">The three-state validity pair of an MIZH header or one MIZL leaf-table entry: {0, 0} absent, {0, -1} known-NA-free, or a 64-byte-aligned offset whose ceil(n / 8)-byte bitmap fits the region, 0 &lt;= count &lt;= n. <br /></td></tr>
 <tr class="separator:a507f0468577715cc1345b5d4e825fc59"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae5c248d88ebff4cb558a4ac087d9fa1c" id="r_ae5c248d88ebff4cb558a4ac087d9fa1c"><td class="memItemLeft" align="right" valign="top">static int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#ae5c248d88ebff4cb558a4ac087d9fa1c">mizu_ext_mizl_tag_ok</a> (int32_t sexptype)</td></tr>
-<tr class="memdesc:ae5c248d88ebff4cb558a4ac087d9fa1c"><td class="mdescLeft">&#160;</td><td class="mdescRight">A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64.  <br /></td></tr>
+<tr class="memdesc:ae5c248d88ebff4cb558a4ac087d9fa1c"><td class="mdescLeft">&#160;</td><td class="mdescRight">A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64, and the remote leaf (33).  <br /></td></tr>
 <tr class="separator:ae5c248d88ebff4cb558a4ac087d9fa1c"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae25036612b126dddcb89c48100437910" id="r_ae25036612b126dddcb89c48100437910"><td class="memItemLeft" align="right" valign="top">static int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#ae25036612b126dddcb89c48100437910">mizu_ext_na_real_bits</a> (uint64_t bits)</td></tr>
 <tr class="memdesc:ae25036612b126dddcb89c48100437910"><td class="mdescLeft">&#160;</td><td class="mdescRight">One per-element NA test per NA-capable wire type (anything else is never null): INT32_MIN for LGL and INT, INT64_MIN, and the NA_real_ payload discriminated from other NaNs — any NaN whose low word is 1954 (0x7A2), R's own ISNA test, so a writer's quiet-bit-clear NA_real_ (R's verbatim form) and the wire's quiet-bit-set twin both read as NA while a genuine NaN stays a value.  <br /></td></tr>
@@ -2322,8 +2326,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </table>
 </div><div class="memdoc">
 
-<p>A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64. </p>
-<p>The reserved remote leaf (33) rejects with anything else unlisted. </p>
+<p>A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64, and the remote leaf (33). </p>
+<p>Anything else unlisted rejects. </p>
 
 </div>
 </div>
@@ -2403,7 +2407,7 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </div><div class="memdoc">
 
 <p>One MIZL directory entry's checks, shared by mizu_mizl_check's pass and mizu_mizl_elem: alignment and extent, the attrs tail, the listed tag, and the length against the leaf kind — the string block's fixed sections for STR, the element extent for an atomic leaf. </p>
-<p>Fills *e except the valid pair. </p>
+<p>A remote leaf (tag 33) skips the attrs-tail and body checks: the span is the identifier (1–255 bytes), and length / attrs_size describe the referenced column as resolved; the S4 bit rejects. Fills *e except the valid pair. </p>
 
 </div>
 </div>
