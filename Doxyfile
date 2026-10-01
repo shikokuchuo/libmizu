@@ -1,0 +1,38 @@
+# libmizu API reference. `make docs` builds into docs/html (gitignored);
+# the docs workflow publishes that to the gh-pages branch. The reference
+# is generated from the two installed headers only — keep their comments
+# in doxygen form (/** ... */ blocks; /**< ... */ for trailing member
+# docs). A future static-site render flips GENERATE_XML on and adds a
+# doxygen-XML-to-markdown bridge; this config carries over unchanged.
+
+PROJECT_NAME           = libmizu
+PROJECT_BRIEF          = "Lock-free shared-memory IPC"
+PROJECT_NUMBER         = $(MIZU_VERSION)
+OUTPUT_DIRECTORY       = docs
+
+INPUT                  = README.md \
+                         DESIGN.md \
+                         CHANGELOG.md \
+                         include/mizu.h \
+                         include/mizu_ext.h
+USE_MDFILE_AS_MAINPAGE = README.md
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = YES
+SORT_MEMBER_DOCS       = NO
+JAVADOC_AUTOBRIEF      = YES
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+GENERATE_LATEX         = NO
+HTML_EXTRA_STYLESHEET  = tools/doxygen/doxygen-awesome.css
+HTML_COLORSTYLE        = LIGHT
+
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = MIZU_API= \
+                         "MIZU_ATOMIC(T)=T" \
+                         "MIZU_STATIC_ASSERT(c,m)=" \
+                         MIZU_EXT_INLINE="static inline"

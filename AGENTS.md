@@ -6,8 +6,8 @@ First-class bindings live in sibling repos: `mizu` (R)
 and `pymizu` (Python); they vendor/compile these sources into their own
 packages. The channel
 and pool transports plus the built-in bytes binding are complete and
-tested. License: MIT (`LICENSE.note` holds third-party RngStreams
-attribution).
+tested. License: MIT (`LICENSE.note` holds the third-party attributions:
+RngStreams, doxygen-awesome-css).
 
 ## Requirements
 
@@ -79,6 +79,11 @@ attribution).
   symbols against `tools/exports.txt` (no leaks, no missing = ABI break);
   `--write` regenerates after an intended change. Run in CI.
 - `tools/build-win.bat` — Windows build (clang-cl).
+- `Doxyfile` + `tools/doxygen/` — the API reference. Generated from the
+  two installed headers' comments (keep them doxygen-formed: `/** ... */`
+  blocks on the documented entity, `/**< ... */` trailing on members),
+  plus README/DESIGN/CHANGELOG as pages; README.md is the mainpage.
+  `tools/doxygen/` vendors the doxygen-awesome-css theme.
 - `dev/` — scratch copies of headers.
 
 ## Build and test
@@ -102,6 +107,7 @@ make compile_commands.json  # clangd compilation database (gitignored;
                             # regenerates when the Makefile changes)
 make install          # honors PREFIX (/usr/local) and DESTDIR
 tools/amalgamate.sh   # writes mizu.c + mizu.h
+make docs             # doxygen API reference into docs/html (gitignored)
 ```
 
 Compile flags: `-std=c11 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden`.
@@ -157,3 +163,6 @@ these.
   on ubuntu; sanitizer legs cover ASan/UBSan/TSan on the unit tier.
 - `.github/workflows/release.yml` — on `v*` tags: checks tag matches
   `MIZU_VERSION`, generates the amalgamation for the release.
+- `.github/workflows/docs.yml` — on pushes to main: builds the doxygen
+  reference and publishes `docs/html` to the `gh-pages` branch (Pages must
+  be enabled on the repo).

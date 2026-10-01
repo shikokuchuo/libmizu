@@ -78,7 +78,7 @@ FUZZ_SEED ?= 1
 
 .PHONY: all static shared test test-unit test-ext test-integration \
         test-soak test-fuzz bench coverage install uninstall clean \
-        amalgamation tidy
+        amalgamation tidy docs
 
 all: static shared
 
@@ -196,6 +196,12 @@ coverage:
 amalgamation:
 	tools/amalgamate.sh
 
+# API reference: Doxygen over the two installed headers (the Doxyfile adds
+# the markdown pages). MIZU_VERSION feeds the Doxyfile's PROJECT_NUMBER.
+# Output in docs/html (gitignored); the docs workflow publishes gh-pages.
+docs:
+	MIZU_VERSION=$(VERSION) doxygen Doxyfile
+
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib \
 	         $(DESTDIR)$(PREFIX)/lib/pkgconfig
@@ -243,4 +249,4 @@ clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
 	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface
 	rm -rf mizu.c mizu.h mizu_ext.h mizu-*.profraw mizu.profdata \
-	      compile_commands.json
+	      compile_commands.json docs/html docs/xml

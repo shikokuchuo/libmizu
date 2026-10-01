@@ -12,7 +12,7 @@ It makes the communication between those processes cheap enough that work can be
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and [pymizu](https://github.com/shikokuchuo/pymizu) (Python).
-[Writing a binding](#writing-a-binding) covers other languages.
+[Writing a binding](https://github.com/shikokuchuo/libmizu#writing-a-binding) covers other languages.
 
 ## Performance
 
@@ -28,7 +28,7 @@ Representative figures from the C bench suite (`make bench`), measured on an App
 | Pool submit + collect (4 KiB payload) | 1.0 µs |
 | Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
 
-The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](bench/notes.md).
+The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md).
 
 ## Writing a binding
 
