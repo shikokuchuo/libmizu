@@ -135,6 +135,8 @@ extern "C" {
 #define MIZU_CAP_TASKREF (1u << 3) /**< reads 0x13 ref leaves: task
    arguments by reference (task streams and the map descriptor, which
    shares the value grammar) */
+#define MIZU_CAP_MIZL_REF (1u << 4) /**< reads MIZL remote leaves —
+   directory tag 33 */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -895,8 +897,8 @@ MIZU_EXT_INLINE int mizu_ext_valid_ok(int64_t off, int64_t count,
 }
 
 /** A directory entry's sexptype: MIZU_MIZL_S4 masked off, the remainder a
-   listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64.
-   The reserved remote leaf (33) rejects with anything else unlisted. */
+   listed tag — 0 (a serialized leaf), the atomic tags, STR, VEC, INT64,
+   and the remote leaf (33). Anything else unlisted rejects. */
 MIZU_EXT_INLINE int mizu_ext_mizl_tag_ok(int32_t sexptype) {
   switch (sexptype & ~(int32_t) MIZU_MIZL_S4) {
   case 0:
@@ -908,6 +910,7 @@ MIZU_EXT_INLINE int mizu_ext_mizl_tag_ok(int32_t sexptype) {
   case MIZU_TYPE_VEC:
   case MIZU_TYPE_RAW:
   case MIZU_TYPE_INT64:
+  case 33:                        /* remote leaf */
     return 1;
   default:
     return 0;
@@ -979,8 +982,11 @@ MIZU_EXT_INLINE void mizu_ext_na_store(int type, void *dst, uint64_t i) {
 /** One MIZL directory entry's checks, shared by mizu_mizl_check's pass and
    mizu_mizl_elem: alignment and extent, the attrs tail, the listed tag,
    and the length against the leaf kind — the string block's fixed
-   sections for STR, the element extent for an atomic leaf. Fills *e
-   except the valid pair. */
+   sections for STR, the element extent for an atomic leaf. A remote leaf
+   (tag 33) skips the attrs-tail and body checks: the span is the
+   identifier (1–255 bytes), and length / attrs_size describe the
+   referenced column as resolved; the S4 bit rejects. Fills *e except the
+   valid pair. */
 MIZU_EXT_INLINE int mizu_ext_mizl_ent(const void *base, size_t size,
                                      int64_t i, mizu_mizl_entry *e) {
   const unsigned char *dir = (const unsigned char *) base +
@@ -995,10 +1001,17 @@ MIZU_EXT_INLINE int mizu_ext_mizl_ent(const void *base, size_t size,
       (uint64_t) e->data_offset > (uint64_t) size ||
       (uint64_t) e->data_size >
         (uint64_t) size - (uint64_t) e->data_offset ||
-      e->attrs_size < 0 || (int64_t) e->attrs_size > e->data_size)
+      e->attrs_size < 0)
     return -1;
   if (!mizu_ext_mizl_tag_ok(e->sexptype)) return -1;
   const int32_t tag = e->sexptype & ~(int32_t) MIZU_MIZL_S4;
+  if (tag == 33) {              /* remote leaf: the span is the identifier */
+    if ((e->sexptype & (int32_t) MIZU_MIZL_S4) != 0 || e->length < 0 ||
+        e->data_size < 1 || e->data_size > 255)
+      return -1;
+    return 0;
+  }
+  if ((int64_t) e->attrs_size > e->data_size) return -1;
   const int64_t body = e->data_size - (int64_t) e->attrs_size;
   const size_t elt = mizu_type_elt_size(tag);
   if (elt != 0) {
@@ -1155,6 +1168,10 @@ MIZU_EXT_INLINE int mizu_ext_mizl_elem_impl(const void *base, size_t size,
   int64_t loff, lcount;
   memcpy(&loff, tab + 16 * (size_t) i, 8);
   memcpy(&lcount, tab + 16 * (size_t) i + 8, 8);
+  /* a remote leaf (tag 33) carries a {0,0} / {0,-1} claim alone — a
+     bitmap offset is region-local and cannot describe a remote column */
+  if ((elem->sexptype & ~(int32_t) MIZU_MIZL_S4) == 33 && loff != 0)
+    return -1;
   if (!mizu_ext_valid_ok(loff, lcount, (uint64_t) elem->length, size))
     return -1;
   elem->valid[0] = loff;

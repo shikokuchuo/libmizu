@@ -23,6 +23,25 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The MIZL remote leaf (directory tag 33) is normative in DESIGN.md (the
+  follow-ups plan's F2 — a per-column REF): the entry's `data_offset` /
+  `data_size` hold the view layer's identifier span (the 0x13 ref leaf's
+  byte form, 1–255 bytes), `length` and `attrs_size` describe the
+  referenced column as resolved, the S4 bit rejects, and the validity
+  pair is a `{0,0}` / `{0,-1}` claim alone — a remote column contributes
+  no bitmap and no count to the header validity (the `vcount` bound over
+  local atomic leaf lengths forces the exclusion), and a `{0,-1}` claim
+  is validatable only against a referenced form that records known-NA-
+  free itself. Resolve-time validation compares the claims against the
+  resolved leaf; a dangling identifier, a parse failure or any mismatch
+  declines as a corrupt region. Emission gates on the new
+  `MIZU_CAP_MIZL_REF` capability bit (bit 4), per frame. The layout
+  checks admit the tag: `mizu_ext_mizl_tag_ok` lists it,
+  `mizu_ext_mizl_ent` exempts it from the attrs-tail and body checks and
+  bounds the span, and `mizu_ext_mizl_elem` rejects a nonzero validity
+  offset on it. New `fuzz_mizl` harness over the directory parser. No
+  ABI bump.
+
 - The ref leaf (`'I'` tag 0x13) is normative in DESIGN.md (the
   follow-ups plan's F1 — task arguments by reference): u8 length (1–255)
   plus the view layer's identifier bytes, an ordinary value in the

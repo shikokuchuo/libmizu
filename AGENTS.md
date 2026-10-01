@@ -65,8 +65,8 @@ RngStreams, doxygen-awesome-css).
 - `tests/soak/` — minutes-long forked contention runs (nightly, not per-PR;
   `MIZU_SOAK_SECONDS` overrides the duration).
 - `tests/fuzz/` — libFuzzer harnesses for the wire parsers a crashed peer
-  can leave torn (preamble, pool header, REF/SHM_RAW identifier); built
-  with clang, run as fixed-seed ASan+UBSan bursts.
+  can leave torn (preamble, pool header, REF/SHM_RAW identifier, the MIZL
+  directory); built with clang, run as fixed-seed ASan+UBSan bursts.
 - `bench/` — report-only microbenchmarks (no timing asserts); records are
   appended to `bench/notes.md` with the commit SHA.
 - `libmizu.pc.in` — pkg-config template; `make install` sed-substitutes it

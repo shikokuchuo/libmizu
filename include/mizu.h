@@ -353,9 +353,13 @@ MIZU_API size_t mizu_type_elt_size(int type);
    (sexptype 0); the leaf's attrs blob is the last attrs_size bytes of
    data_size. Bit 30 of the entry's sexptype is the leaf's S4 bit; the
    remainder is a listed tag — 0 (serialized), the atomic tags, STR, VEC,
-   and 32 (MIZU_TYPE_INT64 is legal on MIZL leaves). Tag 33 is reserved
-   (a remote, per-column REF leaf): no writer emits it, and a reader
-   meeting it declines as a corrupt or newer region. */
+   and 32 (MIZU_TYPE_INT64 is legal on MIZL leaves). Tag 33 is a remote
+   leaf: the column lives in another region and crosses by reference.
+   data_offset / data_size hold the identifier span — the region name,
+   optionally name[i,j,...] with 1-based decimal indices, 1-255 bytes —
+   length and attrs_size describe the referenced column as resolved, the
+   S4 bit is never set, and the validity pair is a {0,0} / {0,-1} claim
+   alone (DESIGN.md's remote-leaf rules are normative). */
 #define MIZU_MIZL_S4 0x40000000
 
 #define MIZU_MAGIC_VEC   0x4D495A48u  /**< "MIZH" */

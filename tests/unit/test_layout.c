@@ -145,10 +145,7 @@ static void mizl_tests(void) {
   assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
   flags_word(r, 0u);
 
-  /* an unlisted sexptype rejects; the reserved remote leaf (33) with it;
-     the S4 bit rides the tag */
-  put32(r, 64 + 16, 33);
-  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
+  /* an unlisted sexptype rejects; the S4 bit rides the tag */
   put32(r, 64 + 16, 7);
   assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
   put32(r, 64 + 16, (uint32_t) MIZU_TYPE_REAL | MIZU_MIZL_S4);
@@ -156,6 +153,32 @@ static void mizl_tests(void) {
   assert(mizu_mizl_elem(r, sizeof r, 0, &e) == 0 &&
          (e.sexptype & MIZU_MIZL_S4) != 0);
   put32(r, 64 + 16, MIZU_TYPE_REAL);
+
+  /* a well-formed remote leaf (tag 33): the span is the identifier, and
+     length / attrs_size describe the referenced column as resolved */
+  put64(r, 64 + 8, 20);                         /* identifier byte count */
+  put32(r, 64 + 16, 33);
+  put64(r, 64 + 24, 1000000);                   /* remote column length */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) == 0);
+  assert(mizu_mizl_elem(r, sizeof r, 0, &e) == 0 &&
+         e.sexptype == 33 && e.length == 1000000);
+  put32(r, 64 + 20, 200);                       /* attrs past the span:
+                                                   the factor case */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) == 0);
+  put32(r, 64 + 20, 0);
+  put64(r, 64 + 8, 0);                          /* empty identifier */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
+  put64(r, 64 + 8, 256);                        /* past the u8 bound */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
+  put64(r, 64 + 8, 20);
+  put64(r, 64 + 24, -1);                        /* negative length */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
+  put64(r, 64 + 24, 1000000);
+  put32(r, 64 + 16, 33 | MIZU_MIZL_S4);         /* S4 bit set */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
+  put32(r, 64 + 16, MIZU_TYPE_REAL);
+  put64(r, 64 + 8, 24);
+  put64(r, 64 + 24, 3);
 
   /* the header validity table: {0, -1} covers every leaf */
   mizu_mizh_validity_set(r, 0, -1);
@@ -196,6 +219,29 @@ static void mizl_tests(void) {
   put64(r, 448, 512);
   put64(r, 456, 4);                             /* count past length 3 */
   assert(mizu_mizl_elem(r, sizeof r, 0, &e) != 0);
+
+  /* a remote leaf's table row is a {0,0} / {0,-1} claim alone — a bitmap
+     offset is region-local and rejects at elem time */
+  put32(r, 64 + 16, 33);
+  assert(mizu_mizl_elem(r, sizeof r, 0, &e) != 0);   /* row {512, 4} */
+  put64(r, 448, 0);
+  put64(r, 456, -1);
+  assert(mizu_mizl_elem(r, sizeof r, 0, &e) == 0 &&
+         e.valid[0] == 0 && e.valid[1] == -1);
+  put64(r, 456, 0);
+  assert(mizu_mizl_elem(r, sizeof r, 0, &e) == 0 &&
+         e.valid[0] == 0 && e.valid[1] == 0);
+
+  /* an all-remote tree: a remote column contributes no bitmap and no
+     count to the header validity, so tallying one checks as corrupt */
+  put32(r, 96 + 16, 33);
+  mizu_mizh_validity_set(r, 448, 0);
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) == 0 &&
+         valid[0] == 448 && valid[1] == 0);
+  assert(mizu_mizl_elem(r, sizeof r, 1, &e) == 0 &&
+         e.valid[0] == 0 && e.valid[1] == 0);
+  mizu_mizh_validity_set(r, 448, 1);            /* remote nulls tallied */
+  assert(mizu_mizl_check(r, sizeof r, &n, &aoff, &asz, valid) != 0);
 }
 
 static void na_tests(void) {
