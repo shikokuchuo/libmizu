@@ -63,6 +63,7 @@ struct mizu_channel_s {
   int side;                      /* MIZU_ENTITY_HOST or MIZU_ENTITY_PEER */
   int spin;
   int released;                  /* full teardown ran; handle is dead */
+  long self_pid;                 /* fork guard */
   int verdict_dead;              /* sticky flock-confirmed peer death */
   int names_unlinked;            /* survivor cleanup already ran */
   int pk_ok;
@@ -594,15 +595,10 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
       continue;
     }
     chan_publish_head(c);     /* always publish before parking */
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) {
-        atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
-        return MIZU_TIMEOUT;
-      }
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) {
+      atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+      return MIZU_TIMEOUT;
     }
     mizu_park_bracket(&c->h.binding, 1);
     mizu_park(&c->self_pk, e, ms);
@@ -654,17 +650,7 @@ mizu_status mizu_channel_create(mizu_channel **out,
                               const mizu_channel_opts *opts,
                               const mizu_binding *b) {
   *out = NULL;
-  if (b == NULL || b->stage == NULL || b->read == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a channel binding needs stage and read callbacks");
-    return MIZU_ERR;
-  }
-  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a channel binding needs an identity word with a "
-                       "nonzero language byte");
-    return MIZU_ERR;
-  }
+  if (mizu_binding_check(b, "channel") != 0) return MIZU_ERR;
   uint64_t cap = opts->capacity;
   uint64_t slot = opts->slot_size;
   uint64_t arena = opts->arena_size;
@@ -730,6 +716,7 @@ mizu_status mizu_channel_create(mizu_channel **out,
   c->h.binding = *b;
   mizu_read_tmpl_init(&c->h);
   c->side = MIZU_ENTITY_HOST;
+  c->self_pid = mizu_self_pid();
   c->wait_budget_ns = MIZU_SPIN_BUDGET_NS;
 
   mizu_preamble p = {
@@ -804,13 +791,43 @@ mizu_status mizu_channel_create(mizu_channel **out,
   return MIZU_OK;
 }
 
+// Handle access ---------------------------------------------------------------------
+
+/* The closed check plus the fork guard: a handle is process-private (the
+   parkers, the death-listener thread, the kept liveness fds), and a forked
+   child's writes would corrupt the creating process's shared ring. The
+   raising verbs gate here; the sentinel verbs keep their released-handle
+   sentinel and raise only on fork via chan_forked; the total probes
+   (alive, peer_ident, drop) answer empty on fork. destroy stays unguarded
+   by design — teardown belongs to the creating process. */
+static mizu_channel *chan_get(const mizu_channel *c) {
+  if (c == NULL) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
+    return NULL;
+  }
+  mizu_channel *mc = (mizu_channel *) c;
+  if (c->released) {
+    mizu_err_record(&mc->h, MIZU_ERRCAT_OTHER, "channel handle is closed");
+    return NULL;
+  }
+  if (c->self_pid != mizu_self_pid()) {
+    mizu_err_record(&mc->h, MIZU_ERRCAT_OTHER,
+                   "channel handles do not survive fork()");
+    return NULL;
+  }
+  return mc;
+}
+
+static mizu_status chan_forked(mizu_channel *c) {
+  mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
+                 "channel handles do not survive fork()");
+  return MIZU_ERR;
+}
+
 /* The join token is the region name past the namespace prefix:
    "<pid hex>_<counter hex>". */
 mizu_status mizu_channel_token(const mizu_channel *c, char *buf, size_t cap) {
-  if (c == NULL || c->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
-    return MIZU_ERR;
-  }
+  if (chan_get(c) == NULL) return MIZU_ERR;
   const char *suffix = c->shm.name + strlen(MIZU_PREFIX_LITERAL);
   int n = snprintf(buf, cap, "%s", suffix);
   if (n <= 0 || (size_t) n >= cap) {
@@ -825,21 +842,13 @@ mizu_status mizu_channel_token(const mizu_channel *c, char *buf, size_t cap) {
    watching the pid the peer wrote into the control block. MIZU_TIMEOUT on
    deadline expiry — the caller walks the channel back (destroy). */
 mizu_status mizu_channel_ready_wait(mizu_channel *c, double timeout_ms) {
-  if (c == NULL || c->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
-    return MIZU_ERR;
-  }
+  if (chan_get(c) == NULL) return MIZU_ERR;
   double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
   for (;;) {
     uint32_t e = mizu_parker_snapshot(&c->self_pk);
     if (atomic_load_explicit(c->ready, memory_order_acquire) != 0) break;
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) return MIZU_TIMEOUT;
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
-    }
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) return MIZU_TIMEOUT;
     mizu_park_bracket(&c->h.binding, 1);
     mizu_park(&c->self_pk, e, ms);
     mizu_park_bracket(&c->h.binding, 0);
@@ -861,17 +870,7 @@ mizu_status mizu_channel_ready_wait(mizu_channel *c, double timeout_ms) {
 mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
                               const mizu_binding *b) {
   *out = NULL;
-  if (b == NULL || b->stage == NULL || b->read == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a channel binding needs stage and read callbacks");
-    return MIZU_ERR;
-  }
-  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a channel binding needs an identity word with a "
-                       "nonzero language byte");
-    return MIZU_ERR;
-  }
+  if (mizu_binding_check(b, "channel") != 0) return MIZU_ERR;
   if (!mizu_token_valid(token)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
     return MIZU_ERR;
@@ -898,6 +897,7 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
   c->h.binding = *b;
   mizu_read_tmpl_init(&c->h);
   c->side = MIZU_ENTITY_PEER;
+  c->self_pid = mizu_self_pid();
   c->wait_budget_ns = MIZU_SPIN_BUDGET_NS;
 
   /* validate before touching any other field */
@@ -992,7 +992,7 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
    host holds everything they reference alive exactly until ready. */
 void mizu_channel_drop(const mizu_channel *c, const uint8_t **bytes,
                       uint64_t *n) {
-  if (c == NULL || c->released) {
+  if (c == NULL || c->released || c->self_pid != mizu_self_pid()) {
     *bytes = NULL;
     *n = 0;
     return;
@@ -1005,17 +1005,14 @@ void mizu_channel_drop(const mizu_channel *c, const uint8_t **bytes,
    peer attaches (the host's rendezvous knows it once ready_wait
    returns). */
 uint64_t mizu_channel_peer_ident(const mizu_channel *c) {
-  if (c == NULL || c->released) return 0;
+  if (c == NULL || c->released || c->self_pid != mizu_self_pid()) return 0;
   const _Atomic uint64_t *w = (const _Atomic uint64_t *)
     (c->base + MIZU_ENTITY_OFFSET(1 - c->side) + MIZU_ENTITY_IDENT);
   return atomic_load_explicit(w, memory_order_acquire);
 }
 
 mizu_status mizu_channel_ready_set(mizu_channel *c) {
-  if (c == NULL || c->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
-    return MIZU_ERR;
-  }
+  if (chan_get(c) == NULL) return MIZU_ERR;
   atomic_store_explicit(c->peer_pid, (uint64_t) mizu_self_pid(),
                         memory_order_release);
   atomic_store_explicit(c->ready, 1u, memory_order_release);
@@ -1027,6 +1024,7 @@ mizu_status mizu_channel_ready_set(mizu_channel *c) {
 
 mizu_status mizu_channel_send(mizu_channel *c, void *obj) {
   if (c == NULL || c->released) return MIZU_CLOSED;
+  if (c->self_pid != mizu_self_pid()) return chan_forked(c);
   mizu_status st = chan_send1(c, obj);
   chan_flush(c);
   chan_reap(c, 0);
@@ -1043,6 +1041,10 @@ mizu_status mizu_channel_send_batch(mizu_channel *c, void **objs, size_t n,
     *accepted_out = 0;
     return MIZU_CLOSED;
   }
+  if (c->self_pid != mizu_self_pid()) {
+    *accepted_out = 0;
+    return chan_forked(c);
+  }
   size_t i = 0;
   mizu_status st = MIZU_OK;
   for (; i < n; i++) {
@@ -1058,6 +1060,7 @@ mizu_status mizu_channel_send_batch(mizu_channel *c, void **objs, size_t n,
 mizu_status mizu_channel_recv(mizu_channel *c, void **obj_out,
                             double timeout_ms) {
   if (c == NULL || c->released) return MIZU_CLOSED;
+  if (c->self_pid != mizu_self_pid()) return chan_forked(c);
   mizu_status st = chan_wait_msg(c, timeout_ms);
   if (st != MIZU_OK) return st;
   const char *err = NULL;
@@ -1087,6 +1090,10 @@ mizu_status mizu_channel_recv_batch_fn(mizu_channel *c, size_t cap,
   if (c == NULL || c->released) {
     *n_out = 0;
     return MIZU_CLOSED;
+  }
+  if (c->self_pid != mizu_self_pid()) {
+    *n_out = 0;
+    return chan_forked(c);
   }
   if (cap < 1 || sink == NULL) {
     mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
@@ -1136,6 +1143,7 @@ mizu_status mizu_channel_recv_batch(mizu_channel *c, void **objs, size_t cap,
    already-released handle. */
 mizu_status mizu_channel_close_signal(mizu_channel *c) {
   if (c == NULL || c->released) return MIZU_OK;
+  if (c->self_pid != mizu_self_pid()) return chan_forked(c);
   chan_flush(c);
   atomic_fetch_or_explicit(c->closedw, chan_closed_bit(c),
                            memory_order_seq_cst);
@@ -1145,6 +1153,7 @@ mizu_status mizu_channel_close_signal(mizu_channel *c) {
 
 mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
   if (c == NULL || c->released) return MIZU_OK;   /* close is idempotent */
+  if (c->self_pid != mizu_self_pid()) return chan_forked(c);
   uint32_t own = chan_closed_bit(c), other = 3u ^ own;
 
   /* 1. flush — close never silently discards sent messages */
@@ -1164,13 +1173,8 @@ mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
       chan_release(c, 1);
       return MIZU_OK;
     }
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) return MIZU_TIMEOUT;
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
-    }
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) return MIZU_TIMEOUT;
     mizu_park_bracket(&c->h.binding, 1);
     mizu_park(&c->self_pk, e, ms);
     mizu_park_bracket(&c->h.binding, 0);
@@ -1192,15 +1196,14 @@ int64_t mizu_handle_keep_out(const mizu_handle *h) {
 }
 
 int mizu_channel_alive(const mizu_channel *c) {
-  if (c == NULL || c->released || c->verdict_dead) return 0;
+  if (c == NULL || c->released || c->verdict_dead ||
+      c->self_pid != mizu_self_pid())
+    return 0;
   return !chan_probe_dead((mizu_channel *) c);
 }
 
 mizu_status mizu_channel_info_get(const mizu_channel *c, mizu_channel_info *out) {
-  if (c == NULL || c->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
-    return MIZU_ERR;
-  }
+  if (chan_get(c) == NULL) return MIZU_ERR;
   memset(out, 0, sizeof(*out));
   out->size = (uint32_t) sizeof(*out);
   out->name = c->shm.name;

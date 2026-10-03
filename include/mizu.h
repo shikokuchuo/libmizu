@@ -638,7 +638,11 @@ MIZU_API mizu_status mizu_channel_recv_batch_fn(mizu_channel *, size_t cap,
    destroy is the GC-finalizer target: idempotent, never blocks; on a
    handle that never rendezvoused it signals close and releases what the
    (non-blocking) rendezvous check completes — the death verdict and
-   mizu_shm_reap backstop the rest. */
+   mizu_shm_reap backstop the rest.
+   Handles are process-private and do not survive fork(): verbs on an
+   inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer
+   empty. destroy on an inherited handle is a contract violation —
+   teardown belongs to the creating process. */
 MIZU_API mizu_status mizu_channel_close(mizu_channel *, double timeout_ms);
 MIZU_API mizu_status mizu_channel_close_signal(mizu_channel *);
 /** Logically a read; the probe can run survivor cleanup internally. */

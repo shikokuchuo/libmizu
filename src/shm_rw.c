@@ -25,11 +25,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   shm->addr = NULL;
   shm->size = 0;
   shm->handle = NULL;
-  size_t nl = strlen(name);
-  if (nl >= sizeof(shm->name)) nl = sizeof(shm->name) - 1;
-  memcpy(shm->name, name, nl);
-  shm->name[nl] = '\0';
-  shm->name_len = (uint8_t) nl;
+  mizu_shm_set_name(shm, name);
 
   HANDLE h = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name);
   if (h == NULL) return -1;
@@ -84,11 +80,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
   shm->addr = NULL;
   shm->size = 0;
-  size_t nl = strlen(name);
-  if (nl >= sizeof(shm->name)) nl = sizeof(shm->name) - 1;
-  memcpy(shm->name, name, nl);
-  shm->name[nl] = '\0';
-  shm->name_len = (uint8_t) nl;
+  mizu_shm_set_name(shm, name);
 
   int fd = mizu_shm_os_open_rw(name);
   if (fd < 0) return -1;
@@ -147,11 +139,7 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   if (shm == NULL) return NULL;
   shm->addr = NULL;
   shm->size = 0;
-  size_t nl = strlen(name);
-  if (nl >= sizeof(shm->name)) nl = sizeof(shm->name) - 1;
-  memcpy(shm->name, name, nl);
-  shm->name[nl] = '\0';
-  shm->name_len = (uint8_t) nl;
+  mizu_shm_set_name(shm, name);
 
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);

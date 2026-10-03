@@ -460,17 +460,7 @@ static int mizu_pow2_u64(uint64_t v) {
 mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
                            const mizu_binding *b) {
   *out = NULL;
-  if (b == NULL || b->stage == NULL || b->read == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs stage and read callbacks");
-    return MIZU_ERR;
-  }
-  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs an identity word with a "
-                       "nonzero language byte");
-    return MIZU_ERR;
-  }
+  if (mizu_binding_check(b, "pool") != 0) return MIZU_ERR;
   uint64_t maxw = opts->max_workers;
   uint64_t maxs = opts->max_submitters;
   uint64_t inj_cap = opts->injection_cap;
@@ -714,15 +704,10 @@ mizu_status mizu_pool_ready_wait(mizu_pool *p, const uint32_t *slots,
       live += atomic_load_explicit(&p->wk[slots[i]].status,
                                    memory_order_acquire) == MIZU_WK_LIVE;
     if (live == n) break;
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) {
-        timed_out = 1;
-        break;
-      }
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) {
+      timed_out = 1;
+      break;
     }
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, 0), e, ms);
@@ -941,17 +926,7 @@ static mizu_status pool_sub_keepers_claim(mizu_pool *p) {
 mizu_status mizu_pool_worker_join(mizu_pool **out, const char *token,
                                 uint32_t slot, const mizu_binding *b) {
   *out = NULL;
-  if (b == NULL || b->stage == NULL || b->read == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs stage and read callbacks");
-    return MIZU_ERR;
-  }
-  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs an identity word with a "
-                       "nonzero language byte");
-    return MIZU_ERR;
-  }
+  if (mizu_binding_check(b, "pool") != 0) return MIZU_ERR;
   mizu_pool *p = pool_open_common(token, b, 1);
   if (p == NULL) return MIZU_ERR;
   p->role = MIZU_ROLE_WORKER;
@@ -1160,17 +1135,7 @@ uint64_t mizu_pool_worker_ident(const mizu_pool *p) {
 mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
                            const mizu_binding *b) {
   *out = NULL;
-  if (b == NULL || b->stage == NULL || b->read == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs stage and read callbacks");
-    return MIZU_ERR;
-  }
-  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "a pool binding needs an identity word with a "
-                       "nonzero language byte");
-    return MIZU_ERR;
-  }
+  if (mizu_binding_check(b, "pool") != 0) return MIZU_ERR;
   mizu_pool *p = pool_open_common(token, b, 0);
   if (p == NULL) return MIZU_ERR;
   p->role = MIZU_ROLE_SUBMITTER;
@@ -1297,16 +1262,11 @@ static mizu_status pool_ring_space_wait(mizu_pool *p, _Atomic int64_t *head,
       mizu_err_record(&p->h, MIZU_ERRCAT_STOPPED, "pool stopped or owner dead");
       return MIZU_ERR;
     }
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) {
-        atomic_fetch_and_explicit(p->full_waiters, ~bit,
-                                  memory_order_seq_cst);
-        return MIZU_FULL;
-      }
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) {
+      atomic_fetch_and_explicit(p->full_waiters, ~bit,
+                                memory_order_seq_cst);
+      return MIZU_FULL;
     }
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
@@ -1606,8 +1566,11 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
   int64_t cad = (int64_t) p->hdr.inj_cap < 64 ? (int64_t) p->hdr.inj_cap : 64;
   size_t done = 0;
   for (size_t i = 0; i < n; i++) {
-    double rem_ms = deadline < 0 ? -1 :
-      (deadline - mizu_now() > 0 ? (deadline - mizu_now()) * 1000 : 0);
+    double rem_ms = -1;
+    if (deadline >= 0) {
+      double rem = deadline - mizu_now();
+      rem_ms = rem > 0 ? rem * 1000 : 0;
+    }
     mizu_status st = pool_ring_space_wait(p, ring_head(ring), rem_ms);
     if (st == MIZU_FULL) break;
     if (st != MIZU_OK) {
@@ -3086,13 +3049,8 @@ mizu_status mizu_pool_collect(mizu_pool *p, const mizu_task *t,
       pool_collect_learn(p, t_wait, budget);
       continue;
     }
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) return MIZU_TIMEOUT;
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
-    }
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) return MIZU_TIMEOUT;
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
     mizu_park_bracket(&p->h.binding, 0);
@@ -3287,16 +3245,11 @@ mizu_status mizu_pool_collect_any(mizu_pool *p, const mizu_task *tasks,
       pool_collect_learn(p, t_wait, budget);
       break;
     }
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) {
-        pool_any_unannounce(rss, n);
-        free(rss);
-        return MIZU_TIMEOUT;
-      }
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) {
+      pool_any_unannounce(rss, n);
+      free(rss);
+      return MIZU_TIMEOUT;
     }
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
@@ -3422,16 +3375,11 @@ static mizu_status pool_collect_all_impl(mizu_pool *p, const mizu_task *tasks,
       pool_collect_learn(p, t_wait, budget);
       break;
     }
-    long ms = MIZU_INTERRUPT_BOUND_MS;
-    if (deadline >= 0) {
-      double rem = deadline - mizu_now();
-      if (rem <= 0) {
-        pool_any_unannounce(rss, n);
-        free(rss);
-        return MIZU_TIMEOUT;
-      }
-      long rem_ms = (long) (rem * 1000) + 1;
-      if (rem_ms < ms) ms = rem_ms;
+    long ms = mizu_wait_ms(deadline);
+    if (ms < 0) {
+      pool_any_unannounce(rss, n);
+      free(rss);
+      return MIZU_TIMEOUT;
     }
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);

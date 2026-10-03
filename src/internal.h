@@ -50,6 +50,17 @@ mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate);
    name. The public mizu_shm_close wraps this + free. */
 void mizu_shm_close_stack(mizu_shm *shm, int unlink);
 
+/* The open forms' name copy: fixed-buffer truncate, always
+   NUL-terminated, length stamped. */
+static inline MIZU_MAYBE_UNUSED void mizu_shm_set_name(mizu_shm *shm,
+                                                      const char *name) {
+  size_t nl = strlen(name);
+  if (nl >= sizeof(shm->name)) nl = sizeof(shm->name) - 1;
+  memcpy(shm->name, name, nl);
+  shm->name[nl] = '\0';
+  shm->name_len = (uint8_t) nl;
+}
+
 /* macOS registry-log exit/unload hook (shm.c; defined under __APPLE__
    only): removes this process's log and prunes the registry dir once
    every created region is torn down. Registered as a library
@@ -167,6 +178,18 @@ static inline MIZU_MAYBE_UNUSED uint64_t mizu_spin_learn(double gap_ns, uint64_t
 #else
 #  define MIZU_INTERRUPT_BOUND_MS 2000L
 #endif
+
+/* Park-timeout budget for a wait deadline: the interrupt-bound ceiling,
+   tightened to the remaining deadline (+1 ms round-up), or -1 once the
+   deadline has passed — the caller disposes (timeout/abort path). A
+   negative deadline takes the ceiling alone, skipping the clock read. */
+static inline MIZU_MAYBE_UNUSED long mizu_wait_ms(double deadline) {
+  if (deadline < 0) return MIZU_INTERRUPT_BOUND_MS;
+  double rem = deadline - mizu_now();
+  if (rem <= 0) return -1;
+  long rem_ms = (long) (rem * 1000) + 1;
+  return rem_ms < MIZU_INTERRUPT_BOUND_MS ? rem_ms : MIZU_INTERRUPT_BOUND_MS;
+}
 
 // Death listener internals ---------------------------------------------------------
 
@@ -392,6 +415,25 @@ static inline MIZU_MAYBE_UNUSED int mizu_check_interrupt(const mizu_binding *b) 
 
 static inline MIZU_MAYBE_UNUSED void mizu_park_bracket(const mizu_binding *b, int entering) {
   if (b->park != NULL) b->park(b->ctx, entering);
+}
+
+/* The create/attach/join binding gate: stage/read callbacks and a
+   language-tagged identity word are mandatory. `what` names the handle
+   kind for the error record ("channel" / "pool"). */
+static inline MIZU_MAYBE_UNUSED int mizu_binding_check(const mizu_binding *b,
+                                                      const char *what) {
+  if (b == NULL || b->stage == NULL || b->read == NULL) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a %s binding needs stage and read callbacks", what);
+    return -1;
+  }
+  if ((uint8_t) b->ident == MIZU_LANG_NONE) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a %s binding needs an identity word with a nonzero "
+                       "language byte", what);
+    return -1;
+  }
+  return 0;
 }
 
 #endif /* MIZU_INTERNAL_H */
