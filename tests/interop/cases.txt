@@ -101,6 +101,7 @@ py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=str("fa
 frame-1col | rt | all | attr(list(realv[1,2]), names=str("x"), class=str("data.frame"), row.names=intv[na,-2]) | a one-column frame, automatic row names
 frame-0row | rt | all | attr(list(intv[],strv[]), names=strv["a","b"], class=str("data.frame"), row.names=intv[na,0]) | a zero-row frame: c(NA, 0)
 frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=str("f"), class=str("factor")), i64v[5,na]), names=strv["n","f","i"], class=str("data.frame"), row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column
+frame-temporal | rt | all | attr(list(attr(realv[19000,19001], class=str("Date")), attr(realv[90,135], class=str("difftime"), units=str("secs"))), names=strv["d","u"], class=str("data.frame"), row.names=intv[na,-2]) | a Date column beside a difftime column
 frame-int-rownames | rt | all | attr(list(realv[1,2,3]), names=str("x"), class=str("data.frame"), row.names=intv[10,20,30]) | integer row names (a base df[i, ] subset)
 frame-char-rownames | rt | all | attr(list(realv[1,2,3]), names=str("x"), class=str("data.frame"), row.names=strv["a","b","c"]) | character row names (mtcars)
 frame-cplx | dec | PY | attr(list(cplxv[cplx(1,2)]), names=str("z"), class=str("data.frame"), row.names=intv[na,-1]) | to_dict() carries complex128; the Arrow export raises
@@ -117,6 +118,12 @@ posixct-na | rt | all | attr(realv[1700000000,na], class=strv["POSIXct","POSIXt"
 posixct-naive | rt | R | attr(realv[1700000000], class=strv["POSIXct","POSIXt"]) | tzone absent, R's naive form
 py-posixct-naive | dec | PY | attr(realv[1700000000], class=strv["POSIXct","POSIXt"]) => attr(realv[1700000000], class=strv["POSIXct","POSIXt"], tzone=str("UTC")) | the naive read
 py-posixct-utc-enc | enc | PY | attr(realv[1700000000], class=strv["POSIXct","POSIXt"], tzone=str("UTC")) | a naive datetime64 writes tzone="UTC" (the absent -> UTC normalization)
+difftime-secs | rt | all | attr(realv[90,135], class=str("difftime"), units=str("secs")) | values cross in the declared units
+difftime-mins | rt | R | attr(realv[1.5,na], class=str("difftime"), units=str("mins")) | NA the NA_real_ payload
+py-difftime-mins | dec | PY | attr(realv[1.5,na], class=str("difftime"), units=str("mins")) => attr(realv[90,na], class=str("difftime"), units=str("secs")) | NaT for NA, the read homes seconds as timedelta64[us]
+py-difftime-ms-enc | enc | PY | attr(realv[0.25,2], class=str("difftime"), units=str("secs")) | a timedelta64[ms] writes seconds (units normalize)
+err-difftime-units | read-err | all | attr(realv[1], class=str("difftime"), units=str("fortnights")) | builder: an unknown difftime unit
+wd-difftime-units | write-decline | R | attr(realv[1], class=str("difftime"), units=str("fortnights")) | an unknown unit declines at send
 
 # --- depth ---
 depth-64 | rt | all | list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(list(nil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) | at the cap: accepts
