@@ -401,7 +401,7 @@ int main(void) {
   {
     mizu_shm *shm = NULL;
     char name[80];
-    snprintf(name, sizeof(name), "/mizu_%s", token);
+    snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
     assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
     int64_t bad = INT64_MAX;
     memcpy((char *) mizu_shm_addr(shm) + MIZU_OFF_HP_HEAD, &bad, 8);
