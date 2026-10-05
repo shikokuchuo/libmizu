@@ -291,6 +291,10 @@ static void chan_reap(mizu_channel *c, int force) {
       c->h.fl.led_n == 0)
     return;
   int64_t head = atomic_load_explicit(r->head, memory_order_acquire);
+  /* clamp to the local tail: a consumer-published head beyond it is torn
+     or forged, and reaping to it would release keepers of in-flight
+     payloads (and spin on a corrupted count) */
+  if (head > r->ltail) head = r->ltail;
   r->cached_head = head;
   if (head <= r->reaped_head) return;
   for (int64_t i = r->reaped_head; i < head; i++) {
@@ -475,13 +479,16 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
   } else if (hdr->kind == MIZU_KIND_RAWSPILL) {
     uint64_t off;
     memcpy(&off, payload, sizeof(off));
+    /* snapshot len: the slot is peer-writable, so the bound and the limit
+       must be one read (the ARENA branch's n already is) */
+    const uint32_t len = hdr->len;
     if (c->rx.arena == NULL || off > c->rx.arena_size ||
-        hdr->len > c->rx.arena_size - off) {
+        len > c->rx.arena_size - off) {
       *err_out = "corrupt payload slot";
       return MIZU_ERR;
     }
     bytes = c->rx.arena + off;
-    limit = hdr->len;
+    limit = len;
   } else {
     bytes = payload;
     limit = c->inline_max;
@@ -855,7 +862,12 @@ mizu_status mizu_channel_ready_wait(mizu_channel *c, double timeout_ms) {
     if (mizu_check_interrupt(&c->h.binding)) return chan_intr(c);
   }
   uint64_t pid = atomic_load_explicit(c->peer_pid, memory_order_acquire);
-  c->watch = mizu_death_watch_start((long) pid, &c->peer_dead, &c->self_pk);
+  /* a repeat call (or a peer-side call after attach already armed one)
+       must not orphan the live watch: its flag and parker point into this
+       handle, so a leaked watch fires into freed memory after destroy */
+  if (c->watch == NULL)
+    c->watch = mizu_death_watch_start((long) pid, &c->peer_dead,
+                                      &c->self_pk);
   if (c->watch == NULL) {
     mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
                    "cannot watch peer process %llu",

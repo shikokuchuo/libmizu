@@ -5,6 +5,10 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include "internal.h"
 
@@ -93,6 +97,27 @@ int main(void) {
   mizu_live_unlock(h2);
   mizu_live_close(h2);
   remove(path);
+
+#ifndef _WIN32
+  /* with stdin closed, a lock fd must bounce off 0 (the consumers'
+     not-open sentinel) and close cleanly */
+  {
+    int saved = dup(0);
+    close(0);
+    assert(mizu_live_open(path, &h1) == 0);
+    assert(h1 > 0);
+    assert(fcntl(0, F_GETFD) == -1);   /* fd 0 stays free, not the lock */
+    mizu_live_close(h1);
+    assert(mizu_live_open_existing(path, &h2) == 0);
+    assert(h2 > 0);
+    mizu_live_close(h2);
+    remove(path);
+    if (saved >= 0) {
+      dup2(saved, 0);
+      close(saved);
+    }
+  }
+#endif
 
   /* rng jump: deterministic, and changes the state */
   int seed[6] = { 1, 2, 3, 4, 5, 6 };

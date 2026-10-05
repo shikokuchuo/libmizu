@@ -909,8 +909,12 @@ static mizu_status pool_claim_sub_slot(mizu_pool *p, intptr_t *lock_out) {
    table, on first use only, so pools that never nest spend no submitter
    slots on workers. */
 static mizu_status pool_sub_keepers_claim(mizu_pool *p) {
-  if (p->sub_slot >= 0) return MIZU_OK;
-  if (pool_claim_sub_slot(p, &p->live_sub) != 0) return MIZU_ERR;
+  /* the slot claim and the table allocation are not one step: after an
+     allocation failure only the table is retried — never report claimed
+     without the table (pool_alloc_rs would index through NULL) */
+  if (p->sub_slot < 0 && pool_claim_sub_slot(p, &p->live_sub) != 0)
+    return MIZU_ERR;
+  if (p->sub_keepers != NULL) return MIZU_OK;
   uint32_t n = p->sub[p->sub_slot].rs_count;
   p->sub_keepers = calloc((size_t) n, sizeof(mizu_keeper));
   if (p->sub_keepers == NULL) {
@@ -1681,6 +1685,12 @@ static int pool_rk_reserve(mizu_pool *p) {
   p->rk = calloc(p->hdr.result_slots, sizeof(*p->rk));
   p->rk_pos = calloc(p->hdr.result_slots, sizeof(*p->rk_pos));
   if (p->rk == NULL || p->rk_pos == NULL) {
+    /* leave no half-reserved pair: a retry must re-run both allocations
+       (rk_pos[idx] would be read through NULL otherwise) */
+    free(p->rk);
+    free(p->rk_pos);
+    p->rk = NULL;
+    p->rk_pos = NULL;
     mizu_err_record(&p->h, MIZU_ERRCAT_NOMEMORY, "allocation failure");
     return -1;
   }
@@ -2326,6 +2336,14 @@ static int pool_watch_workers(mizu_pool *p, const uint32_t *slots, size_t n) {
     p->wk_dead = calloc(p->hdr.max_workers, sizeof(*p->wk_dead));
     p->reap_ctx = calloc(p->hdr.max_workers, sizeof(*p->reap_ctx));
     if (p->wk_watch == NULL || p->wk_dead == NULL || p->reap_ctx == NULL) {
+      /* leave no half-allocated triple: the next call must re-run the
+         whole block rather than write through NULL members */
+      free(p->wk_watch);
+      free(p->wk_dead);
+      free(p->reap_ctx);
+      p->wk_watch = NULL;
+      p->wk_dead = NULL;
+      p->reap_ctx = NULL;
       mizu_err_record(&p->h, MIZU_ERRCAT_NOMEMORY, "allocation failure");
       return -1;
     }

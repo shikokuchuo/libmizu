@@ -50,7 +50,9 @@ uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint64_t n,
                            uint32_t claim_n) {
   if (n < 1 || n > ((uint64_t) 1 << 48)) return 0;
   if (morsel_size < 1 || morsel_size > n) return 0;
-  if (desc_len < 1) return 0;
+  /* every geometry input is bounded so no section offset can wrap; the
+     region cap below is 2^46, so the descriptor caps there too */
+  if (desc_len < 1 || desc_len > ((uint64_t) 1 << 46)) return 0;
   if (claim_n < 1 || claim_n > (1u << 16)) return 0;
   memset(h, 0, sizeof *h);
   h->magic = MIZU_MORSEL_MAGIC;

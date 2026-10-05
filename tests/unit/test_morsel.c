@@ -56,6 +56,12 @@ static void layout_tests(void) {
   assert(mizu_morsel_layout(&h, 10, 11, 1, 0, 0, 0, 0, 64) == 0);
   assert(mizu_morsel_layout(&h, 10, 1, 0, 0, 0, 0, 0, 64) == 0);
   assert(mizu_morsel_layout(&h, 10, 1, 1, 0, 0, 0, 0, 0) == 0);
+  /* the descriptor is bounded like every other geometry input: an
+     unbounded desc_len wraps the first section offset */
+  assert(mizu_morsel_layout(&h, 10, 1, (uint64_t) -1, 0, 0, 0, 0,
+                           64) == 0);
+  assert(mizu_morsel_layout(&h, 10, 1, ((uint64_t) 1 << 46) + 1, 0, 0,
+                           0, 0, 64) == 0);
   /* x_len must be exactly n elements */
   assert(mizu_morsel_layout(&h, 10, 1, 1, MIZU_TYPE_REAL, 79, 0,
                            0, 64) == 0);

@@ -371,6 +371,53 @@ int main(void) {
   assert(mizu_channel_alive(peer) == 0);   /* the lock probe's verdict */
   mizu_channel_destroy(peer);
 
+  /* the preamble validator mirrors the create side's slot range: a torn
+     slot < 64 would wrap inline_max into a multi-gigabyte payload bound */
+  {
+    mizu_preamble p;
+    memset(&p, 0, sizeof(p));
+    p.magic = MIZU_MAGIC;
+    p.version = MIZU_ABI_VERSION;
+    p.cap = 8;
+    p.slot = 256;
+    mizu_preamble out;
+    size_t region_size = MIZU_FIXED_LAYOUT_SIZE + 2 * 8 * 256;
+    assert(mizu_preamble_validate(&p, region_size, &out) == NULL);
+    p.slot = 16;
+    assert(mizu_preamble_validate(&p, region_size, &out) != NULL);
+    p.slot = 1u << 21;
+    assert(mizu_preamble_validate(&p, region_size, &out) != NULL);
+  }
+
+  /* a consumer-published head beyond the tail is torn: the reap clamps
+     to the tail rather than adopting it (a huge head once spun the
+     reap's slot loop) */
+  assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+  assert(mizu_channel_ready_set(peer) == MIZU_OK);
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  send_bytes(host, "a", 1);
+  {
+    mizu_shm *shm = NULL;
+    char name[80];
+    snprintf(name, sizeof(name), "/mizu_%s", token);
+    assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+    int64_t bad = INT64_MAX;
+    memcpy((char *) mizu_shm_addr(shm) + MIZU_OFF_HP_HEAD, &bad, 8);
+    mizu_shm_close(shm, 0);
+    /* fill the ring so the send path runs the forced reap */
+    for (int i = 0; i < 4; i++) {
+      unsigned char x = (unsigned char) i;
+      mizu_bytes xb = { &x, 1 };
+      mizu_status st = mizu_channel_send(host, &xb);
+      assert(st == MIZU_OK || st == MIZU_FULL);
+    }
+    recv_bytes(peer, "a", 1);
+  }
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
+
   puts("test_channel: ok");
   return 0;
 }

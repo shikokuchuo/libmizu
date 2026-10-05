@@ -82,6 +82,17 @@ static int mizu_live_dir_default(char *buf, size_t size) {
 #include <unistd.h>
 #include <errno.h>
 
+/* Consumers keep these in zero-initialized structs with 0 as the
+   not-open sentinel, so a lock fd must never be 0: a process launched
+   with stdin closed would otherwise leak the fd (and its flock) and
+   probe every peer as permanently alive. */
+static int mizu_live_fd_bounce(int fd) {
+  if (fd > 0) return fd;
+  int nfd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+  close(fd);
+  return nfd;
+}
+
 int mizu_live_open(const char *path, intptr_t *out) {
   /* O_CLOEXEC is required: flock is scoped to the open file
      description, so an inherited fd would keep the lock alive past the
@@ -97,12 +108,16 @@ int mizu_live_open(const char *path, intptr_t *out) {
     close(fd);
     return -1;
   }
+  fd = mizu_live_fd_bounce(fd);
+  if (fd < 0) return -1;
   *out = (intptr_t) fd;
   return 0;
 }
 
 int mizu_live_open_existing(const char *path, intptr_t *out) {
   int fd = open(path, O_RDWR | O_CLOEXEC);
+  if (fd < 0) return -1;
+  fd = mizu_live_fd_bounce(fd);
   if (fd < 0) return -1;
   *out = (intptr_t) fd;
   return 0;

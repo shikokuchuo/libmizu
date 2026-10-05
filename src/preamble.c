@@ -40,10 +40,12 @@ const char *mizu_preamble_validate(const void *region, size_t region_size,
   if (p.version != MIZU_ABI_VERSION)
     return "ABI version mismatch: peer and host were built against "
            "different mizu wire formats";
-  if (!mizu_pow2_u32(p.cap))
+  if (!mizu_pow2_u32(p.cap) || p.cap < 2)
     return "ring capacity is not a power of two";
-  if (!mizu_pow2_u32(p.slot))
-    return "slot size is not a power of two";
+  /* the create side's range, mirrored: slot < 64 would wrap inline_max
+     (slot - sizeof(mizu_slot_hdr)) into a multi-gigabyte payload bound */
+  if (!mizu_pow2_u32(p.slot) || p.slot < 64 || p.slot > (1u << 20))
+    return "slot size is not a power of two between 64 and 2^20";
   if (p.arena_size % 64 != 0)
     return "arena size is not a multiple of 64";
 
