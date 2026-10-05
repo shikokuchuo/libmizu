@@ -74,16 +74,21 @@ $(function() {
   <div class="headertitle"><div class="title">Changelog</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p><a class="anchor" id="autotoc_md27"></a> All notable changes to libmizu are documented here. The format follows <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>. Versions carry an ABI contract: any wire-format change bumps <code>MIZU_ABI_VERSION</code> in <code><a class="el" href="mizu_8h.html" title="libmizu public API: SPSC channels and work-stealing task pools between processes on one machine.">include/mizu.h</a></code>, and the soname tracks <code>MIZU_VERSION_MAJOR</code>.</p>
-<h1><a class="anchor" id="autotoc_md28"></a>
+<div class="textblock"><p><a class="anchor" id="autotoc_md28"></a> All notable changes to libmizu are documented here. The format follows <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>. Versions carry an ABI contract: any wire-format change bumps <code>MIZU_ABI_VERSION</code> in <code><a class="el" href="mizu_8h.html" title="libmizu public API: SPSC channels and work-stealing task pools between processes on one machine.">include/mizu.h</a></code>, and the soname tracks <code>MIZU_VERSION_MAJOR</code>.</p>
+<h1><a class="anchor" id="autotoc_md29"></a>
 [Unreleased]</h1>
 <p>Pre-release; no tagged version yet. On the first tag, rename this section to <code>## [0.0.1] - &lt;date&gt;</code> and start a fresh <code>Unreleased</code> section above it.</p>
-<h2><a class="anchor" id="autotoc_md29"></a>
+<h2><a class="anchor" id="autotoc_md30"></a>
+Added</h2>
+<ul>
+<li>The byte-shape helper registry (DESIGN.md's Interchange codec section): the 'I' machinery that operates purely on byte spans and cursor items moves into the core so no byte-level rule keeps a second implementation free to drift across bindings. New dual-form helpers <code>mizu_ix_utf8_valid</code> (strict RFC 3629 validation — the cursor's own string checks now single-source through it), <code>mizu_ix_tag_of</code> (the wire-type → vector-tag table; <code>mizu_ix_put_vec</code>'s internal switch single-sources through it), and <code>mizu_ix_write_err</code> (the bounded err framer — type capped at its 128-byte share, message at half the inline budget, detail at the remainder, each cut at a UTF-8 boundary, so the stream fits the slot by construction and cannot fail), with the budget constants <code>MIZU_IX_ERR_OVERHEAD</code> / <code>MIZU_IX_ERR_TYPE_SHARE</code> in the header as the wire authority. New exported-only task-stream decode shim <code>mizu_ixt_open</code> / <code>mizu_ixt_want_code</code> / <code>mizu_ixt_want_list</code> / <code>mizu_ixt_want_dict</code> — the per-field shape checks every task decode shares, recording the normative texts in the thread-local slot so they are byte-identical across bindings by construction. New attr vocabulary macros <code>MIZU_IX_ATTR_*</code> / <code>MIZU_IX_CLASS_*</code> / <code>MIZU_IX_UNIT_*</code> (the shape whitelist's 7 keys, 6 class strings and 5 difftime units; append-only). No wire change: the golden corpus passes unmodified and <code>MIZU_ABI_VERSION</code> is untouched.</li>
+</ul>
+<h2><a class="anchor" id="autotoc_md31"></a>
 Fixed</h2>
 <ul>
 <li><code>mizu_na_build</code>'s REAL and CPLX element tests now discriminate the <code>NA_real_</code> payload the way R's own <code>ISNA</code> does — any NaN whose low word is 1954 (<code>0x7A2</code>) — instead of matching only the quiet-bit-set <code>MIZU_NA_REAL_BITS</code> exactly, so a writer's quiet-bit-clear <code>NA_real_</code> (R's verbatim form, <code>0x7FF00000000007A2</code>) reads as NA on the validity-bitmap paths. No ABI or wire change (the helpers are unreleased, Phase 0).</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md30"></a>
+<h2><a class="anchor" id="autotoc_md32"></a>
 Added</h2>
 <ul>
 <li>The MIZL remote leaf (directory tag 33) is normative in DESIGN.md (the follow-ups plan's F2 — a per-column REF): the entry's <code>data_offset</code> / <code>data_size</code> hold the view layer's identifier span (the 0x13 ref leaf's byte form, 1–255 bytes), <code>length</code> and <code>attrs_size</code> describe the referenced column as resolved, the S4 bit rejects, and the validity pair is a <code>{0,0}</code> / <code>{0,-1}</code> claim alone — a remote column contributes no bitmap and no count to the header validity (the <code>vcount</code> bound over local atomic leaf lengths forces the exclusion), and a <code>{0,-1}</code> claim is validatable only against a referenced form that records known-NA- free itself. Resolve-time validation compares the claims against the resolved leaf; a dangling identifier, a parse failure or any mismatch declines as a corrupt region. Emission gates on the new <code>MIZU_CAP_MIZL_REF</code> capability bit (bit 4), per frame. The layout checks admit the tag: <code>mizu_ext_mizl_tag_ok</code> lists it, <code>mizu_ext_mizl_ent</code> exempts it from the attrs-tail and body checks and bounds the span, and <code>mizu_ext_mizl_elem</code> rejects a nonzero validity offset on it. New <code>fuzz_mizl</code> harness over the directory parser. No ABI bump.</li>
@@ -118,7 +123,7 @@ Added</h2>
 <li><code>The map morsel protocol in <code><a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a></code> (<code>morsel.c</code>, <code>mizu_morsel_*</code>): the 128-byte map header (one unified layout; bindings keep their magic tags), the generation-fenced CLAIM word protocol, AIMD batch sizing (<code>mizu_morsel_sizer</code>), reset/re-arm, the abandon trim, the cancel word, and the lost-set scan — extracted from mizu's and pymizu's map modules.</code></li>
 </ul>
 <p><code></code></p>
-<h2><a class="anchor" id="autotoc_md31"></a>
+<h2><a class="anchor" id="autotoc_md33"></a>
 Changed</h2>
 <p><code></code></p>
 <p><code></p><ul>

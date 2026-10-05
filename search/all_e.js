@@ -9,8 +9,8 @@ var searchData=
   ['per_5fworker_5fcap_6',['per_worker_cap',['../structmizu__pool__opts__s.html#aac472027ca0330555ce3fac1e727dfcb',1,'mizu_pool_opts_s']]],
   ['performance_7',['Performance',['../index.html#autotoc_md1',1,'']]],
   ['pid_8',['pid',['../structmizu__wk__slot__s.html#a5d310891f1f929039cb0d13bd3e0990e',1,'mizu_wk_slot_s::pid'],['../structmizu__shm__s.html#a7e5fc8cee28896e59fb6a315b8936995',1,'mizu_shm_s::pid']]],
-  ['policy_9',['Staging policy',['../md_DESIGN.html#autotoc_md20',1,'']]],
-  ['pool_20mechanics_10',['Pool mechanics',['../md_DESIGN.html#autotoc_md25',1,'']]],
-  ['protocol_11',['protocol',['../md_DESIGN.html#autotoc_md21',1,'Map morsel protocol'],['../md_DESIGN.html#autotoc_md12',1,'Parker protocol']]],
+  ['policy_9',['Staging policy',['../md_DESIGN.html#autotoc_md21',1,'']]],
+  ['pool_20mechanics_10',['Pool mechanics',['../md_DESIGN.html#autotoc_md26',1,'']]],
+  ['protocol_11',['protocol',['../md_DESIGN.html#autotoc_md22',1,'Map morsel protocol'],['../md_DESIGN.html#autotoc_md12',1,'Parker protocol']]],
   ['ptr_12',['ptr',['../structmizu__ix__item__s.html#ab63210023a4df67da9acc1ccea6fa22d',1,'mizu_ix_item_s']]]
 ];
