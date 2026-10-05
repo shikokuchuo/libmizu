@@ -137,6 +137,16 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_ix_put_task);
   refs += sink((mizu_any_fn) &mizu_ix_put_ref);
 
+  /* The byte-shape helper registry: the dual forms resolve like the put
+     helpers; the task decode shim is exported-only, like the cursor. */
+  refs += sink((mizu_any_fn) &mizu_ix_utf8_valid);
+  refs += sink((mizu_any_fn) &mizu_ix_tag_of);
+  refs += sink((mizu_any_fn) &mizu_ix_write_err);
+  refs += sink((mizu_any_fn) &mizu_ixt_open);
+  refs += sink((mizu_any_fn) &mizu_ixt_want_code);
+  refs += sink((mizu_any_fn) &mizu_ixt_want_list);
+  refs += sink((mizu_any_fn) &mizu_ixt_want_dict);
+
   /* The raw-tier staging reservation (the header inline by default, the
      exported form under EXT_PROBE_EXPORTS; the slow path is extern-only). */
   refs += sink((mizu_any_fn) &mizu_stage_raw);
@@ -160,7 +170,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 99);
+  assert(refs == 106);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +
@@ -288,6 +298,90 @@ int main(void) {
   assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_REF &&
          it.len == 8 && memcmp(it.ptr, "mizu_ab", 8) == 0);
   assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* The byte-shape helpers, in either mode: a smoke pass (the matrices
+     live in tests/unit/test_interop.c). */
+  assert(mizu_ix_utf8_valid("abc", 3) == 1);
+  assert(mizu_ix_utf8_valid("\xc3\xa9", 2) == 1);       /* U+00E9 */
+  assert(mizu_ix_utf8_valid("\xc0\xaf", 2) == 0);       /* overlong */
+  assert(mizu_ix_utf8_valid("", 0) == 1);
+  assert(mizu_ix_tag_of(MIZU_TYPE_LGL) == MIZU_IX_TAG_LGLV &&
+         mizu_ix_tag_of(MIZU_TYPE_INT) == MIZU_IX_TAG_INTV &&
+         mizu_ix_tag_of(MIZU_TYPE_REAL) == MIZU_IX_TAG_REALV &&
+         mizu_ix_tag_of(MIZU_TYPE_CPLX) == MIZU_IX_TAG_CPLXV &&
+         mizu_ix_tag_of(MIZU_TYPE_RAW) == MIZU_IX_TAG_RAWV &&
+         mizu_ix_tag_of(MIZU_TYPE_INT64) == MIZU_IX_TAG_I64V);
+  assert(mizu_ix_tag_of(0) == 0 && mizu_ix_tag_of(99) == 0);
+  assert(MIZU_IX_ERR_OVERHEAD == 25u && MIZU_IX_ERR_TYPE_SHARE == 128u);
+  assert(sizeof(MIZU_IX_ATTR_CLASS) == 6 &&
+         sizeof(MIZU_IX_CLASS_POSIXCT) == 8 &&
+         sizeof(MIZU_IX_UNIT_WEEKS) == 6);
+
+  /* The err framer: fits the slot by construction, and the cursor reads
+     back the truncated spans (the full budget matrix is the unit tier's). */
+  {
+    unsigned char eb[256];
+    const char *long_msg = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    size_t en = mizu_ix_write_err(eb, 64, "some.error", 10, long_msg, 40,
+                                  "detail", 6, 0, 0);
+    assert(en <= 64);
+    assert(mizu_ix_write_err(NULL, 64, "some.error", 10, long_msg, 40,
+                             "detail", 6, 0, 0) == en);
+    assert(mizu_ix_open(&cur, eb, en) == MIZU_OK);
+    assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_ERR &&
+           it.err_flags == 0);
+    assert(it.err_str[0].len == 10 &&
+           memcmp(it.err_str[0].ptr, "some.error", 10) == 0);
+    assert(it.err_str[1].len == 29);          /* min(64/2, 64-25-10) = 29 */
+    assert(it.err_str[2].len == 0);           /* the budget is spent */
+    assert(mizu_ix_end(&cur) == MIZU_OK);
+
+    /* short spans survive whole; the index rides flags bit 0 */
+    en = mizu_ix_write_err(eb, 64, "type", 4, "msg", 3, "detail", 6, 1, 42);
+    assert(mizu_ix_open(&cur, eb, en) == MIZU_OK);
+    assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_ERR &&
+           it.err_flags == 1 && it.err_index == 42);
+    assert(it.err_str[2].len == 6 &&
+           memcmp(it.err_str[2].ptr, "detail", 6) == 0);
+    assert(mizu_ix_end(&cur) == MIZU_OK);
+  }
+
+  /* The task decode shim: accept row, then the reject texts through the
+     TLS slot. */
+  {
+    unsigned char tb[64];
+    size_t tn = mizu_ix_put_header(tb);
+    tn += mizu_ix_put_task(tb + tn, MIZU_LANG_PYTHON, 0, 7);
+    tn += mizu_ix_put_str(tb + tn, "pkg::fn", 7);
+    tn += mizu_ix_put_list_begin(tb + tn, 0);
+    tn += mizu_ix_put_dict_begin(tb + tn, 0);
+    assert(mizu_ixt_open(&cur, tb, tn, &it, 1) == MIZU_OK &&
+           it.kind == MIZU_IX_TASK && it.u64[0] == 7);
+    assert(mizu_ixt_want_code(&cur, &it) == MIZU_OK &&
+           it.kind == MIZU_IX_STR1 && it.len == 7);
+    assert(mizu_ixt_want_list(&cur, &it) == MIZU_OK &&
+           it.kind == MIZU_IX_LIST);
+    assert(mizu_ixt_want_dict(&cur, &it) == MIZU_OK &&
+           it.kind == MIZU_IX_DICT);
+    assert(mizu_ix_end(&cur) == MIZU_OK);
+
+    /* a kind above the site's ceiling declines with the shim's text */
+    tn = mizu_ix_put_header(tb);
+    tn += mizu_ix_put_task(tb + tn, MIZU_LANG_R, 2, 0);
+    tn += mizu_ix_put_str(tb + tn, "r", 1);
+    tn += mizu_ix_put_int(tb + tn, 0);
+    tn += mizu_ix_put_nil(tb + tn);
+    assert(mizu_ixt_open(&cur, tb, tn, &it, 1) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "unsupported task kind 0x02") != NULL);
+
+    /* a non-task first item and a wrong field shape take the shim's
+       malformed texts */
+    tn = mizu_ix_put_header(tb);
+    tn += mizu_ix_put_nil(tb + tn);
+    assert(mizu_ixt_open(&cur, tb, tn, &it, 1) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "no task tag") != NULL);
+  }
 
   /* A taste of the stable tier: the proof links both headers' surface. */
   assert(mizu_version() != NULL);

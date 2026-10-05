@@ -54,6 +54,13 @@ mizu_ix_put_strelt
 mizu_ix_put_strv_begin
 mizu_ix_put_task
 mizu_ix_put_vec
+mizu_ix_tag_of
+mizu_ix_utf8_valid
+mizu_ix_write_err
+mizu_ixt_open
+mizu_ixt_want_code
+mizu_ixt_want_dict
+mizu_ixt_want_list
 mizu_last_error_category
 mizu_last_error_message
 mizu_live_close

@@ -11,6 +11,30 @@ Versions carry an ABI contract: any wire-format change bumps
 Pre-release; no tagged version yet. On the first tag, rename this section
 to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
+### Added
+
+- The byte-shape helper registry (DESIGN.md's Interchange codec section):
+  the 'I' machinery that operates purely on byte spans and cursor items
+  moves into the core so no byte-level rule keeps a second implementation
+  free to drift across bindings. New dual-form helpers
+  `mizu_ix_utf8_valid` (strict RFC 3629 validation — the cursor's own
+  string checks now single-source through it), `mizu_ix_tag_of` (the
+  wire-type → vector-tag table; `mizu_ix_put_vec`'s internal switch
+  single-sources through it), and `mizu_ix_write_err` (the bounded err
+  framer — type capped at its 128-byte share, message at half the inline
+  budget, detail at the remainder, each cut at a UTF-8 boundary, so the
+  stream fits the slot by construction and cannot fail), with the budget
+  constants `MIZU_IX_ERR_OVERHEAD` / `MIZU_IX_ERR_TYPE_SHARE` in the
+  header as the wire authority. New exported-only task-stream decode
+  shim `mizu_ixt_open` / `mizu_ixt_want_code` / `mizu_ixt_want_list` /
+  `mizu_ixt_want_dict` — the per-field shape checks every task decode
+  shares, recording the normative texts in the thread-local slot so they
+  are byte-identical across bindings by construction. New attr
+  vocabulary macros `MIZU_IX_ATTR_*` / `MIZU_IX_CLASS_*` /
+  `MIZU_IX_UNIT_*` (the shape whitelist's 7 keys, 6 class strings and 5
+  difftime units; append-only). No wire change: the golden corpus passes
+  unmodified and `MIZU_ABI_VERSION` is untouched.
+
 ### Fixed
 
 - `mizu_na_build`'s REAL and CPLX element tests now discriminate the

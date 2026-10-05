@@ -124,6 +124,14 @@ uint64_t mizu_na_apply(int type, void *dst, const void *src,
   return mizu_ext_na_apply_impl(type, dst, src, bitmap, n);
 }
 
+int mizu_ix_utf8_valid(const void *s, size_t n) {
+  return mizu_ext_ix_utf8_valid_impl(s, n);
+}
+
+int mizu_ix_tag_of(int wire_type) {
+  return mizu_ext_ix_tag_of_impl(wire_type);
+}
+
 size_t mizu_ix_put_header(unsigned char *dst) {
   return mizu_ext_ix_put_header_impl(dst);
 }
@@ -202,4 +210,14 @@ size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
 size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
                       uint32_t name_len) {
   return mizu_ext_ix_put_ref_impl(dst, name, name_len);
+}
+
+size_t mizu_ix_write_err(unsigned char *dst, uint32_t inline_max,
+                         const void *type, size_t type_n,
+                         const void *msg, size_t msg_n,
+                         const void *detail, size_t detail_n,
+                         int has_index, uint64_t index) {
+  return mizu_ext_ix_write_err_impl(dst, inline_max, type, type_n, msg,
+                                    msg_n, detail, detail_n, has_index,
+                                    index);
 }

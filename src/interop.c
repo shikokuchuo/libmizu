@@ -39,38 +39,9 @@ static int ix_has(const mizu_ix *cur, size_t n) {
     return MIZU_ERR;                                          \
   } while (0)
 
-/* Strict RFC 3629: rejects overlong forms, surrogates, and code points
-   past U+10FFFF. */
-static int ix_utf8_ok(const unsigned char *s, size_t n) {
-  size_t i = 0;
-  while (i < n) {
-    const unsigned char c = s[i];
-    if (c < 0x80) {
-      i++;
-    } else if (c < 0xC2) {             /* stray continuation / overlong */
-      return 0;
-    } else if (c < 0xE0) {             /* 2 bytes */
-      if (i + 2 > n || (s[i + 1] & 0xC0) != 0x80) return 0;
-      i += 2;
-    } else if (c < 0xF0) {             /* 3 bytes */
-      if (i + 3 > n || (s[i + 1] & 0xC0) != 0x80 ||
-          (s[i + 2] & 0xC0) != 0x80) return 0;
-      if (c == 0xE0 && s[i + 1] < 0xA0) return 0;   /* overlong */
-      if (c == 0xED && s[i + 1] >= 0xA0) return 0;  /* surrogate */
-      i += 3;
-    } else if (c < 0xF5) {             /* 4 bytes */
-      if (i + 4 > n || (s[i + 1] & 0xC0) != 0x80 ||
-          (s[i + 2] & 0xC0) != 0x80 || (s[i + 3] & 0xC0) != 0x80)
-        return 0;
-      if (c == 0xF0 && s[i + 1] < 0x90) return 0;   /* overlong */
-      if (c == 0xF4 && s[i + 1] > 0x8F) return 0;   /* > U+10FFFF */
-      i += 4;
-    } else {
-      return 0;
-    }
-  }
-  return 1;
-}
+/* The UTF-8 rule is the registry's: mizu_ext.h's mizu_ix_utf8_valid
+   (dual-form there), so the stream's check and the bindings' string rules
+   have one implementation. */
 
 /* One item completed at the innermost level: the innermost frame's count
    drops, and a frame that empties pops — which itself completes one item
@@ -104,7 +75,7 @@ static mizu_status ix_string(mizu_ix *cur, mizu_ix_item *it, int key) {
   } else {
     if ((uint64_t) (uint32_t) len > (uint64_t) (cur->end - cur->p))
       IX_FAIL(cur, "truncated interop stream");
-    if (!ix_utf8_ok(cur->p, (size_t) len))
+    if (!mizu_ix_utf8_valid(cur->p, (size_t) len))
       IX_FAIL(cur, "malformed interop stream: invalid UTF-8");
     it->ptr = cur->p;
     it->len = (uint64_t) len;
@@ -237,7 +208,7 @@ mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *it) {
     } else {
       if ((uint64_t) (uint32_t) len > (uint64_t) (cur->end - cur->p))
         IX_FAIL(cur, "truncated interop stream");
-      if (!ix_utf8_ok(cur->p, (size_t) len))
+      if (!mizu_ix_utf8_valid(cur->p, (size_t) len))
         IX_FAIL(cur, "malformed interop stream: invalid UTF-8");
       it->ptr = cur->p;
       it->len = (uint64_t) len;
@@ -348,7 +319,7 @@ mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *it) {
         IX_FAIL(cur, "malformed interop stream: an err string is NA");
       if ((uint64_t) (uint32_t) len > (uint64_t) (cur->end - cur->p))
         IX_FAIL(cur, "truncated interop stream");
-      if (!ix_utf8_ok(cur->p, (size_t) len))
+      if (!mizu_ix_utf8_valid(cur->p, (size_t) len))
         IX_FAIL(cur, "malformed interop stream: invalid UTF-8");
       it->err_str[i].ptr = cur->p;
       it->err_str[i].len = (uint64_t) len;
@@ -410,5 +381,48 @@ mizu_status mizu_ix_end(mizu_ix *cur) {
     IX_FAIL(cur, "truncated interop stream");
   if (cur->p != cur->end)
     IX_FAIL(cur, "malformed interop stream: bytes past the one value");
+  return MIZU_OK;
+}
+
+// The task-stream decode shim -------------------------------------------------------
+
+/* The per-field shape checks every task-stream decode shares (DESIGN.md's
+   byte-shape helper registry): the field tags are the builder's check,
+   not the cursor's, and the shim is that check once — exported only, as
+   it wraps the cursor and records through the TLS slot, so the texts are
+   byte-identical across bindings by construction. The item pull itself
+   stays mizu_ix_next; the binding-side pieces (the target-byte misroute
+   guard, name resolution, the key set, the per-kind call construction)
+   never come here. */
+
+mizu_status mizu_ixt_open(mizu_ix *cur, const void *buf, size_t len,
+                          mizu_ix_item *item, int max_kind) {
+  if (mizu_ix_open(cur, buf, len) != MIZU_OK) return MIZU_ERR;
+  if (mizu_ix_next(cur, item) != MIZU_OK) return MIZU_ERR;
+  if (item->kind != MIZU_IX_TASK)
+    IX_FAIL(cur, "malformed task stream: no task tag");
+  if (item->task_kind > (uint32_t) max_kind)
+    IX_FAIL(cur, "unsupported task kind 0x%02X", item->task_kind);
+  return MIZU_OK;
+}
+
+mizu_status mizu_ixt_want_code(mizu_ix *cur, mizu_ix_item *item) {
+  if (mizu_ix_next(cur, item) != MIZU_OK) return MIZU_ERR;
+  if (item->kind != MIZU_IX_STR1 || item->na)
+    IX_FAIL(cur, "malformed task stream: the code field is not a string");
+  return MIZU_OK;
+}
+
+mizu_status mizu_ixt_want_list(mizu_ix *cur, mizu_ix_item *item) {
+  if (mizu_ix_next(cur, item) != MIZU_OK) return MIZU_ERR;
+  if (item->kind != MIZU_IX_LIST)
+    IX_FAIL(cur, "malformed task stream: the positional field is not a list");
+  return MIZU_OK;
+}
+
+mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item) {
+  if (mizu_ix_next(cur, item) != MIZU_OK) return MIZU_ERR;
+  if (item->kind != MIZU_IX_DICT)
+    IX_FAIL(cur, "malformed task stream: the named field is not a dict");
   return MIZU_OK;
 }

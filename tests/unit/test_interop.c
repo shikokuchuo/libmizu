@@ -468,12 +468,259 @@ static void roundtrip_tests(void) {
   assert(mizu_ix_end(&cur) == MIZU_OK);
 }
 
+/* The byte-shape helper registry (DESIGN.md): the validator's edge
+   matrix, the framer's budget matrix, the shim's accept/reject rows with
+   the exact TLS texts, and the full tag table. */
+
+static void utf8_tests(void) {
+  /* the empty span and ASCII */
+  assert(mizu_ix_utf8_valid("", 0) == 1);
+  assert(mizu_ix_utf8_valid("abc", 3) == 1);
+  assert(mizu_ix_utf8_valid("\0\0", 2) == 1);        /* NUL is valid */
+  /* 2-byte: the boundaries, then overlong / stray / truncated */
+  assert(mizu_ix_utf8_valid("\xc2\x80", 2) == 1);    /* U+0080 */
+  assert(mizu_ix_utf8_valid("\xdf\xbf", 2) == 1);    /* U+07FF */
+  assert(mizu_ix_utf8_valid("\xc0\x80", 2) == 0);    /* overlong NUL */
+  assert(mizu_ix_utf8_valid("\xc1\xbf", 2) == 0);    /* overlong */
+  assert(mizu_ix_utf8_valid("\x80", 1) == 0);        /* stray continuation */
+  assert(mizu_ix_utf8_valid("\xbf\x80", 2) == 0);
+  assert(mizu_ix_utf8_valid("\xc3", 1) == 0);        /* truncated */
+  assert(mizu_ix_utf8_valid("\xc3\x28", 2) == 0);    /* bad continuation */
+  /* 3-byte: boundaries, overlong, surrogates, truncated */
+  assert(mizu_ix_utf8_valid("\xe0\xa0\x80", 3) == 1);  /* U+0800 */
+  assert(mizu_ix_utf8_valid("\xe2\x82\xac", 3) == 1);  /* U+20AC */
+  assert(mizu_ix_utf8_valid("\xef\xbf\xbf", 3) == 1);  /* U+FFFF */
+  assert(mizu_ix_utf8_valid("\xe0\x9f\xbf", 3) == 0);  /* overlong */
+  assert(mizu_ix_utf8_valid("\xed\xa0\x80", 3) == 0);  /* U+D800 */
+  assert(mizu_ix_utf8_valid("\xed\xbf\xbf", 3) == 0);  /* U+DFFF */
+  assert(mizu_ix_utf8_valid("\xe2\x82", 2) == 0);      /* truncated */
+  assert(mizu_ix_utf8_valid("\xe2\x82\x28", 3) == 0);  /* bad continuation */
+  /* 4-byte: boundaries, overlong, past U+10FFFF, the F5-FF range */
+  assert(mizu_ix_utf8_valid("\xf0\x90\x80\x80", 4) == 1);  /* U+10000 */
+  assert(mizu_ix_utf8_valid("\xf4\x8f\xbf\xbf", 4) == 1);  /* U+10FFFF */
+  assert(mizu_ix_utf8_valid("\xf0\x8f\xbf\xbf", 4) == 0);  /* overlong */
+  assert(mizu_ix_utf8_valid("\xf4\x90\x80\x80", 4) == 0);  /* U+110000 */
+  assert(mizu_ix_utf8_valid("\xf5\x80\x80\x80", 4) == 0);  /* F5+ */
+  assert(mizu_ix_utf8_valid("\xf8\x88\x80\x80\x80", 5) == 0);
+  assert(mizu_ix_utf8_valid("\xf0\x90\x80", 3) == 0);      /* truncated */
+  /* a valid sequence followed by garbage fails whole */
+  assert(mizu_ix_utf8_valid("a\xc3\xa9z", 4) == 1);
+  assert(mizu_ix_utf8_valid("a\xc3\xa9\x80", 4) == 0);
+}
+
+/* Frame an err stream and parse it back through the cursor, asserting
+   the emitted lengths. */
+static void err_check(uint32_t inline_max,
+                      const char *type, size_t type_n,
+                      const char *msg, size_t msg_n,
+                      const char *detail, size_t detail_n,
+                      int has_index, uint64_t index,
+                      size_t tn, size_t mn, size_t dn) {
+  unsigned char buf[1024];
+  size_t n = mizu_ix_write_err(buf, inline_max, type, type_n, msg, msg_n,
+                               detail, detail_n, has_index, index);
+  assert(n <= inline_max);
+  assert(n == 2 + 3 + (has_index ? 8 : 0) + 12 + tn + mn + dn);
+  assert(mizu_ix_write_err(NULL, inline_max, type, type_n, msg, msg_n,
+                           detail, detail_n, has_index, index) == n);
+  mizu_ix cur;
+  mizu_ix_item it;
+  assert(mizu_ix_open(&cur, buf, n) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_ERR);
+  assert(it.err_flags == (uint32_t) (has_index != 0));
+  if (has_index) assert(it.err_index == index);
+  assert(it.err_str[0].len == tn &&
+         (tn == 0 || memcmp(it.err_str[0].ptr, type, tn) == 0));
+  assert(it.err_str[1].len == mn &&
+         (mn == 0 || memcmp(it.err_str[1].ptr, msg, mn) == 0));
+  assert(it.err_str[2].len == dn &&
+         (dn == 0 || memcmp(it.err_str[2].ptr, detail, dn) == 0));
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+}
+
+static void err_framer_tests(void) {
+  static char big[300];
+  memset(big, 'x', sizeof big);
+
+  /* inline_max at the 25-byte minimum: every span floors to zero; with
+     the index the stream is exactly 25 */
+  err_check(25, "t", 1, "m", 1, "d", 1, 0, 0, 0, 0, 0);
+  err_check(25, "t", 1, "m", 1, "d", 1, 1, 7, 0, 0, 0);
+  /* short spans survive whole */
+  err_check(64, "type", 4, "msg", 3, "detail", 6, 1, 42, 4, 3, 6);
+  /* the type share cap: avail = 487 > 128, so type truncates at 128 */
+  err_check(512, big, 300, "m", 1, "d", 1, 0, 0, 128, 1, 1);
+  /* a smaller budget binds the type below its share cap */
+  err_check(64, big, 300, "m", 1, "d", 1, 0, 0, 39, 0, 0);
+  /* the message share: min(inline_max / 2, the remainder) */
+  err_check(64, "t", 1, big, 300, big, 300, 0, 0, 1, 32, 6);
+  err_check(300, "", 0, big, 300, big, 300, 0, 0, 0, 150, 125);
+  /* detail takes what remains */
+  err_check(128, "tttt", 4, big, 300, big, 300, 0, 0, 4, 64, 35);
+  /* the UTF-8-boundary step-back: 127 ASCII + one 2-byte sequence, the
+     128 share cuts inside it and steps back over the whole sequence */
+  {
+    static char s[200];
+    memset(s, 'a', 127);
+    memcpy(s + 127, "\xc3\xa9", 2);              /* U+00E9 at 127-128 */
+    memset(s + 129, 'b', 71);
+    err_check(512, s, 200, "m", 1, "d", 1, 0, 0, 127, 1, 1);
+    /* exact-boundary cuts do not step back: 126 ASCII + the sequence,
+       ending exactly at 128 */
+    static char s2[200];
+    memset(s2, 'a', 126);
+    memcpy(s2 + 126, "\xc3\xa9", 2);             /* U+00E9 at 126-127 */
+    memset(s2 + 128, 'b', 72);
+    err_check(512, s2, 128, "m", 1, "d", 1, 0, 0, 128, 1, 1);
+    err_check(512, s2, 129, "m", 1, "d", 1, 0, 0, 128, 1, 1);
+  }
+  /* zero-length spans (NULL pointers) frame three empty strings */
+  err_check(64, NULL, 0, NULL, 0, NULL, 0, 0, 0, 0, 0, 0);
+
+  /* the fits-by-construction invariant across the budget range */
+  unsigned char buf[1024];
+  for (uint32_t cap = 25; cap <= 400; cap += 7) {
+    const int hi = (int) (cap & 1u);
+    size_t n = mizu_ix_write_err(buf, cap, big, 300, big, 300, big, 300,
+                                 hi, 12345);
+    assert(n <= cap);
+    assert(mizu_ix_write_err(NULL, cap, big, 300, big, 300, big, 300,
+                             hi, 12345) == n);
+    mizu_ix cur;
+    mizu_ix_item it;
+    assert(mizu_ix_open(&cur, buf, n) == MIZU_OK);
+    assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_ERR);
+    assert(mizu_ix_end(&cur) == MIZU_OK);
+  }
+}
+
+static void shim_tests(void) {
+  unsigned char buf[128];
+  mizu_ix cur;
+  mizu_ix_item it;
+
+  /* the accept row: the header, then code / positional / named fields */
+  size_t off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_PYTHON, 0,
+                          MIZU_IDENT(MIZU_LANG_R, 0));
+  off += mizu_ix_put_str(buf + off, "pkg::fn", 7);
+  off += mizu_ix_put_list_begin(buf + off, 0);
+  off += mizu_ix_put_dict_begin(buf + off, 0);
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(it.kind == MIZU_IX_TASK &&
+         it.u64[0] == MIZU_IDENT(MIZU_LANG_R, 0));
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_OK &&
+         it.kind == MIZU_IX_STR1 && !it.na && it.len == 7);
+  assert(mizu_ixt_want_list(&cur, &it) == MIZU_OK &&
+         it.kind == MIZU_IX_LIST);
+  assert(mizu_ixt_want_dict(&cur, &it) == MIZU_OK &&
+         it.kind == MIZU_IX_DICT);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* a runner (kind 2) opens at ceiling 2, declines at ceiling 1 with the
+     shim's text; a kind past the registry keeps the cursor's text */
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 2, 0);
+  off += mizu_ix_put_str(buf + off, "r", 1);
+  off += mizu_ix_put_int(buf + off, 0);
+  off += mizu_ix_put_nil(buf + off);
+  assert(mizu_ixt_open(&cur, buf, off, &it, 2) == MIZU_OK &&
+         it.task_kind == 2);
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "unsupported task kind 0x02") == 0);
+  unsigned char unk[] = { 'I', 0x01, 0x12, 0x02, 0x09, 0x00, 0x00,
+                          0, 0, 0, 0, 0, 0, 0, 0 };
+  assert(mizu_ixt_open(&cur, unk, sizeof unk, &it, 2) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "unknown task kind 0x09") != NULL);
+
+  /* a non-task first item */
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_nil(buf + off);
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "malformed task stream: no task tag") == 0);
+  /* the latch: later calls fail */
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_ERR);
+
+  /* the want_* rejections, each with its normative text */
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 0, 0);
+  off += mizu_ix_put_list_begin(buf + off, 0);   /* a list where code goes */
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "malformed task stream: the code field is not a string") == 0);
+
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 0, 0);
+  off += mizu_ix_put_str(buf + off, NULL, -1);   /* an NA code string */
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "malformed task stream: the code field is not a string") == 0);
+
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 0, 0);
+  off += mizu_ix_put_str(buf + off, "f", 1);
+  off += mizu_ix_put_str(buf + off, "x", 1);     /* a string for the list */
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_OK);
+  assert(mizu_ixt_want_list(&cur, &it) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "malformed task stream: the positional field is not a list") == 0);
+
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 0, 0);
+  off += mizu_ix_put_str(buf + off, "f", 1);
+  off += mizu_ix_put_list_begin(buf + off, 0);
+  off += mizu_ix_put_list_begin(buf + off, 0);   /* a list for the dict */
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_OK);
+  assert(mizu_ixt_want_list(&cur, &it) == MIZU_OK);
+  assert(mizu_ixt_want_dict(&cur, &it) == MIZU_ERR);
+  assert(strcmp(mizu_last_error_message(),
+                "malformed task stream: the named field is not a dict") == 0);
+
+  /* a cursor failure inside a want_* carries the cursor's own text */
+  off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_task(buf + off, MIZU_LANG_R, 0, 0);
+  assert(mizu_ixt_open(&cur, buf, off, &it, 1) == MIZU_OK);
+  assert(mizu_ixt_want_code(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "truncated") != NULL);
+}
+
+static void tag_table_tests(void) {
+  assert(mizu_ix_tag_of(MIZU_TYPE_LGL) == MIZU_IX_TAG_LGLV);
+  assert(mizu_ix_tag_of(MIZU_TYPE_INT) == MIZU_IX_TAG_INTV);
+  assert(mizu_ix_tag_of(MIZU_TYPE_REAL) == MIZU_IX_TAG_REALV);
+  assert(mizu_ix_tag_of(MIZU_TYPE_CPLX) == MIZU_IX_TAG_CPLXV);
+  assert(mizu_ix_tag_of(MIZU_TYPE_RAW) == MIZU_IX_TAG_RAWV);
+  assert(mizu_ix_tag_of(MIZU_TYPE_INT64) == MIZU_IX_TAG_I64V);
+  /* any other input: 0 — MIZU_IX_TAG_NIL, never a vector tag */
+  assert(mizu_ix_tag_of(0) == MIZU_IX_TAG_NIL);
+  assert(mizu_ix_tag_of(1) == MIZU_IX_TAG_NIL);
+  assert(mizu_ix_tag_of(99) == MIZU_IX_TAG_NIL);
+  assert(mizu_ix_tag_of(-1) == MIZU_IX_TAG_NIL);
+  /* put_vec's refusal tracks the table exactly */
+  unsigned char buf[16];
+  const int32_t v[1] = { 1 };
+  assert(mizu_ix_put_vec(buf, 0, v, 1) == 0);
+  assert(mizu_ix_put_vec(NULL, 99, v, 1) == 0);
+  assert(mizu_ix_put_vec(buf, MIZU_TYPE_INT, v, 1) == 13);
+  assert(buf[0] == MIZU_IX_TAG_INTV);
+}
+
 int main(void) {
   open_tests();
   err_task_tests();
   ref_tests();
   done_tests();
   roundtrip_tests();
+  utf8_tests();
+  err_framer_tests();
+  shim_tests();
+  tag_table_tests();
   corpus_tests();
   printf("test_interop: OK\n");
   return 0;

@@ -1464,6 +1464,110 @@ MIZU_API mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *item);
    truncated root value or on bytes past it. */
 MIZU_API mizu_status mizu_ix_end(mizu_ix *cur);
 
+/** The task-stream decode shim (DESIGN.md's byte-shape helper registry):
+   the per-field shape checks every task-stream decode shares, once.
+   Exported only — it wraps the cursor and records through the TLS slot,
+   the cursor's own form. mizu_ixt_open opens the cursor, pulls the first
+   item and requires the TASK header with task_kind <= max_kind — the
+   decode site's ceiling within the cursor's registry, so a runner stream
+   at the exec decode fails informatively instead of misparsing. On
+   success *item is the header item, the submitter identity riding
+   item->u64[0]; the binding stashes it by its own discipline. Every
+   failure is MIZU_ERR with the text in the thread-local slot. */
+MIZU_API mizu_status mizu_ixt_open(mizu_ix *cur, const void *buf,
+                                   size_t len, mizu_ix_item *item,
+                                   int max_kind);
+/** The next item must be a non-NA STR1 (the 0x04 code string). */
+MIZU_API mizu_status mizu_ixt_want_code(mizu_ix *cur, mizu_ix_item *item);
+/** The next item must be a LIST begin (the positional field). */
+MIZU_API mizu_status mizu_ixt_want_list(mizu_ix *cur, mizu_ix_item *item);
+/** The next item must be a DICT begin (the named field). */
+MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
+
+/** The err framer's budget constants (mizu_ix_write_err below) — the wire
+   authority for the bounded err item: magic + version + tag + flags +
+   index + three counted lengths of headroom, and the type span's share
+   cap. */
+#define MIZU_IX_ERR_OVERHEAD 25u
+#define MIZU_IX_ERR_TYPE_SHARE 128u
+
+/** The attribute vocabulary (DESIGN.md's byte-shape helper registry): the
+   shape whitelist's wire strings — attr keys, class strings and difftime
+   units. The set is append-only: a rename is a wire change; a later
+   whitelist shape adds rows. Lengths ride sizeof - 1 at the call sites
+   that pass one. */
+#define MIZU_IX_ATTR_NAMES    "names"
+#define MIZU_IX_ATTR_LEVELS   "levels"
+#define MIZU_IX_ATTR_DIM      "dim"
+#define MIZU_IX_ATTR_CLASS    "class"
+#define MIZU_IX_ATTR_UNITS    "units"
+#define MIZU_IX_ATTR_ROWNAMES "row.names"
+#define MIZU_IX_ATTR_TZONE    "tzone"
+
+#define MIZU_IX_CLASS_FACTOR    "factor"
+#define MIZU_IX_CLASS_DATE      "Date"
+#define MIZU_IX_CLASS_POSIXCT   "POSIXct"
+#define MIZU_IX_CLASS_POSIXT    "POSIXt"
+#define MIZU_IX_CLASS_DIFFTIME  "difftime"
+#define MIZU_IX_CLASS_DATAFRAME "data.frame"
+
+#define MIZU_IX_UNIT_SECS  "secs"
+#define MIZU_IX_UNIT_MINS  "mins"
+#define MIZU_IX_UNIT_HOURS "hours"
+#define MIZU_IX_UNIT_DAYS  "days"
+#define MIZU_IX_UNIT_WEEKS "weeks"
+
+/** The byte-shape helpers' bodies (DESIGN.md's byte-shape helper
+   registry): pure byte math over the wire constants, dual-form below. */
+
+MIZU_EXT_INLINE int mizu_ext_ix_utf8_valid_impl(const void *s, size_t n) {
+  /** Strict RFC 3629: rejects overlong forms, surrogates, and code points
+     past U+10FFFF. The empty span is valid. */
+  const unsigned char *b = (const unsigned char *) s;
+  size_t i = 0;
+  while (i < n) {
+    const unsigned char c = b[i];
+    if (c < 0x80) {
+      i++;
+    } else if (c < 0xC2) {             /* stray continuation / overlong */
+      return 0;
+    } else if (c < 0xE0) {             /* 2 bytes */
+      if (i + 2 > n || (b[i + 1] & 0xC0) != 0x80) return 0;
+      i += 2;
+    } else if (c < 0xF0) {             /* 3 bytes */
+      if (i + 3 > n || (b[i + 1] & 0xC0) != 0x80 ||
+          (b[i + 2] & 0xC0) != 0x80) return 0;
+      if (c == 0xE0 && b[i + 1] < 0xA0) return 0;   /* overlong */
+      if (c == 0xED && b[i + 1] >= 0xA0) return 0;  /* surrogate */
+      i += 3;
+    } else if (c < 0xF5) {             /* 4 bytes */
+      if (i + 4 > n || (b[i + 1] & 0xC0) != 0x80 ||
+          (b[i + 2] & 0xC0) != 0x80 || (b[i + 3] & 0xC0) != 0x80)
+        return 0;
+      if (c == 0xF0 && b[i + 1] < 0x90) return 0;   /* overlong */
+      if (c == 0xF4 && b[i + 1] > 0x8F) return 0;   /* > U+10FFFF */
+      i += 4;
+    } else {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+MIZU_EXT_INLINE int mizu_ext_ix_tag_of_impl(int wire_type) {
+  /** The wire-type -> vector-tag mapping; 0 (MIZU_IX_TAG_NIL — never a
+     vector tag) for any other input. */
+  switch (wire_type) {
+  case MIZU_TYPE_LGL:   return MIZU_IX_TAG_LGLV;
+  case MIZU_TYPE_INT:   return MIZU_IX_TAG_INTV;
+  case MIZU_TYPE_REAL:  return MIZU_IX_TAG_REALV;
+  case MIZU_TYPE_CPLX:  return MIZU_IX_TAG_CPLXV;
+  case MIZU_TYPE_RAW:   return MIZU_IX_TAG_RAWV;
+  case MIZU_TYPE_INT64: return MIZU_IX_TAG_I64V;
+  default:              return MIZU_IX_TAG_NIL;
+  }
+}
+
 /** The interop emit helpers' bodies (the interchange stream section
    below): every count and value follows its tag byte directly at
    unaligned offsets, little-endian, so writes are memcpy, never casts. */
@@ -1553,16 +1657,8 @@ MIZU_EXT_INLINE size_t mizu_ext_ix_put_vec_impl(unsigned char *dst,
                                                int wire_type,
                                                const void *data,
                                                uint64_t count) {
-  uint32_t tag;
-  switch (wire_type) {
-  case MIZU_TYPE_LGL:  tag = MIZU_IX_TAG_LGLV;  break;
-  case MIZU_TYPE_INT:  tag = MIZU_IX_TAG_INTV;  break;
-  case MIZU_TYPE_REAL: tag = MIZU_IX_TAG_REALV; break;
-  case MIZU_TYPE_CPLX: tag = MIZU_IX_TAG_CPLXV; break;
-  case MIZU_TYPE_RAW:  tag = MIZU_IX_TAG_RAWV;  break;
-  case MIZU_TYPE_INT64: tag = MIZU_IX_TAG_I64V; break;
-  default: return 0;
-  }
+  const int tag = mizu_ext_ix_tag_of_impl(wire_type);
+  if (tag == MIZU_IX_TAG_NIL) return 0;
   const size_t elt = mizu_type_elt_size(wire_type);
   if (dst != NULL) {
     dst[0] = (unsigned char) tag;
@@ -1673,7 +1769,49 @@ MIZU_EXT_INLINE size_t mizu_ext_ix_put_ref_impl(unsigned char *dst,
   return (size_t) 2 + name_len;
 }
 
+MIZU_EXT_INLINE size_t mizu_ext_ix_err_floor_impl(const void *s, size_t n,
+                                                  size_t share) {
+  /** The UTF-8-boundary floor: n itself within share, else the largest
+     len <= share that does not split a multi-byte sequence. */
+  if (n <= share) return n;
+  const unsigned char *b = (const unsigned char *) s;
+  size_t len = share;
+  while (len > 0 && (b[len] & 0xC0) == 0x80) len--;
+  return len;
+}
+
+MIZU_EXT_INLINE size_t mizu_ext_ix_write_err_impl(
+    unsigned char *dst, uint32_t inline_max,
+    const void *type, size_t type_n,
+    const void *msg, size_t msg_n,
+    const void *detail, size_t detail_n,
+    int has_index, uint64_t index) {
+  /** The bounded budget (DESIGN.md's err framer): type capped at its
+     share, message at half the inline budget, detail at what remains —
+     each floored at a UTF-8 boundary, so the stream fits the slot by
+     construction (inline_max >= MIZU_IX_ERR_OVERHEAD) and the writer
+     cannot fail. The spans are valid UTF-8 by the caller's guarantee. */
+  const size_t budget = inline_max;
+  const size_t avail =
+    budget > MIZU_IX_ERR_OVERHEAD ? budget - MIZU_IX_ERR_OVERHEAD : 0;
+  size_t cap =
+    avail < MIZU_IX_ERR_TYPE_SHARE ? avail : MIZU_IX_ERR_TYPE_SHARE;
+  const size_t tn = mizu_ext_ix_err_floor_impl(type, type_n, cap);
+  cap = budget / 2;
+  if (cap > avail - tn) cap = avail - tn;
+  const size_t mn = mizu_ext_ix_err_floor_impl(msg, msg_n, cap);
+  const size_t dn =
+    mizu_ext_ix_err_floor_impl(detail, detail_n, avail - tn - mn);
+  size_t n = mizu_ext_ix_put_header_impl(dst);
+  n += mizu_ext_ix_put_err_impl(dst != NULL ? dst + n : NULL, has_index,
+                                index, type, (uint32_t) tn, msg,
+                                (uint32_t) mn, detail, (uint32_t) dn);
+  return n;
+}
+
 #ifdef MIZU_EXT_NO_INLINES
+MIZU_API int mizu_ix_utf8_valid(const void *s, size_t n);
+MIZU_API int mizu_ix_tag_of(int wire_type);
 MIZU_API size_t mizu_ix_put_header(unsigned char *dst);
 MIZU_API size_t mizu_ix_put_nil(unsigned char *dst);
 MIZU_API size_t mizu_ix_put_lgl(unsigned char *dst, int value);
@@ -1703,12 +1841,32 @@ MIZU_API size_t mizu_ix_put_task(unsigned char *dst, int target, int kind,
                                uint64_t ident);
 MIZU_API size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
                               uint32_t name_len);
+MIZU_API size_t mizu_ix_write_err(unsigned char *dst, uint32_t inline_max,
+                                  const void *type, size_t type_n,
+                                  const void *msg, size_t msg_n,
+                                  const void *detail, size_t detail_n,
+                                  int has_index, uint64_t index);
 #else
 /** The emit helpers: each returns its byte count, writing only when dst
    is not NULL, so a binding's two-pass walk sizes (dst NULL) and writes
    through the same byte-level code. The write pass relies on the size
    pass's count, so no limit is carried. Bodies are impl delegations, the
    dual-form single-sourcing discipline. */
+/** Strict RFC 3629 UTF-8 validation: 1 when the n bytes at s are a
+   well-formed byte sequence (shortest forms only, no surrogates, no code
+   point past U+10FFFF), 0 otherwise. The empty span is valid; s shall be
+   NULL only when n is 0. A pure predicate: O(n), no allocation, no error
+   record. */
+MIZU_EXT_INLINE int mizu_ix_utf8_valid(const void *s, size_t n) {
+  return mizu_ext_ix_utf8_valid_impl(s, n);
+}
+/** The wire-type -> vector-tag mapping: MIZU_TYPE_LGL / INT / REAL / CPLX
+   / RAW / INT64 -> 0x06 / 0x07 / 0x08 / 0x09 / 0x0a / 0x0e; any other
+   input returns 0 (MIZU_IX_TAG_NIL, never a vector tag, so the failure
+   is distinguishable from every mapping). */
+MIZU_EXT_INLINE int mizu_ix_tag_of(int wire_type) {
+  return mizu_ext_ix_tag_of_impl(wire_type);
+}
 MIZU_EXT_INLINE size_t mizu_ix_put_header(unsigned char *dst) {
   return mizu_ext_ix_put_header_impl(dst);
 }
@@ -1792,6 +1950,24 @@ MIZU_EXT_INLINE size_t mizu_ix_put_task(unsigned char *dst, int target,
 MIZU_EXT_INLINE size_t mizu_ix_put_ref(unsigned char *dst, const void *name,
                                      uint32_t name_len) {
   return mizu_ext_ix_put_ref_impl(dst, name, name_len);
+}
+/** A complete 'I' err stream in one call: the two-byte header, then the
+   0x11 err item, under the bounded budget (DESIGN.md's err framer) —
+   type truncated at MIZU_IX_ERR_TYPE_SHARE, message at half the inline
+   budget, detail at what remains, each cut at a UTF-8 boundary.
+   inline_max shall be at least MIZU_IX_ERR_OVERHEAD; the return is then
+   at most inline_max, so the caller stamps INLINE with the keeperless
+   claim and the writer cannot fail. The three spans shall be valid
+   UTF-8; the framer never validates. A NULL dst is the size query. */
+MIZU_EXT_INLINE size_t mizu_ix_write_err(unsigned char *dst,
+                                         uint32_t inline_max,
+                                         const void *type, size_t type_n,
+                                         const void *msg, size_t msg_n,
+                                         const void *detail, size_t detail_n,
+                                         int has_index, uint64_t index) {
+  return mizu_ext_ix_write_err_impl(dst, inline_max, type, type_n, msg,
+                                    msg_n, detail, detail_n, has_index,
+                                    index);
 }
 #endif
 
