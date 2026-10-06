@@ -11,6 +11,11 @@ libmizu is for runtimes that parallelize with processes rather than threads.
 It makes the communication between those processes cheap enough that work can be divided at granularities usually reserved for threads.
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 
+Shared memory has always been the fastest IPC transport.
+A socket round trip costs four system calls and four copies of the data; in shared memory, one process reads the bytes the other wrote — the kernel never touches the data.
+libmizu handles the synchronization, waiting, and peer crashes for you, so a round trip drops from tens of microseconds over sockets to under a microsecond.
+See [Performance](#performance).
+
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and [pymizu](https://github.com/shikokuchuo/pymizu) (Python).
 [Writing a binding](https://github.com/shikokuchuo/libmizu#writing-a-binding) covers other languages.
 
@@ -67,7 +72,7 @@ mizu_channel_ready_wait(ch, -1);                 /* block until attach */
 mizu_channel_send(ch, my_obj);
 void *obj;
 mizu_channel_recv(ch, &obj, -1);                 /* MIZU_OK / sentinels */
-mizu_channel_close(ch, 5000);
+mizu_channel_close(ch, 5000);                     /* up to 5 s for the peer's close */
 ```
 
 The peer attaches with `mizu_channel_attach(&ch, token, &binding)`.
@@ -75,6 +80,7 @@ It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_chan
 
 [`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
 [`DESIGN.md`](DESIGN.md) gives the invariants.
+The rendered API reference lives at [shikokuchuo.net/libmizu](https://shikokuchuo.net/libmizu/).
 
 ## API tiers
 
@@ -87,16 +93,16 @@ The headers are two deliberate tiers:
 
 A third header, `src/internal.h`, is private and never installed; bindings never include it.
 
+## Building
+
 libmizu needs a C11 compiler and a 64-bit platform: the wire formats depend on lock-free 64-bit atomics.
 On Linux, kernel 5.3 or later is required.
-
-## Building
 
 The Makefile is the only build system:
 
 ```sh
 make                    # libmizu.a + the shared library
-make test               # the unit tier (in-process, deterministic)
+make test               # the unit and ext tiers (in-process, deterministic)
 make test-integration   # the integration tier (forked child processes)
 make test-soak          # the soak tier (minutes-long contention runs; nightly)
 make test-fuzz          # libFuzzer bursts on the wire parsers (clang)
@@ -104,6 +110,7 @@ make bench              # the benchmark suite (report-only)
 make coverage           # llvm-cov report over the unit tier (report-only)
 make tidy               # clang-tidy over the library sources (report-only;
                         # TIDY overrides the binary)
+make docs               # doxygen API reference into docs/html
 make install            # honors PREFIX (/usr/local) and DESTDIR;
                         # also installs libmizu.pc for pkg-config
 ```
@@ -133,4 +140,4 @@ The API is not stable and may change at any time before a release.
 ## License
 
 MIT.
-`LICENSE.note` has the third-party attribution (RngStreams jump matrices).
+`LICENSE.note` has the third-party attributions (RngStreams jump matrices, vendored doxygen stylesheet).
