@@ -80,12 +80,12 @@ $(function() {
 <p>Shared memory has always been the fastest IPC transport. A socket round trip costs four system calls and four copies of the data; in shared memory, one process reads the bytes the other wrote — the kernel never touches the data. libmizu handles the synchronization, waiting, and peer crashes for you, so a round trip drops from tens of microseconds over sockets to under a microsecond. See Performance.</p>
 <p>The first-party bindings are <a href="https://github.com/shikokuchuo/mizu">mizu</a> (R) and <a href="https://github.com/shikokuchuo/pymizu">pymizu</a> (Python). Writing a binding covers other languages.</p>
 <ul>
-<li>Lock-free SPSC rings and work-stealing deques over shared memory.</li>
-<li>Bounded, microsecond-latency waiting: futex, <code>__ulock</code>, or <code>WaitOnAddress</code> per platform.</li>
-<li>Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling.</li>
-<li>Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue.</li>
-<li>FFI-safe ABI: opaque handles, exported functions only, <code>mizu_status</code> sentinels on hot paths.</li>
-<li>C11, 64-bit: Linux, macOS, and Windows.</li>
+<li>Lock-free SPSC rings and work-stealing deques over shared memory</li>
+<li>Bounded, microsecond-latency waiting: futex, <code>__ulock</code>, or <code>WaitOnAddress</code> per platform</li>
+<li>Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling</li>
+<li>Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue</li>
+<li>FFI-safe ABI: opaque handles, exported functions only, <code>mizu_status</code> sentinels on hot paths</li>
+<li>C11, 64-bit: Linux, macOS, and Windows</li>
 </ul>
 <blockquote class="doxtable">
 <p>&zwj;<b>Pre-release.</b> The API is not stable and may change at any time before a release. </p>
