@@ -23,6 +23,9 @@ RngStreams, doxygen-awesome-css).
   consumers get `static inline`s, FFI consumers bind the exported symbols
   from `src/ext.c` (`MIZU_EXT_NO_INLINES` keeps the inlines out of that TU).
 - `CHANGELOG.md` — Keep a Changelog; versions carry the ABI contract.
+- `CONTRIBUTING.md` — contributor notes: bug reports, the per-PR checks,
+  conventions, and the repo layout.
+- `CITATION.cff` — citation metadata; same author block as the bindings'.
 - `DESIGN.md` — design authority: invariants the implementation maintains
   (wire format, parker protocol, payload tiers, binding seam, retain table,
   zero-copy, crash atomicity, pool mechanics, ABI discipline). Code comments
@@ -82,7 +85,9 @@ RngStreams, doxygen-awesome-css).
 - `Doxyfile` + `tools/doxygen/` — the API reference. Generated from the
   two installed headers' comments (keep them doxygen-formed: `/** ... */`
   blocks on the documented entity, `/**< ... */` trailing on members),
-  plus README/DESIGN/CHANGELOG as pages; README.md is the mainpage.
+  plus README/DESIGN/CHANGELOG as pages; README.md is the mainpage, so
+  its links to files that are not doxygen pages (e.g. `bench/notes.md`)
+  stay absolute GitHub URLs.
   `tools/doxygen/` vendors the doxygen-awesome-css theme.
 - `dev/` — scratch copies of headers.
 
@@ -148,6 +153,8 @@ these.
 - Comments are concise and to the point: state the invariant or the
   why (protocol guarantees, platform quirks), skip narrative filler and
   restatement of the code. Keep license/attribution headers intact.
+- README structure is shared with the bindings; contributor notes live in
+  `CONTRIBUTING.md`, not the README.
 - Commit messages are a single line (subject only, no body).
 - Never push without explicit approval — every push must be approved by
   the user first.

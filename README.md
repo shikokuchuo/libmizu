@@ -17,7 +17,16 @@ libmizu handles the synchronization, waiting, and peer crashes for you, so a rou
 See [Performance](#performance).
 
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and [pymizu](https://github.com/shikokuchuo/pymizu) (Python).
-[Writing a binding](https://github.com/shikokuchuo/libmizu#writing-a-binding) covers other languages.
+[Writing a binding](#writing-a-binding) covers other languages.
+
+- Lock-free SPSC rings and work-stealing deques over shared memory
+- Bounded, microsecond-latency waiting: futex, `__ulock`, or `WaitOnAddress` per platform
+- Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling
+- Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue
+- FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
+- C11, 64-bit: Linux, macOS, and Windows
+
+> **Pre-release.** The API is not stable and may change at any time before a release.
 
 ## Performance
 
@@ -35,31 +44,18 @@ Representative figures from the C bench suite (`make bench`), measured on an App
 
 The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md).
 
-## Writing a binding
-
-A binding teaches libmizu how to turn the language's values into frames and back: the `stage` and `read` callbacks in the quickstart below, plus `exec` for pool workers.
-libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
-To start without callbacks, `mizu_binding_bytes()` gives you a ready-made binding that sends and receives byte buffers.
-
-Every operation is an exported function, so a language with a foreign function interface can call libmizu directly from the shared library without compiling any C of its own.
-Every handle is opaque, so libmizu's internals can change without breaking the binding.
-Bindings that compile C themselves can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
-
 ## Quickstart
 
-This example makes a channel between two processes.
-Registering callbacks is binding-author surface, so it includes `mizu_ext.h`.
+This example makes a channel between two processes using the built-in bytes binding — no callbacks, so it compiles as written.
 The host:
 
 ```c
-#include <mizu_ext.h>   /* mizu_binding, mizu_binding_init (implies mizu.h) */
+#include <mizu_ext.h>   /* mizu_binding_bytes, mizu_bytes (implies mizu.h) */
 
 mizu_channel_opts opts;
 mizu_channel_opts_init(&opts);
 mizu_binding binding;
-mizu_binding_init(&binding);
-binding.stage = my_stage;   /* frame your objects as (hdr, payload) */
-binding.read  = my_read;    /* the receive-side materializer */
+mizu_binding_bytes(&binding);
 
 mizu_channel *ch;
 mizu_channel_create(&ch, &opts, &binding);
@@ -69,18 +65,42 @@ mizu_channel_token(ch, token, sizeof token);
 /* spawn the peer however you like, passing the token */
 mizu_channel_ready_wait(ch, -1);                 /* block until attach */
 
-mizu_channel_send(ch, my_obj);
+mizu_bytes out = { "hello", 5 };                 /* { data, len } */
+mizu_channel_send(ch, &out);
+
 void *obj;
 mizu_channel_recv(ch, &obj, -1);                 /* MIZU_OK / sentinels */
-mizu_channel_close(ch, 5000);                     /* up to 5 s for the peer's close */
+mizu_bytes *in = obj;                            /* in->data, in->len */
+mizu_bytes_free(in);
+
+mizu_channel_close(ch, 5000);                    /* up to 5 s for the peer's close */
 ```
 
-The peer attaches with `mizu_channel_attach(&ch, token, &binding)`.
+The peer fills its binding with `mizu_binding_bytes()` too and attaches with `mizu_channel_attach(&ch, token, &binding)`.
 It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
+
+To move a language's own objects rather than byte buffers, register callbacks on the binding instead — the binding-author seam covered in [Writing a binding](#writing-a-binding):
+
+```c
+mizu_binding binding;
+mizu_binding_init(&binding);
+binding.stage = my_stage;   /* frame your objects as (hdr, payload) */
+binding.read  = my_read;    /* the receive-side materializer */
+```
 
 [`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
 [`DESIGN.md`](DESIGN.md) gives the invariants.
 The rendered API reference lives at [shikokuchuo.net/libmizu](https://shikokuchuo.net/libmizu/).
+
+## Writing a binding
+
+A binding teaches libmizu how to turn the language's values into frames and back: the `stage` and `read` callbacks shown in the quickstart, plus `exec` for pool workers.
+libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
+To start without callbacks, the built-in bytes binding — `mizu_binding_bytes()` — sends and receives byte buffers, as the quickstart shows.
+
+Every operation is an exported function, so a language with a foreign function interface can call libmizu directly from the shared library without compiling any C of its own.
+Every handle is opaque, so libmizu's internals can change without breaking the binding.
+Bindings that compile C themselves can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
 
 ## API tiers
 
@@ -132,10 +152,9 @@ To generate the amalgamation, run:
 tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 ```
 
-## Status
+## Contributing
 
-Pre-release.
-The API is not stable and may change at any time before a release.
+The repository layout and contributor notes live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
