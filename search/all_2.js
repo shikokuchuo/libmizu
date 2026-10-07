@@ -12,9 +12,10 @@ var searchData=
   ['codec_9',['Interchange codec',['../md_DESIGN.html#autotoc_md16',1,'']]],
   ['codec_20registry_10',['Codec registry',['../md_DESIGN.html#autotoc_md14',1,'']]],
   ['collect_5fparks_11',['collect_parks',['../structmizu__pool__dump__s.html#aa6efcff05bf248d0d83b956a03136e57',1,'mizu_pool_dump_s']]],
-  ['copy_20views_12',['Zero-copy views',['../md_DESIGN.html#autotoc_md24',1,'']]],
-  ['cost_13',['cost',['../structmizu__morsel__sizer__s.html#a4ab0a7707bd4b877d9072caf2667f437',1,'mizu_morsel_sizer_s']]],
-  ['count_14',['count',['../structmizu__ix__item__s.html#aaf8fc14eeceaa8e8e1816a2a29557209',1,'mizu_ix_item_s']]],
-  ['crash_20atomicity_15',['Crash atomicity',['../md_DESIGN.html#autotoc_md25',1,'']]],
-  ['ctx_16',['ctx',['../structmizu__binding__s.html#a8fb5a137cad62ba9ea055dd40553df83',1,'mizu_binding_s']]]
+  ['contributing_12',['Contributing',['../index.html#autotoc_md6',1,'']]],
+  ['copy_20views_13',['Zero-copy views',['../md_DESIGN.html#autotoc_md24',1,'']]],
+  ['cost_14',['cost',['../structmizu__morsel__sizer__s.html#a4ab0a7707bd4b877d9072caf2667f437',1,'mizu_morsel_sizer_s']]],
+  ['count_15',['count',['../structmizu__ix__item__s.html#aaf8fc14eeceaa8e8e1816a2a29557209',1,'mizu_ix_item_s']]],
+  ['crash_20atomicity_16',['Crash atomicity',['../md_DESIGN.html#autotoc_md25',1,'']]],
+  ['ctx_17',['ctx',['../structmizu__binding__s.html#a8fb5a137cad62ba9ea055dd40553df83',1,'mizu_binding_s']]]
 ];
