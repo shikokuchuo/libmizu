@@ -862,7 +862,12 @@ MIZU_API mizu_status mizu_pool_set_trace(mizu_pool *, mizu_trace_fn, void *ctx);
    late (completed, already cancelled, pool gone) — every edge folds
    into 0, there is no error path. A completed slot is left collectible;
    releasing a handle that will never be collected is
-   mizu_pool_task_release. */
+   mizu_pool_task_release. A cancelled slot is instead consumed
+   asynchronously by the worker — its publish or claim skip moves the
+   slot CANCEL to FREE without resequencing, so a later collect of the
+   cancelled handle may report the task already collected. A drain after
+   cancel must tolerate that: mizu_pool_task_state distinguishes a
+   drained sibling from a terminal outcome ahead of the collect. */
 MIZU_API int mizu_pool_cancel(mizu_pool *, const mizu_task *);
 /** The finalizer release for a task handle that was never collected: a
    still-pending task is cancelled (as mizu_pool_cancel); a completed
