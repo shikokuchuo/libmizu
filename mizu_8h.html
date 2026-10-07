@@ -1972,7 +1972,7 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><div class="memdoc">
 
 <p>Advisory and discard-only, never preemptive: a still-queued task is skipped; an executing one runs to completion and its result is dropped. </p>
-<p>Returns 1 when this call cancelled the task, 0 when too late (completed, already cancelled, pool gone) — every edge folds into 0, there is no error path. A completed slot is left collectible; releasing a handle that will never be collected is mizu_pool_task_release. </p>
+<p>Returns 1 when this call cancelled the task, 0 when too late (completed, already cancelled, pool gone) — every edge folds into 0, there is no error path. A completed slot is left collectible; releasing a handle that will never be collected is mizu_pool_task_release. A cancelled slot is instead consumed asynchronously by the worker — its publish or claim skip moves the slot CANCEL to FREE without resequencing, so a later collect of the cancelled handle may report the task already collected. A drain after cancel must tolerate that: mizu_pool_task_state distinguishes a drained sibling from a terminal outcome ahead of the collect. </p>
 
 </div>
 </div>
