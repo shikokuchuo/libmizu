@@ -137,6 +137,8 @@ extern "C" {
    shares the value grammar) */
 #define MIZU_CAP_MIZL_REF (1u << 4) /**< reads MIZL remote leaves —
    directory tag 33 */
+#define MIZU_CAP_MIZL_TSN (1u << 5) /**< reads MIZL INT64 leaves carrying
+   a tscale attribute — verbatim nanosecond timestamps and durations */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -1503,6 +1505,7 @@ MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 #define MIZU_IX_ATTR_UNITS    "units"
 #define MIZU_IX_ATTR_ROWNAMES "row.names"
 #define MIZU_IX_ATTR_TZONE    "tzone"
+#define MIZU_IX_ATTR_TSCALE   "tscale"
 
 #define MIZU_IX_CLASS_FACTOR    "factor"
 #define MIZU_IX_CLASS_DATE      "Date"

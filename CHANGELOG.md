@@ -39,6 +39,19 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   form (bulk CE_UTF8 marks + the validity tail), so the bytes are
   peer-agnostic. No wire change: `MIZU_ABI_VERSION` is untouched.
 
+- The Arrow frame writer's nanosecond temporal form: a `timestamp[ns]` /
+  `duration[ns]` column stages as a verbatim INT64 leaf (the counts
+  unrescaled, `NaT` the INT64 sentinel) whose attrs blob adds
+  `tscale = "ns"` beside the POSIXct/`tzone` or difftime/`units` pairs,
+  gated per column on the new `MIZU_CAP_MIZL_TSN` capability bit (bit 5)
+  — a peer short of the bit gets today's REAL-seconds write with the
+  `1e-9` rescale, and a reader short of it fails informatively on the
+  form, never a silent mis-read. New attr vocabulary macro
+  `MIZU_IX_ATTR_TSCALE`. The verdict resolves once at classify
+  (`peer_caps` is already in hand), so the size and write passes cannot
+  diverge. No ABI bump: capability bits are append-only and absent means
+  unsupported.
+
 - The byte-shape helper registry (DESIGN.md's Interchange codec section):
   the 'I' machinery that operates purely on byte spans and cursor items
   moves into the core so no byte-level rule keeps a second implementation

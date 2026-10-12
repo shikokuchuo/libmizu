@@ -744,6 +744,84 @@ static void test_temporal(void) {
   mizu_arrow_close(a);
 }
 
+static void test_temporal_ns(void) {
+  /* tsn / tDn: the verbatim INT64 leaf with a capable peer word, the REAL
+     fallback without */
+  ArrowSchema ct, cu, root;
+  ArrowSchema *kids[2] = { &ct, &cu };
+  mk_schema(&ct, "tsn:America/New_York", "t", NULL, 0, NULL, 0);
+  mk_schema(&cu, "tDn", "u", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+
+  const uint8_t bm4 = 0x0B;   /* element 2 null */
+  const int64_t tsv[4] = { 1700000000123456789LL, -3600000000001LL, 0, 0 };
+  const int64_t dur[4] = { 90, 86400000000000LL, 0, 0 };
+  const void *tb[2] = { &bm4, tsv };
+  const void *ub[2] = { &bm4, dur };
+  ArrowArray at, au, batch;
+  ArrowArray *bk[2] = { &at, &au };
+  mk_array(&at, 4, 1, 0, 2, tb, NULL, NULL);
+  mk_array(&au, 4, 1, 0, 2, ub, NULL, NULL);
+  mk_array(&batch, 4, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow_warn warn;
+  mizu_arrow *a;
+  mizu_mizl_entry e;
+
+  /* the capable word: verbatim INT64 leaves, the tscale pair present */
+  size_t total;
+  uint8_t *buf = frame_write(&root, batches, 1, MIZU_CAP_MIZL_TSN, &total,
+                             &warn, &a);
+  for (int i = 0; i < 2; i++) {
+    assert(mizu_mizl_elem(buf, total, i, &e) == 0);
+    assert(e.sexptype == MIZU_TYPE_INT64 && e.attrs_size > 0);
+    const int64_t *v = (const int64_t *) (buf + e.data_offset);
+    assert(v[2] == MIZU_NA_INT64);   /* NaT at the null lane */
+    const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+    assert(find_span(blob, (size_t) e.attrs_size, "tscale", 6) != NULL);
+    assert(find_span(blob, (size_t) e.attrs_size, "ns", 2) != NULL);
+    blob_check(blob, (size_t) e.attrs_size);
+  }
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int64_t *tv = (const int64_t *) (buf + e.data_offset);
+  assert(tv[0] == 1700000000123456789LL && tv[1] == -3600000000001LL);
+  const uint8_t *tblob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(tblob, (size_t) e.attrs_size, "America/New_York", 16) !=
+         NULL);
+  assert(mizu_mizl_elem(buf, total, 1, &e) == 0);
+  const int64_t *uv = (const int64_t *) (buf + e.data_offset);
+  assert(uv[0] == 90 && uv[1] == 86400000000000LL);
+  const uint8_t *ublob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(ublob, (size_t) e.attrs_size, "difftime", 8) != NULL);
+  /* the validity tail rides as for any atomic leaf */
+  int64_t aoff, asz, valid[2];
+  assert(frame_check(buf, total, &aoff, &asz, valid) == 2);
+  assert(valid[0] != 0 && valid[1] == 2);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* a peer word short of the bit: the REAL fallback, the pair absent */
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  const uint64_t na_r = 0x7FF00000000007A2ULL;
+  for (int i = 0; i < 2; i++) {
+    assert(mizu_mizl_elem(buf, total, i, &e) == 0);
+    assert(e.sexptype == MIZU_TYPE_REAL && e.attrs_size > 0);
+    const double *v = (const double *) (buf + e.data_offset);
+    uint64_t bits;
+    memcpy(&bits, &v[2], 8);
+    assert(bits == na_r);
+    const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+    assert(find_span(blob, (size_t) e.attrs_size, "tscale", 6) == NULL);
+    blob_check(blob, (size_t) e.attrs_size);
+  }
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const double *dv = (const double *) (buf + e.data_offset);
+  assert(dv[0] == (double) tsv[0] * 1e-9 && dv[1] == (double) tsv[1] * 1e-9);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 // Declines ------------------------------------------------------------------------------
 
 static void test_declines(void) {
@@ -1172,6 +1250,7 @@ int main(void) {
   test_dicts();
   test_dict_declines();
   test_temporal();
+  test_temporal_ns();
   test_declines();
   test_remote();
   test_root_blob_override();

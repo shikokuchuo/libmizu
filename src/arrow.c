@@ -509,31 +509,41 @@ static size_t arrow_blob_date(uint8_t *dst) {
   return e.total;
 }
 
-static size_t arrow_blob_ts(uint8_t *dst, const char *tz) {
+/* tsn: the verbatim ns form's extra pair — the i64 counts' scale label. */
+static size_t arrow_blob_ts(uint8_t *dst, const char *tz, int tsn) {
   static const char *cls[2] = { MIZU_IX_CLASS_POSIXCT, MIZU_IX_CLASS_POSIXT };
   arrow_ixe e = { dst, 0 };
   ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
-  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 2));
+  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), tsn ? 3 : 2));
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   arrow_ixe_class(&e, cls, 2);
   arrow_ixe_key(&e, MIZU_IX_ATTR_TZONE);
   ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), tz,
                                     (int32_t) strlen(tz)));
+  if (tsn) {
+    arrow_ixe_key(&e, MIZU_IX_ATTR_TSCALE);
+    ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), "ns", 2));
+  }
   return e.total;
 }
 
 /* The difftime dict {class = "difftime", units = "secs"} — the layout
-   column's doubles are seconds, so the blob is unit-fixed. */
-static size_t arrow_blob_difftime(uint8_t *dst) {
+   column's doubles are seconds, so the blob is unit-fixed (tscale names
+   the verbatim form's i64 counts instead). */
+static size_t arrow_blob_difftime(uint8_t *dst, int tsn) {
   static const char *cls[1] = { MIZU_IX_CLASS_DIFFTIME };
   arrow_ixe e = { dst, 0 };
   ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
-  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 2));
+  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), tsn ? 3 : 2));
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   arrow_ixe_class(&e, cls, 1);
   arrow_ixe_key(&e, MIZU_IX_ATTR_UNITS);
   ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), MIZU_IX_UNIT_SECS,
                                     (int32_t) (sizeof MIZU_IX_UNIT_SECS - 1)));
+  if (tsn) {
+    arrow_ixe_key(&e, MIZU_IX_ATTR_TSCALE);
+    ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), "ns", 2));
+  }
   return e.total;
 }
 
@@ -568,6 +578,10 @@ typedef struct {
   const mizu_cvt_row *row;   /* CVT */
   int str_form;         /* STR/DICT: 1 utf8, 2 large_utf8, 3 view */
   double ts_scale;      /* TS/TD */
+  char unit;            /* TS/TD: the Arrow unit s/m/u/n */
+  int ts_verbatim;      /* TS/TD: the ns INT64 leaf verdict (unit n and the
+                           peer reads MIZU_CAP_MIZL_TSN), resolved at
+                           classify */
   char tz[64];          /* TS: the classified tzone ("UTC" when naive) */
   const char *tz_o;     /* TS: the tzone override (NULL: the classified) */
   int idx_w;            /* DICT: the index width */
@@ -696,6 +710,9 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
       (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n')) {
     pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
       f[2] == 'u' ? 1e-6 : 1e-9;
+    pc->unit = f[2];
+    pc->ts_verbatim = f[2] == 'n' &&
+      (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
     const char *tz = f + 4;
     snprintf(pc->tz, sizeof(pc->tz), "%s", tz[0] != '\0' ? tz : "UTC");
     pc->kind = MIZU_ARROW_TS;
@@ -705,6 +722,9 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
       (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n')) {
     pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
       f[2] == 'u' ? 1e-6 : 1e-9;
+    pc->unit = f[2];
+    pc->ts_verbatim = f[2] == 'n' &&
+      (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
     pc->kind = MIZU_ARROW_TD;
     return 0;
   }
@@ -986,11 +1006,11 @@ static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
   case MIZU_ARROW_TS:
     c->body = a->rows * 8;
     c->tz = pc->tz_o != NULL ? pc->tz_o : pc->tz;
-    c->blob = (int64_t) arrow_blob_ts(NULL, c->tz);
+    c->blob = (int64_t) arrow_blob_ts(NULL, c->tz, pc->ts_verbatim);
     break;
   case MIZU_ARROW_TD:
     c->body = a->rows * 8;
-    c->blob = (int64_t) arrow_blob_difftime(NULL);
+    c->blob = (int64_t) arrow_blob_difftime(NULL, pc->ts_verbatim);
     break;
   }
   for (size_t b = 0; b < a->nb; b++)
@@ -1039,8 +1059,7 @@ static void arrow_size_pass(mizu_arrow *a) {
 // The write pass -------------------------------------------------------------------------
 
 static void arrow_write_cvt(uint8_t *dst, mizu_arrow *a, int col,
-                            mizu_arrow_warn *warn) {
-  const arrow_pcol *pc = &a->cols[col];
+                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   size_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
@@ -1050,13 +1069,13 @@ static void arrow_write_cvt(uint8_t *dst, mizu_arrow *a, int col,
     const uint8_t *valid = ba->null_count != 0 ?
       (const uint8_t *) ba->buffers[0] : NULL;
     uint64_t off = (uint64_t) ba->offset;
-    if (pc->row->cvt == MIZU_CVT_BIT_LGL) {
-      mizu_cvt_convert(dst + done, data, valid, off, n, pc->row, warn);
+    if (row->cvt == MIZU_CVT_BIT_LGL) {
+      mizu_cvt_convert(dst + done, data, valid, off, n, row, warn);
     } else {
-      mizu_cvt_convert(dst + done, data + off * pc->row->w_in, valid,
-                       off, n, pc->row, warn);
+      mizu_cvt_convert(dst + done, data + off * row->w_in, valid,
+                       off, n, row, warn);
     }
-    done += n * pc->row->w_out;
+    done += n * row->w_out;
   }
 }
 
@@ -1281,7 +1300,7 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
       switch (pc->kind) {
       case MIZU_ARROW_CVT:
         entry.sexptype = pc->row->wire;
-        arrow_write_cvt(dst, a, i, warn);
+        arrow_write_cvt(dst, a, i, pc->row, warn);
         break;
       case MIZU_ARROW_STR:
         entry.sexptype = MIZU_TYPE_STR;
@@ -1299,14 +1318,28 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
         arrow_blob_date(dst + c->body);
         break;
       case MIZU_ARROW_TS:
-        entry.sexptype = MIZU_TYPE_REAL;
-        arrow_write_ts(dst, a, i);
-        arrow_blob_ts(dst + c->body, c->tz);
+        if (pc->ts_verbatim) {
+          /* the ns counts verbatim: the identity i64 row, NaT the INT64
+             sentinel, the tscale pair the scale label */
+          entry.sexptype = MIZU_TYPE_INT64;
+          arrow_write_cvt(dst, a, i, &CVT_ROW_I64, warn);
+          arrow_blob_ts(dst + c->body, c->tz, 1);
+        } else {
+          entry.sexptype = MIZU_TYPE_REAL;
+          arrow_write_ts(dst, a, i);
+          arrow_blob_ts(dst + c->body, c->tz, 0);
+        }
         break;
       case MIZU_ARROW_TD:
-        entry.sexptype = MIZU_TYPE_REAL;
-        arrow_write_ts(dst, a, i);
-        arrow_blob_difftime(dst + c->body);
+        if (pc->ts_verbatim) {
+          entry.sexptype = MIZU_TYPE_INT64;
+          arrow_write_cvt(dst, a, i, &CVT_ROW_I64, warn);
+          arrow_blob_difftime(dst + c->body, 1);
+        } else {
+          entry.sexptype = MIZU_TYPE_REAL;
+          arrow_write_ts(dst, a, i);
+          arrow_blob_difftime(dst + c->body, 0);
+        }
         break;
       }
       entry.data_size = c->body + c->blob;
