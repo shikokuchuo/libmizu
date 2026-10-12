@@ -139,6 +139,19 @@ Data Structures</h2></td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__ix__s.html">mizu_ix_s</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">The pull cursor.  <a href="structmizu__ix__s.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structArrowSchema.html">ArrowSchema</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structArrowArray.html">ArrowArray</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structArrowArrayStream.html">ArrowArrayStream</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row_s</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__arrow__warn__s.html">mizu_arrow_warn_s</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">The conversion warning counts, accumulated by mizu_cvt_convert and the frame writer; the binding raises them after the stage returns, never mid-stage.  <a href="structmizu__arrow__warn__s.html#details">More...</a><br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__arrow__col__s.html">mizu_arrow_col_s</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="define-members" name="define-members"></a>
 Macros</h2></td></tr>
@@ -307,6 +320,19 @@ Macros</h2></td></tr>
 <tr class="memitem:a075a2bc4979bebf5eb190ee547b726c2" id="r_a075a2bc4979bebf5eb190ee547b726c2"><td class="memItemLeft" align="right" valign="top"><a id="a075a2bc4979bebf5eb190ee547b726c2" name="a075a2bc4979bebf5eb190ee547b726c2"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_UNIT_WEEKS</b>&#160;&#160;&#160;&quot;weeks&quot;</td></tr>
 <tr class="separator:a075a2bc4979bebf5eb190ee547b726c2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a62dff1b60bc389d2afc1f9845c8643c8" id="r_a62dff1b60bc389d2afc1f9845c8643c8"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a62dff1b60bc389d2afc1f9845c8643c8">ARROW_C_DATA_INTERFACE</a></td></tr>
+<tr class="memdesc:a62dff1b60bc389d2afc1f9845c8643c8"><td class="mdescLeft">&#160;</td><td class="mdescRight">The Arrow C Data Interface structs, defined per the spec under its two include guards (the layout is frozen ABI; no headers, no dependency): <a class="el" href="structArrowSchema.html">ArrowSchema</a> / <a class="el" href="structArrowArray.html">ArrowArray</a> under ARROW_C_DATA_INTERFACE, <a class="el" href="structArrowArrayStream.html">ArrowArrayStream</a> under ARROW_C_STREAM_INTERFACE (nanoarrow guards the stream struct separately; one shared guard would leave it redefinable by a later nanoarrow or arrow include).  <br /></td></tr>
+<tr class="separator:a62dff1b60bc389d2afc1f9845c8643c8"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aacad63acda264a0ae393bd842a77220d" id="r_aacad63acda264a0ae393bd842a77220d"><td class="memItemLeft" align="right" valign="top"><a id="aacad63acda264a0ae393bd842a77220d" name="aacad63acda264a0ae393bd842a77220d"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>ARROW_C_STREAM_INTERFACE</b></td></tr>
+<tr class="separator:aacad63acda264a0ae393bd842a77220d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a5cbe2ccaa46dce777ba22b826dfba3fa" id="r_a5cbe2ccaa46dce777ba22b826dfba3fa"><td class="memItemLeft" align="right" valign="top"><a id="a5cbe2ccaa46dce777ba22b826dfba3fa" name="a5cbe2ccaa46dce777ba22b826dfba3fa"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ARROW_FLAG_DICTIONARY_ORDERED</b>&#160;&#160;&#160;1</td></tr>
+<tr class="memdesc:a5cbe2ccaa46dce777ba22b826dfba3fa"><td class="mdescLeft">&#160;</td><td class="mdescRight">The <a class="el" href="structArrowSchema.html">ArrowSchema</a> flags word bits the writer reads (the spec's values). <br /></td></tr>
+<tr class="separator:a5cbe2ccaa46dce777ba22b826dfba3fa"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a0a6ddfcbacdc7ed24571c81ea4b34062" id="r_a0a6ddfcbacdc7ed24571c81ea4b34062"><td class="memItemLeft" align="right" valign="top"><a id="a0a6ddfcbacdc7ed24571c81ea4b34062" name="a0a6ddfcbacdc7ed24571c81ea4b34062"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ARROW_FLAG_NULLABLE</b>&#160;&#160;&#160;2</td></tr>
+<tr class="separator:a0a6ddfcbacdc7ed24571c81ea4b34062"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="typedef-members" name="typedef-members"></a>
 Typedefs</h2></td></tr>
@@ -382,6 +408,28 @@ typedef struct <a class="el" href="structmizu__ix__item__s.html">mizu_ix_item_s<
 <tr class="memitem:ac3e0d1af772ed4dee41ebcd15bc78aed" id="r_ac3e0d1af772ed4dee41ebcd15bc78aed"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="structmizu__ix__s.html">mizu_ix_s</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#ac3e0d1af772ed4dee41ebcd15bc78aed">mizu_ix</a></td></tr>
 <tr class="memdesc:ac3e0d1af772ed4dee41ebcd15bc78aed"><td class="mdescLeft">&#160;</td><td class="mdescRight">The pull cursor.  <br /></td></tr>
 <tr class="separator:ac3e0d1af772ed4dee41ebcd15bc78aed"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a8a0fcb9a4f14da20edaa59858318fd78" id="r_a8a0fcb9a4f14da20edaa59858318fd78"><td class="memItemLeft" align="right" valign="top"><a id="a8a0fcb9a4f14da20edaa59858318fd78" name="a8a0fcb9a4f14da20edaa59858318fd78"></a>
+typedef struct <a class="el" href="structArrowSchema.html">ArrowSchema</a>&#160;</td><td class="memItemRight" valign="bottom"><b>ArrowSchema</b></td></tr>
+<tr class="separator:a8a0fcb9a4f14da20edaa59858318fd78"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a829950a98e43a6adc4a42d14fafcdab1" id="r_a829950a98e43a6adc4a42d14fafcdab1"><td class="memItemLeft" align="right" valign="top"><a id="a829950a98e43a6adc4a42d14fafcdab1" name="a829950a98e43a6adc4a42d14fafcdab1"></a>
+typedef struct <a class="el" href="structArrowArray.html">ArrowArray</a>&#160;</td><td class="memItemRight" valign="bottom"><b>ArrowArray</b></td></tr>
+<tr class="separator:a829950a98e43a6adc4a42d14fafcdab1"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a31e98b84d0a9c48298135c35fc520378" id="r_a31e98b84d0a9c48298135c35fc520378"><td class="memItemLeft" align="right" valign="top"><a id="a31e98b84d0a9c48298135c35fc520378" name="a31e98b84d0a9c48298135c35fc520378"></a>
+typedef struct <a class="el" href="structArrowArrayStream.html">ArrowArrayStream</a>&#160;</td><td class="memItemRight" valign="bottom"><b>ArrowArrayStream</b></td></tr>
+<tr class="separator:a31e98b84d0a9c48298135c35fc520378"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a290b83efa0b4b88b09e3876a83b0fb6f" id="r_a290b83efa0b4b88b09e3876a83b0fb6f"><td class="memItemLeft" align="right" valign="top"><a id="a290b83efa0b4b88b09e3876a83b0fb6f" name="a290b83efa0b4b88b09e3876a83b0fb6f"></a>
+typedef struct <a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_cvt_row</b></td></tr>
+<tr class="separator:a290b83efa0b4b88b09e3876a83b0fb6f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac702c55dbf774692ccc596d1da4b7626" id="r_ac702c55dbf774692ccc596d1da4b7626"><td class="memItemLeft" align="right" valign="top"><a id="ac702c55dbf774692ccc596d1da4b7626" name="ac702c55dbf774692ccc596d1da4b7626"></a>
+typedef struct <a class="el" href="structmizu__arrow__warn__s.html">mizu_arrow_warn_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_arrow_warn</b></td></tr>
+<tr class="memdesc:ac702c55dbf774692ccc596d1da4b7626"><td class="mdescLeft">&#160;</td><td class="mdescRight">The conversion warning counts, accumulated by mizu_cvt_convert and the frame writer; the binding raises them after the stage returns, never mid-stage. <br /></td></tr>
+<tr class="separator:ac702c55dbf774692ccc596d1da4b7626"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a6062d72c93653f952fc9d52fe0788658" id="r_a6062d72c93653f952fc9d52fe0788658"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a></td></tr>
+<tr class="memdesc:a6062d72c93653f952fc9d52fe0788658"><td class="mdescLeft">&#160;</td><td class="mdescRight">The Arrow -&gt; MIZL frame writer: a classified, batch-vetted frame plus its size-pass results, staged through mizu_arrow_stage.  <br /></td></tr>
+<tr class="separator:a6062d72c93653f952fc9d52fe0788658"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ae394eab7b3fd969b6d1644eb8f5e38f5" id="r_ae394eab7b3fd969b6d1644eb8f5e38f5"><td class="memItemLeft" align="right" valign="top"><a id="ae394eab7b3fd969b6d1644eb8f5e38f5" name="ae394eab7b3fd969b6d1644eb8f5e38f5"></a>
+typedef struct <a class="el" href="structmizu__arrow__col__s.html">mizu_arrow_col_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_arrow_col</b></td></tr>
+<tr class="separator:ae394eab7b3fd969b6d1644eb8f5e38f5"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="enum-members" name="enum-members"></a>
 Enumerations</h2></td></tr>
@@ -462,6 +510,36 @@ Enumerations</h2></td></tr>
  }</td></tr>
 <tr class="memdesc:adc29c2ff13d900c2f185ee95427fb06c"><td class="mdescLeft">&#160;</td><td class="mdescRight">What mizu_ix_next yields.  <a href="mizu__ext_8h.html#adc29c2ff13d900c2f185ee95427fb06c">More...</a><br /></td></tr>
 <tr class="separator:adc29c2ff13d900c2f185ee95427fb06c"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a61dadd085c1777f559549e05962b2c9e" id="r_a61dadd085c1777f559549e05962b2c9e"><td class="memItemLeft" align="right" valign="top">enum &#160;</td><td class="memItemRight" valign="bottom">{ <br />
+&#160;&#160;<a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea65b04e9ff5f523ae6e849d6d68df7ba9">MIZU_CVT_COPY</a> = 0
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9eac6bea9ed2d6ecd6e1c6fe2b3f7a3c78e">MIZU_CVT_I8_INT</a>
+, <b>MIZU_CVT_I16_INT</b>
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea18b7df4bc021ecfe0d94b0c6fc3ece5c">MIZU_CVT_U16_INT</a>
+, <br />
+&#160;&#160;<a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea7620385fecc7d007ee3bf4eb9b8d0ddb">MIZU_CVT_U32_REAL</a>
+, <b>MIZU_CVT_U64_REAL</b>
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ead186e594d9ba41fa7bdad5f40c8fc42e">MIZU_CVT_F16_REAL</a>
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea840ed29e6e7ac7452b9b2f062cb5c01e">MIZU_CVT_F32_REAL</a>
+, <br />
+&#160;&#160;<a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea80fb9e257cf6065e3f3c8467dd06106a">MIZU_CVT_BOOL8_LGL</a>
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9ea9f108194359b26a70110bb3cfafdf937">MIZU_CVT_BIT_LGL</a>
+, <a class="el" href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9eacc49549fd5fd3fb0b09e006a6312d94c">MIZU_CVT_C64_CPLX</a>
+<br />
+ }</td></tr>
+<tr class="memdesc:a61dadd085c1777f559549e05962b2c9e"><td class="mdescLeft">&#160;</td><td class="mdescRight">The fixed-width conversion rows: an element width pair plus the kernel, producing a MIZU_TYPE_* leaf.  <a href="mizu__ext_8h.html#a61dadd085c1777f559549e05962b2c9e">More...</a><br /></td></tr>
+<tr class="separator:a61dadd085c1777f559549e05962b2c9e"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a726ca809ffd3d67ab4b8476646f26635" id="r_a726ca809ffd3d67ab4b8476646f26635"><td class="memItemLeft" align="right" valign="top">enum &#160;</td><td class="memItemRight" valign="bottom">{ <br />
+&#160;&#160;<a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635a259c1c2c0f135846860c09eb17ea70ea">MIZU_ARROW_CVT</a> = 0
+, <a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635ada854f1ac2ac098d7fc9917bb81b1b30">MIZU_ARROW_STR</a>
+, <a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635ad0672a2bc18c5b4e46aec19c11783b6e">MIZU_ARROW_DICT</a>
+, <a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635abe824dd50bfd2fd551a8f6015c65327b">MIZU_ARROW_DATE</a>
+, <br />
+&#160;&#160;<a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635a0d8d56dac1bf8dc9f423a0e321cb1495">MIZU_ARROW_TS</a>
+, <a class="el" href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635a1e6944edb3ead7cacbf042365c1042b5">MIZU_ARROW_TD</a>
+<br />
+ }</td></tr>
+<tr class="memdesc:a726ca809ffd3d67ab4b8476646f26635"><td class="mdescLeft">&#160;</td><td class="mdescRight">The per-column classification, mizu_arrow_col_info's out-param: the kind, the conversion row, and the string / dictionary / temporal particulars a binding's own emitters need.  <a href="mizu__ext_8h.html#a726ca809ffd3d67ab4b8476646f26635">More...</a><br /></td></tr>
+<tr class="separator:a726ca809ffd3d67ab4b8476646f26635"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="func-members" name="func-members"></a>
 Functions</h2></td></tr>
@@ -895,6 +973,39 @@ static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_put_
 <tr class="memitem:a9985466f23e9faf530d0b588cb2b5d76" id="r_a9985466f23e9faf530d0b588cb2b5d76"><td class="memItemLeft" align="right" valign="top">static size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a9985466f23e9faf530d0b588cb2b5d76">mizu_ix_write_err</a> (unsigned char *dst, uint32_t inline_max, const void *type, size_t type_n, const void *msg, size_t msg_n, const void *detail, size_t detail_n, int has_index, uint64_t index)</td></tr>
 <tr class="memdesc:a9985466f23e9faf530d0b588cb2b5d76"><td class="mdescLeft">&#160;</td><td class="mdescRight">A complete 'I' err stream in one call: the two-byte header, then the 0x11 err item, under the bounded budget (DESIGN.md's err framer) — type truncated at MIZU_IX_ERR_TYPE_SHARE, message at half the inline budget, detail at what remains, each cut at a UTF-8 boundary.  <br /></td></tr>
 <tr class="separator:a9985466f23e9faf530d0b588cb2b5d76"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ae171af0099fc0e65bfb73dabd3bd3542" id="r_ae171af0099fc0e65bfb73dabd3bd3542"><td class="memItemLeft" align="right" valign="top"><a id="ae171af0099fc0e65bfb73dabd3bd3542" name="ae171af0099fc0e65bfb73dabd3bd3542"></a>
+const <a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row</a> *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_cvt_for_arrow</b> (const char *fmt)</td></tr>
+<tr class="memdesc:ae171af0099fc0e65bfb73dabd3bd3542"><td class="mdescLeft">&#160;</td><td class="mdescRight">The Arrow-format keying of the conversion table (every supported row a single character); NULL when the format has no row. <br /></td></tr>
+<tr class="separator:ae171af0099fc0e65bfb73dabd3bd3542"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a55e9d55ac7db710049c5342df962b8f5" id="r_a55e9d55ac7db710049c5342df962b8f5"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a55e9d55ac7db710049c5342df962b8f5">mizu_cvt_convert</a> (uint8_t *dst, const uint8_t *src, const uint8_t *valid, uint64_t off, size_t n, const <a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row</a> *row, <a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
+<tr class="memdesc:a55e9d55ac7db710049c5342df962b8f5"><td class="mdescLeft">&#160;</td><td class="mdescRight">One run's convert into a reserved destination: the BIT_LGL / masked / plain dispatch.  <br /></td></tr>
+<tr class="separator:a55e9d55ac7db710049c5342df962b8f5"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a7cf55414f80ba696ffe0abf15b538c36" id="r_a7cf55414f80ba696ffe0abf15b538c36"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a7cf55414f80ba696ffe0abf15b538c36">mizu_arrow_open</a> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
+<tr class="memdesc:a7cf55414f80ba696ffe0abf15b538c36"><td class="mdescLeft">&#160;</td><td class="mdescRight">Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked).  <br /></td></tr>
+<tr class="separator:a7cf55414f80ba696ffe0abf15b538c36"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a9ff09cfb0678b2391f06c0ef7e921b6f" id="r_a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a9ff09cfb0678b2391f06c0ef7e921b6f">mizu_arrow_col_info</a> (const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, <a class="el" href="structmizu__arrow__col__s.html">mizu_arrow_col</a> *out)</td></tr>
+<tr class="memdesc:a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The per-column classification, for a binding's own emitters over the same batches (pymizu's inline frame forms).  <br /></td></tr>
+<tr class="separator:a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:af2be1285ffcde97080f54dfb74ba01ec" id="r_af2be1285ffcde97080f54dfb74ba01ec"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#af2be1285ffcde97080f54dfb74ba01ec">mizu_arrow_remote</a> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, const char *ident, size_t ident_len, void *ref_base, size_t ref_size, int64_t ref_leaf)</td></tr>
+<tr class="memdesc:af2be1285ffcde97080f54dfb74ba01ec"><td class="mdescLeft">&#160;</td><td class="mdescRight">A remote-leaf override (pymizu's provenance match): column col crosses as directory tag 33 — the identifier span, the referenced leaf's attrs size and validity claim read off the referenced region (mizu_mizl_elem), and one REFHELD OR per distinct referenced region at write.  <br /></td></tr>
+<tr class="separator:af2be1285ffcde97080f54dfb74ba01ec"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:adc6731ac7fa73eeead7a5a5fe62d30a2" id="r_adc6731ac7fa73eeead7a5a5fe62d30a2"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#adc6731ac7fa73eeead7a5a5fe62d30a2">mizu_arrow_root_blob</a> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, const void *blob, size_t len)</td></tr>
+<tr class="memdesc:adc6731ac7fa73eeead7a5a5fe62d30a2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The root-blob override: a complete 'I' stream for the frame attributes the caller built (pymizu's custom row_names).  <br /></td></tr>
+<tr class="separator:adc6731ac7fa73eeead7a5a5fe62d30a2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ab0de70a598099a8d98dbf275765d920d" id="r_ab0de70a598099a8d98dbf275765d920d"><td class="memItemLeft" align="right" valign="top"><a id="ab0de70a598099a8d98dbf275765d920d" name="ab0de70a598099a8d98dbf275765d920d"></a>
+void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_arrow_tz</b> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, const char *tz)</td></tr>
+<tr class="memdesc:ab0de70a598099a8d98dbf275765d920d"><td class="mdescLeft">&#160;</td><td class="mdescRight">The tzone override: the POSIXct leaf blob writes tz verbatim (a same-language sender's naivety-preserving form; the classified default writes "UTC" for a naive timestamp). <br /></td></tr>
+<tr class="separator:ab0de70a598099a8d98dbf275765d920d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ab9a4494d860b8ae62627f809fe59a18c" id="r_ab9a4494d860b8ae62627f809fe59a18c"><td class="memItemLeft" align="right" valign="top"><a id="ab9a4494d860b8ae62627f809fe59a18c" name="ab9a4494d860b8ae62627f809fe59a18c"></a>
+size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_arrow_size</b> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *)</td></tr>
+<tr class="memdesc:ab9a4494d860b8ae62627f809fe59a18c"><td class="mdescLeft">&#160;</td><td class="mdescRight">The region span in bytes: runs the size pass on first call (the result memoizes; overrides registered after it do not move the span). <br /></td></tr>
+<tr class="separator:ab9a4494d860b8ae62627f809fe59a18c"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a30ee155dc6d86f159269b9d24efa2364" id="r_a30ee155dc6d86f159269b9d24efa2364"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a30ee155dc6d86f159269b9d24efa2364">mizu_arrow_stage</a> (<a class="el" href="mizu__ext_8h.html#a7d50086f46e354f1678a0ea265d0883c">mizu_handle</a> *, <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, <a class="el" href="structmizu__slot__hdr__s.html">mizu_slot_hdr</a> *hdr, unsigned char *payload, <a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
+<tr class="memdesc:a30ee155dc6d86f159269b9d24efa2364"><td class="mdescLeft">&#160;</td><td class="mdescRight">The one-call stage over the handle seam, valid only during a stage_fn call.  <br /></td></tr>
+<tr class="separator:a30ee155dc6d86f159269b9d24efa2364"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a23244fde0b28800ccea609adcfc5d5be" id="r_a23244fde0b28800ccea609adcfc5d5be"><td class="memItemLeft" align="right" valign="top"><a id="a23244fde0b28800ccea609adcfc5d5be" name="a23244fde0b28800ccea609adcfc5d5be"></a>
+void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_arrow_close</b> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *)</td></tr>
+<tr class="separator:a23244fde0b28800ccea609adcfc5d5be"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a92dadd61d4b9bdc6e739de7d4008837d" id="r_a92dadd61d4b9bdc6e739de7d4008837d"><td class="memItemLeft" align="right" valign="top"><a id="a92dadd61d4b9bdc6e739de7d4008837d" name="a92dadd61d4b9bdc6e739de7d4008837d"></a>
 double&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_now</b> (void)</td></tr>
 <tr class="memdesc:a92dadd61d4b9bdc6e739de7d4008837d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Monotonic seconds (the spin/deadline clock) and the current pid (cached, with an atfork reset). <br /></td></tr>
@@ -1123,6 +1234,23 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 
 <p>The attribute vocabulary (DESIGN.md's byte-shape helper registry): the shape whitelist's wire strings — attr keys, class strings and difftime units. </p>
 <p>The set is append-only: a rename is a wire change; a later whitelist shape adds rows. Lengths ride sizeof - 1 at the call sites that pass one. </p>
+
+</div>
+</div>
+<a id="a62dff1b60bc389d2afc1f9845c8643c8" name="a62dff1b60bc389d2afc1f9845c8643c8"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a62dff1b60bc389d2afc1f9845c8643c8">&#9670;&#160;</a></span>ARROW_C_DATA_INTERFACE</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define ARROW_C_DATA_INTERFACE</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The Arrow C Data Interface structs, defined per the spec under its two include guards (the layout is frozen ABI; no headers, no dependency): <a class="el" href="structArrowSchema.html">ArrowSchema</a> / <a class="el" href="structArrowArray.html">ArrowArray</a> under ARROW_C_DATA_INTERFACE, <a class="el" href="structArrowArrayStream.html">ArrowArrayStream</a> under ARROW_C_STREAM_INTERFACE (nanoarrow guards the stream struct separately; one shared guard would leave it redefinable by a later nanoarrow or arrow include). </p>
+<p>The frame writer reads caller-owned structs; a binding's import front-ends produce them. </p>
 
 </div>
 </div>
@@ -1366,6 +1494,23 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 
 </div>
 </div>
+<a id="a6062d72c93653f952fc9d52fe0788658" name="a6062d72c93653f952fc9d52fe0788658"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a6062d72c93653f952fc9d52fe0788658">&#9670;&#160;</a></span>mizu_arrow</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">typedef struct <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The Arrow -&gt; MIZL frame writer: a classified, batch-vetted frame plus its size-pass results, staged through mizu_arrow_stage. </p>
+<p>Opaque; the caller owns the schema and batch structs it handed over (they must outlive the handle — the writer reads them only inside mizu_arrow_write). </p>
+
+</div>
+</div>
 <h2 class="groupheader">Enumeration Type Documentation</h2>
 <a id="a06fc87d81c62e9abb8790b6e5713c55b" name="a06fc87d81c62e9abb8790b6e5713c55b"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a06fc87d81c62e9abb8790b6e5713c55b">&#9670;&#160;</a></span>anonymous enum</h2>
@@ -1445,6 +1590,73 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 <tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06ca5659885ed2ef4a89449e506dccafdb15" name="adc29c2ff13d900c2f185ee95427fb06ca5659885ed2ef4a89449e506dccafdb15"></a>MIZU_IX_TASK&#160;</td><td class="fielddoc"><p>header: count fields follow as ordinary items </p>
 </td></tr>
 <tr><td class="fieldname"><a id="adc29c2ff13d900c2f185ee95427fb06cadb69c0f115861ccc8a5201faf1db6106" name="adc29c2ff13d900c2f185ee95427fb06cadb69c0f115861ccc8a5201faf1db6106"></a>MIZU_IX_REF&#160;</td><td class="fielddoc"><p>the 0x13 region identifier span (ptr, len) </p>
+</td></tr>
+</table>
+
+</div>
+</div>
+<a id="a61dadd085c1777f559549e05962b2c9e" name="a61dadd085c1777f559549e05962b2c9e"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a61dadd085c1777f559549e05962b2c9e">&#9670;&#160;</a></span>anonymous enum</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">anonymous enum</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The fixed-width conversion rows: an element width pair plus the kernel, producing a MIZU_TYPE_* leaf. </p>
+<table class="fieldtable">
+<tr><th colspan="2">Enumerator</th></tr><tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea65b04e9ff5f523ae6e849d6d68df7ba9" name="a61dadd085c1777f559549e05962b2c9ea65b04e9ff5f523ae6e849d6d68df7ba9"></a>MIZU_CVT_COPY&#160;</td><td class="fielddoc"><p>identity: one memcpy per run </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9eac6bea9ed2d6ecd6e1c6fe2b3f7a3c78e" name="a61dadd085c1777f559549e05962b2c9eac6bea9ed2d6ecd6e1c6fe2b3f7a3c78e"></a>MIZU_CVT_I8_INT&#160;</td><td class="fielddoc"><p>sign-widen </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea18b7df4bc021ecfe0d94b0c6fc3ece5c" name="a61dadd085c1777f559549e05962b2c9ea18b7df4bc021ecfe0d94b0c6fc3ece5c"></a>MIZU_CVT_U16_INT&#160;</td><td class="fielddoc"><p>zero-widen </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea7620385fecc7d007ee3bf4eb9b8d0ddb" name="a61dadd085c1777f559549e05962b2c9ea7620385fecc7d007ee3bf4eb9b8d0ddb"></a>MIZU_CVT_U32_REAL&#160;</td><td class="fielddoc"><p>exact </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ead186e594d9ba41fa7bdad5f40c8fc42e" name="a61dadd085c1777f559549e05962b2c9ead186e594d9ba41fa7bdad5f40c8fc42e"></a>MIZU_CVT_F16_REAL&#160;</td><td class="fielddoc"><p>exact (half decodes into double's wider fields) </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea840ed29e6e7ac7452b9b2f062cb5c01e" name="a61dadd085c1777f559549e05962b2c9ea840ed29e6e7ac7452b9b2f062cb5c01e"></a>MIZU_CVT_F32_REAL&#160;</td><td class="fielddoc"><p>exact </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea80fb9e257cf6065e3f3c8467dd06106a" name="a61dadd085c1777f559549e05962b2c9ea80fb9e257cf6065e3f3c8467dd06106a"></a>MIZU_CVT_BOOL8_LGL&#160;</td><td class="fielddoc"><p>one byte per source lane (numpy '?') -&gt; int32 0/1 </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9ea9f108194359b26a70110bb3cfafdf937" name="a61dadd085c1777f559549e05962b2c9ea9f108194359b26a70110bb3cfafdf937"></a>MIZU_CVT_BIT_LGL&#160;</td><td class="fielddoc"><p>one bit per source lane (Arrow 'b') -&gt; int32 0/1 </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a61dadd085c1777f559549e05962b2c9eacc49549fd5fd3fb0b09e006a6312d94c" name="a61dadd085c1777f559549e05962b2c9eacc49549fd5fd3fb0b09e006a6312d94c"></a>MIZU_CVT_C64_CPLX&#160;</td><td class="fielddoc"><p>float re/im -&gt; double re/im </p>
+</td></tr>
+</table>
+
+</div>
+</div>
+<a id="a726ca809ffd3d67ab4b8476646f26635" name="a726ca809ffd3d67ab4b8476646f26635"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a726ca809ffd3d67ab4b8476646f26635">&#9670;&#160;</a></span>anonymous enum</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">anonymous enum</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The per-column classification, mizu_arrow_col_info's out-param: the kind, the conversion row, and the string / dictionary / temporal particulars a binding's own emitters need. </p>
+<p>The borrowed level spans are valid until mizu_arrow_close. </p>
+<table class="fieldtable">
+<tr><th colspan="2">Enumerator</th></tr><tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635a259c1c2c0f135846860c09eb17ea70ea" name="a726ca809ffd3d67ab4b8476646f26635a259c1c2c0f135846860c09eb17ea70ea"></a>MIZU_ARROW_CVT&#160;</td><td class="fielddoc"><p>fixed-width, through the cvt row </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635ada854f1ac2ac098d7fc9917bb81b1b30" name="a726ca809ffd3d67ab4b8476646f26635ada854f1ac2ac098d7fc9917bb81b1b30"></a>MIZU_ARROW_STR&#160;</td><td class="fielddoc"><p>utf8 / large_utf8 / string_view -&gt; MIZS </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635ad0672a2bc18c5b4e46aec19c11783b6e" name="a726ca809ffd3d67ab4b8476646f26635ad0672a2bc18c5b4e46aec19c11783b6e"></a>MIZU_ARROW_DICT&#160;</td><td class="fielddoc"><p>dictionary&lt;strings&gt; -&gt; a factor </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635abe824dd50bfd2fd551a8f6015c65327b" name="a726ca809ffd3d67ab4b8476646f26635abe824dd50bfd2fd551a8f6015c65327b"></a>MIZU_ARROW_DATE&#160;</td><td class="fielddoc"><p>date32 -&gt; REAL days + the Date blob </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635a0d8d56dac1bf8dc9f423a0e321cb1495" name="a726ca809ffd3d67ab4b8476646f26635a0d8d56dac1bf8dc9f423a0e321cb1495"></a>MIZU_ARROW_TS&#160;</td><td class="fielddoc"><p>timestamp -&gt; REAL seconds + the POSIXct blob </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a726ca809ffd3d67ab4b8476646f26635a1e6944edb3ead7cacbf042365c1042b5" name="a726ca809ffd3d67ab4b8476646f26635a1e6944edb3ead7cacbf042365c1042b5"></a>MIZU_ARROW_TD&#160;</td><td class="fielddoc"><p>duration -&gt; REAL seconds + the difftime blob </p>
 </td></tr>
 </table>
 
@@ -3431,6 +3643,300 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>A complete 'I' err stream in one call: the two-byte header, then the 0x11 err item, under the bounded budget (DESIGN.md's err framer) — type truncated at MIZU_IX_ERR_TYPE_SHARE, message at half the inline budget, detail at what remains, each cut at a UTF-8 boundary. </p>
 <p>inline_max shall be at least MIZU_IX_ERR_OVERHEAD; the return is then at most inline_max, so the caller stamps INLINE with the keeperless claim and the writer cannot fail. The three spans shall be valid UTF-8; the framer never validates. A NULL dst is the size query. </p>
+
+</div>
+</div>
+<a id="a55e9d55ac7db710049c5342df962b8f5" name="a55e9d55ac7db710049c5342df962b8f5"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a55e9d55ac7db710049c5342df962b8f5">&#9670;&#160;</a></span>mizu_cvt_convert()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_cvt_convert </td>
+          <td>(</td>
+          <td class="paramtype">uint8_t *&#160;</td>
+          <td class="paramname"><em>dst</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const uint8_t *&#160;</td>
+          <td class="paramname"><em>src</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const uint8_t *&#160;</td>
+          <td class="paramname"><em>valid</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint64_t&#160;</td>
+          <td class="paramname"><em>off</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>n</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row</a> *&#160;</td>
+          <td class="paramname"><em>row</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *&#160;</td>
+          <td class="paramname"><em>warn</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>One run's convert into a reserved destination: the BIT_LGL / masked / plain dispatch. </p>
+<p>src points at the first source element (the caller applies the element offset); off is the bit offset into data and validity for the bit-packed forms, and into validity for the masked forms. valid NULL converts every lane. The warning counts accumulate into warn. </p>
+
+</div>
+</div>
+<a id="a7cf55414f80ba696ffe0abf15b538c36" name="a7cf55414f80ba696ffe0abf15b538c36"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a7cf55414f80ba696ffe0abf15b538c36">&#9670;&#160;</a></span>mizu_arrow_open()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_arrow_open </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **&#160;</td>
+          <td class="paramname"><em>out</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *&#160;</td>
+          <td class="paramname"><em>schema</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *&#160;</td>
+          <td class="paramname"><em>batches</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>n_batches</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint32_t&#160;</td>
+          <td class="paramname"><em>peer_caps</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked). </p>
+<p>batches are caller-owned and must outlive the handle; the writer reads them only inside mizu_arrow_write. peer_caps is the peer's capability mask: the stage's capability conjunction and the per-column leaf choices key off it. MIZU_OK, or MIZU_ERR with the decline in the thread-local slot (mizu_last_error_message) naming the column, its format and the remedy. </p>
+
+</div>
+</div>
+<a id="a9ff09cfb0678b2391f06c0ef7e921b6f" name="a9ff09cfb0678b2391f06c0ef7e921b6f"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a9ff09cfb0678b2391f06c0ef7e921b6f">&#9670;&#160;</a></span>mizu_arrow_col_info()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_arrow_col_info </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>col</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="structmizu__arrow__col__s.html">mizu_arrow_col</a> *&#160;</td>
+          <td class="paramname"><em>out</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The per-column classification, for a binding's own emitters over the same batches (pymizu's inline frame forms). </p>
+<p>col shall be in range. </p>
+
+</div>
+</div>
+<a id="af2be1285ffcde97080f54dfb74ba01ec" name="af2be1285ffcde97080f54dfb74ba01ec"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#af2be1285ffcde97080f54dfb74ba01ec">&#9670;&#160;</a></span>mizu_arrow_remote()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int mizu_arrow_remote </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>col</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>ident</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>ident_len</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">void *&#160;</td>
+          <td class="paramname"><em>ref_base</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>ref_size</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>ref_leaf</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>A remote-leaf override (pymizu's provenance match): column col crosses as directory tag 33 — the identifier span, the referenced leaf's attrs size and validity claim read off the referenced region (mizu_mizl_elem), and one REFHELD OR per distinct referenced region at write. </p>
+<p>ident is the referenced region's name, ref_base / ref_size its mapping, ref_leaf the referenced 0-based directory leaf; register only for a peer with MIZU_CAP_MIZL_REF. 0, or -1 on a torn referenced tree (the caller leaves the column local). Overrides precede the first mizu_arrow_size / mizu_arrow_stage call. </p>
+
+</div>
+</div>
+<a id="adc6731ac7fa73eeead7a5a5fe62d30a2" name="adc6731ac7fa73eeead7a5a5fe62d30a2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#adc6731ac7fa73eeead7a5a5fe62d30a2">&#9670;&#160;</a></span>mizu_arrow_root_blob()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_arrow_root_blob </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const void *&#160;</td>
+          <td class="paramname"><em>blob</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>len</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The root-blob override: a complete 'I' stream for the frame attributes the caller built (pymizu's custom row_names). </p>
+<p>Absent, the writer emits names + class data.frame + the automatic c(NA, -n) row.names. </p>
+
+</div>
+</div>
+<a id="a30ee155dc6d86f159269b9d24efa2364" name="a30ee155dc6d86f159269b9d24efa2364"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a30ee155dc6d86f159269b9d24efa2364">&#9670;&#160;</a></span>mizu_arrow_stage()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_arrow_stage </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#a7d50086f46e354f1678a0ea265d0883c">mizu_handle</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="structmizu__slot__hdr__s.html">mizu_slot_hdr</a> *&#160;</td>
+          <td class="paramname"><em>hdr</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">unsigned char *&#160;</td>
+          <td class="paramname"><em>payload</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *&#160;</td>
+          <td class="paramname"><em>warn</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The one-call stage over the handle seam, valid only during a stage_fn call. </p>
+<p>First the gate, touching no shared state: the capability conjunction (MIZU_CAP_MIZL | MIZU_CAP_ATTRS, plus MIZU_CAP_MIZS when any column is a string) off the classification and the peer_caps given at open, then the churn check. Then mizu_stage_reap, the spill checkout, the write, the SHM_VEC stamp (name payload, aux type VEC + used bytes) and mizu_stage_retain_zc. MIZU_OK staged; otherwise a non-OK status — the gate's decline or the spill status when no region — with nothing claimed: the caller's copy tiers take every non-OK alike. The caller pins nothing: the region is self-contained unless it registered remote leaves, whose pins are its own. warn (zeroed here) returns the conversion counts; the binding raises them after the stage returns. </p>
 
 </div>
 </div>

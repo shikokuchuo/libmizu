@@ -14,7 +14,8 @@ var searchData=
   ['state_5foff_11',['state_off',['../structmizu__morsel__hdr__s.html#a5b0ab1c99420d5362de983c014a11391',1,'mizu_morsel_hdr_s']]],
   ['status_12',['status',['../structmizu__rs__hdr__s.html#a736c726c8c97525f962102dcabc56388',1,'mizu_rs_hdr_s::status'],['../structmizu__sub__stat__s.html#ad67aa384bd90b24c679b1e89494fcf95',1,'mizu_sub_stat_s::status'],['../structmizu__rs__row__s.html#a66a30acae19b6471cf160b3f93fd3c87',1,'mizu_rs_row_s::status'],['../structmizu__sub__slot__s.html#a2dd2ced7829ea099e53d01d76c581e56',1,'mizu_sub_slot_s::status'],['../structmizu__wk__slot__s.html#a5c8ea5bd812556cef1f9eb6fe3d99f82',1,'mizu_wk_slot_s::status']]],
   ['statuses_20not_20exceptions_13',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]],
-  ['sub_5fslot_14',['sub_slot',['../structmizu__result__sink__s.html#afeb064bfe0cda5a15eb92e7d5fa79b7d',1,'mizu_result_sink_s']]],
-  ['sub_5fstate_15',['sub_state',['../structmizu__pool__status__s.html#a0e295efc4daa911b7c68893496a6d504',1,'mizu_pool_status_s']]],
-  ['sweep_16',['sweep',['../structmizu__binding__s.html#a3c079ed014b6d770c59b94616f406fbf',1,'mizu_binding_s']]]
+  ['str_5fform_14',['str_form',['../structmizu__arrow__col__s.html#a3b89bb19cb542513e10960f2ceb8b401',1,'mizu_arrow_col_s']]],
+  ['sub_5fslot_15',['sub_slot',['../structmizu__result__sink__s.html#afeb064bfe0cda5a15eb92e7d5fa79b7d',1,'mizu_result_sink_s']]],
+  ['sub_5fstate_16',['sub_state',['../structmizu__pool__status__s.html#a0e295efc4daa911b7c68893496a6d504',1,'mizu_pool_status_s']]],
+  ['sweep_17',['sweep',['../structmizu__binding__s.html#a3c079ed014b6d770c59b94616f406fbf',1,'mizu_binding_s']]]
 ];

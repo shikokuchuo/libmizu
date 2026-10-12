@@ -13,5 +13,7 @@ var searchData=
   ['the_20identity_20word_10',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md17',1,'']]],
   ['the_20keeperless_20claim_11',['The keeperless claim',['../md_DESIGN.html#autotoc_md15',1,'']]],
   ['tiers_12',['tiers',['../index.html#autotoc_md4',1,'API tiers'],['../md_DESIGN.html#autotoc_md13',1,'Payload framing tiers']]],
-  ['type_13',['type',['../structmizu__ix__item__s.html#a8c74298a41bb1a0051ed8f0b809a11de',1,'mizu_ix_item_s']]]
+  ['ts_5fscale_13',['ts_scale',['../structmizu__arrow__col__s.html#a475b7c89cdb8121b60162570f803406f',1,'mizu_arrow_col_s']]],
+  ['type_14',['type',['../structmizu__ix__item__s.html#a8c74298a41bb1a0051ed8f0b809a11de',1,'mizu_ix_item_s']]],
+  ['tz_15',['tz',['../structmizu__arrow__col__s.html#aae4d15d0e1409eff5d11a17aacc9978d',1,'mizu_arrow_col_s']]]
 ];
