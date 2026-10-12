@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['seam_0',['The binding seam',['../md_DESIGN.html#autotoc_md20',1,'']]],
+  ['seam_0',['The binding seam',['../md_DESIGN.html#autotoc_md21',1,'']]],
   ['seq_1',['seq',['../structmizu__result__sink__s.html#a3527ef2307099b854b00acf7b2b8b6ed',1,'mizu_result_sink_s']]],
   ['sequence_2',['sequence',['../structmizu__rs__hdr__s.html#ac9484e74eabaed638952e2a90a75d8cb',1,'mizu_rs_hdr_s']]],
   ['shape_20helper_20registry_3',['The byte-shape helper registry',['../md_DESIGN.html#autotoc_md19',1,'']]],
@@ -10,7 +10,7 @@ var searchData=
   ['slot_7',['slot',['../structmizu__preamble__s.html#abae688d2ae65b9badcdaf9282cdc1b66',1,'mizu_preamble_s::slot'],['../structmizu__pool__hdr__s.html#a41caca6822aebf27f525238c471998c5',1,'mizu_pool_hdr_s::slot']]],
   ['slot_5fsize_8',['slot_size',['../structmizu__channel__opts__s.html#a4d06828cbe70331c63fcfeed407ed45c',1,'mizu_channel_opts_s::slot_size'],['../structmizu__pool__opts__s.html#a468030fad81b1280d01263d7789d05da',1,'mizu_pool_opts_s::slot_size']]],
   ['spill_5freuse_9',['spill_reuse',['../structmizu__sub__stat__s.html#ae0afd5da8bb3554665316242854b2f87',1,'mizu_sub_stat_s']]],
-  ['staging_20policy_10',['Staging policy',['../md_DESIGN.html#autotoc_md21',1,'']]],
+  ['staging_20policy_10',['Staging policy',['../md_DESIGN.html#autotoc_md22',1,'']]],
   ['state_5foff_11',['state_off',['../structmizu__morsel__hdr__s.html#a5b0ab1c99420d5362de983c014a11391',1,'mizu_morsel_hdr_s']]],
   ['status_12',['status',['../structmizu__rs__hdr__s.html#a736c726c8c97525f962102dcabc56388',1,'mizu_rs_hdr_s::status'],['../structmizu__sub__stat__s.html#ad67aa384bd90b24c679b1e89494fcf95',1,'mizu_sub_stat_s::status'],['../structmizu__rs__row__s.html#a66a30acae19b6471cf160b3f93fd3c87',1,'mizu_rs_row_s::status'],['../structmizu__sub__slot__s.html#a2dd2ced7829ea099e53d01d76c581e56',1,'mizu_sub_slot_s::status'],['../structmizu__wk__slot__s.html#a5c8ea5bd812556cef1f9eb6fe3d99f82',1,'mizu_wk_slot_s::status']]],
   ['statuses_20not_20exceptions_13',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]],

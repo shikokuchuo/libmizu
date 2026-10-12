@@ -5,7 +5,7 @@ var searchData=
   ['remaining_2',['remaining',['../structmizu__ix__s.html#aa8a3114a078b25081006784b73ac0161',1,'mizu_ix_s']]],
   ['reserved_3',['reserved',['../structmizu__read__ctx__s.html#adc638455383258772e0567ad9364ca61',1,'mizu_read_ctx_s']]],
   ['result_5fslots_4',['result_slots',['../structmizu__pool__hdr__s.html#a9efbba00034b800933f35bc9636632e6',1,'mizu_pool_hdr_s::result_slots'],['../structmizu__pool__opts__s.html#abb6a1bfa125fe9ecc005ff0a1950173d',1,'mizu_pool_opts_s::result_slots']]],
-  ['retain_20table_5',['Retain table',['../md_DESIGN.html#autotoc_md23',1,'']]],
+  ['retain_20table_5',['Retain table',['../md_DESIGN.html#autotoc_md24',1,'']]],
   ['role_6',['role',['../structmizu__pool__status__s.html#a49f131e0d4d4a1fe896d417831cba9ab',1,'mizu_pool_status_s']]],
   ['row_7',['row',['../structmizu__arrow__col__s.html#abc01b80124ce666d8c6d8587af4b13e3',1,'mizu_arrow_col_s']]],
   ['rs_5fcount_8',['rs_count',['../structmizu__sub__slot__s.html#adf46d48bb76361ddcc8153e3c3638f28',1,'mizu_sub_slot_s::rs_count'],['../structmizu__sub__stat__s.html#add2e885bd7f329529915e326171f12c9',1,'mizu_sub_stat_s::rs_count']]],
