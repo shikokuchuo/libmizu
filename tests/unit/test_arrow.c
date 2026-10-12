@@ -1004,6 +1004,7 @@ static void test_tz_override(void) {
   assert(find_span(blob, (size_t) e.attrs_size, "UTC", 3) == NULL);
   blob_check(blob, (size_t) e.attrs_size);
   free(buf);
+  mizu_arrow_close(a);
   /* and the classified default writes "UTC" */
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
   total = mizu_arrow_size(a);
