@@ -13,6 +13,32 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The Arrow frame writer (`src/arrow.c`): an Arrow C Data Interface →
+  MIZL writer in the core, promoted from pymizu's `shmframe.c` so both
+  bindings stage frames through one implementation. The Arrow structs are
+  defined in `mizu_ext.h` under the spec's two include guards
+  (`ARROW_C_DATA_INTERFACE`, `ARROW_C_STREAM_INTERFACE`). The interface:
+  `mizu_arrow_open` (classify + batch vetting + dictionary validation,
+  the decline in the thread-local slot naming the column, its format and
+  the remedy), the `mizu_arrow_remote` / `mizu_arrow_root_blob` /
+  `mizu_arrow_tz` overrides, `mizu_arrow_size`, `mizu_arrow_stage` (the
+  one-call stage over the handle seam — the capability conjunction and
+  the churn check now have one home), `mizu_arrow_col_info` (the
+  per-column plans for a binding's own emitters) and `mizu_arrow_close`,
+  with the `mizu_arrow_warn` conversion counts out-param. The fixed-width
+  conversion kernels export as `mizu_cvt_for_arrow` / `mizu_cvt_convert`
+  over the `mizu_cvt_row` table (`MIZU_CVT_*`). The type map: bool →
+  LGL, int8/int16/uint16 → INT, uint8 → RAW (nulls decline), int32 →
+  INT, uint32 → REAL, int64 → INT64, uint64 → REAL (past 2^53 → NA,
+  counted), float16/32/64 → REAL, utf8/large_utf8/string_view → MIZS,
+  dictionary<strings> → factor (ordered declines), date32 / timestamp /
+  duration → REAL + the Date / POSIXct / difftime blobs. The producer's
+  validity bitmap is authoritative (copied verbatim for a single offset-0
+  batch, rebuilt honouring `batch->offset` otherwise) and the data
+  carries the R sentinels at null slots — the write is always the foreign
+  form (bulk CE_UTF8 marks + the validity tail), so the bytes are
+  peer-agnostic. No wire change: `MIZU_ABI_VERSION` is untouched.
+
 - The byte-shape helper registry (DESIGN.md's Interchange codec section):
   the 'I' machinery that operates purely on byte spans and cursor items
   moves into the core so no byte-level rule keeps a second implementation

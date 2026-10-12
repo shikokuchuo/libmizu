@@ -1,3 +1,11 @@
+mizu_arrow_close
+mizu_arrow_col_info
+mizu_arrow_open
+mizu_arrow_remote
+mizu_arrow_root_blob
+mizu_arrow_size
+mizu_arrow_stage
+mizu_arrow_tz
 mizu_aux_hi
 mizu_aux_rawspill_pool
 mizu_aux_shm_vec
@@ -25,6 +33,8 @@ mizu_channel_recv_batch_fn
 mizu_channel_send
 mizu_channel_send_batch
 mizu_channel_token
+mizu_cvt_convert
+mizu_cvt_for_arrow
 mizu_death_listener_teardown
 mizu_death_watch_start
 mizu_death_watch_stop

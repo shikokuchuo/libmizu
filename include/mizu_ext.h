@@ -1971,6 +1971,207 @@ MIZU_EXT_INLINE size_t mizu_ix_write_err(unsigned char *dst,
 }
 #endif
 
+// The Arrow frame writer (arrow.c) -----------------------------------------------
+
+/** The Arrow C Data Interface structs, defined per the spec under its two
+   include guards (the layout is frozen ABI; no headers, no dependency):
+   ArrowSchema / ArrowArray under ARROW_C_DATA_INTERFACE, ArrowArrayStream
+   under ARROW_C_STREAM_INTERFACE (nanoarrow guards the stream struct
+   separately; one shared guard would leave it redefinable by a later
+   nanoarrow or arrow include). The frame writer reads caller-owned
+   structs; a binding's import front-ends produce them. */
+#ifndef ARROW_C_DATA_INTERFACE
+#define ARROW_C_DATA_INTERFACE
+typedef struct ArrowSchema {
+  const char *format;
+  const char *name;
+  const char *metadata;
+  int64_t flags;
+  int64_t n_children;
+  struct ArrowSchema **children;
+  struct ArrowSchema *dictionary;
+  void (*release)(struct ArrowSchema *);
+  void *private_data;
+} ArrowSchema;
+
+typedef struct ArrowArray {
+  int64_t length;
+  int64_t null_count;
+  int64_t offset;
+  int64_t n_buffers;
+  int64_t n_children;
+  const void **buffers;
+  struct ArrowArray **children;
+  struct ArrowArray *dictionary;
+  void (*release)(struct ArrowArray *);
+  void *private_data;
+} ArrowArray;
+#endif
+
+#ifndef ARROW_C_STREAM_INTERFACE
+#define ARROW_C_STREAM_INTERFACE
+typedef struct ArrowArrayStream {
+  int (*get_schema)(struct ArrowArrayStream *, struct ArrowSchema *out);
+  int (*get_next)(struct ArrowArrayStream *, struct ArrowArray *out);
+  const char *(*get_last_error)(struct ArrowArrayStream *);
+  void (*release)(struct ArrowArrayStream *);
+  void *private_data;
+} ArrowArrayStream;
+#endif
+
+/** The ArrowSchema flags word bits the writer reads (the spec's values). */
+#define MIZU_ARROW_FLAG_DICTIONARY_ORDERED 1
+#define MIZU_ARROW_FLAG_NULLABLE 2
+
+/** The fixed-width conversion rows: an element width pair plus the kernel,
+   producing a MIZU_TYPE_* leaf. */
+enum {
+  MIZU_CVT_COPY = 0,  /**< identity: one memcpy per run */
+  MIZU_CVT_I8_INT,    /**< sign-widen */
+  MIZU_CVT_I16_INT,
+  MIZU_CVT_U16_INT,   /**< zero-widen */
+  MIZU_CVT_U32_REAL,  /**< exact */
+  MIZU_CVT_U64_REAL,
+  MIZU_CVT_F16_REAL,  /**< exact (half decodes into double's wider fields) */
+  MIZU_CVT_F32_REAL,  /**< exact */
+  MIZU_CVT_BOOL8_LGL, /**< one byte per source lane (numpy '?') -> int32 0/1 */
+  MIZU_CVT_BIT_LGL,   /**< one bit per source lane (Arrow 'b') -> int32 0/1 */
+  MIZU_CVT_C64_CPLX   /**< float re/im -> double re/im */
+};
+
+typedef struct mizu_cvt_row_s {
+  int wire;         /**< the MIZU_TYPE_* the row produces */
+  int cvt;          /**< MIZU_CVT_* */
+  uint8_t w_in;     /**< source element bytes (0: bit-packed, MIZU_CVT_BIT_LGL) */
+  uint8_t w_out;
+} mizu_cvt_row;
+
+/** The conversion warning counts, accumulated by mizu_cvt_convert and the
+   frame writer; the binding raises them after the stage returns, never
+   mid-stage. */
+typedef struct mizu_arrow_warn_s {
+  uint64_t n_range;   /**< uint64 past 2^53 -> NA_real_ */
+  uint64_t n_intmin;  /**< a genuine int32 INT32_MIN: reads as NA in R */
+} mizu_arrow_warn;
+
+/** The Arrow-format keying of the conversion table (every supported row a
+   single character); NULL when the format has no row. */
+MIZU_API const mizu_cvt_row *mizu_cvt_for_arrow(const char *fmt);
+
+/** One run's convert into a reserved destination: the BIT_LGL / masked /
+   plain dispatch. src points at the first source element (the caller
+   applies the element offset); off is the bit offset into data and
+   validity for the bit-packed forms, and into validity for the masked
+   forms. valid NULL converts every lane. The warning counts accumulate
+   into warn. */
+MIZU_API void mizu_cvt_convert(uint8_t *dst, const uint8_t *src,
+                               const uint8_t *valid, uint64_t off, size_t n,
+                               const mizu_cvt_row *row,
+                               mizu_arrow_warn *warn);
+
+/** The Arrow -> MIZL frame writer: a classified, batch-vetted frame plus
+   its size-pass results, staged through mizu_arrow_stage. Opaque; the
+   caller owns the schema and batch structs it handed over (they must
+   outlive the handle — the writer reads them only inside
+   mizu_arrow_write). */
+typedef struct mizu_arrow mizu_arrow;
+
+/** The per-column classification, mizu_arrow_col_info's out-param: the
+   kind, the conversion row, and the string / dictionary / temporal
+   particulars a binding's own emitters need. The borrowed level spans are
+   valid until mizu_arrow_close. */
+enum {
+  MIZU_ARROW_CVT = 0,  /**< fixed-width, through the cvt row */
+  MIZU_ARROW_STR,      /**< utf8 / large_utf8 / string_view -> MIZS */
+  MIZU_ARROW_DICT,     /**< dictionary<strings> -> a factor */
+  MIZU_ARROW_DATE,     /**< date32 -> REAL days + the Date blob */
+  MIZU_ARROW_TS,       /**< timestamp -> REAL seconds + the POSIXct blob */
+  MIZU_ARROW_TD        /**< duration -> REAL seconds + the difftime blob */
+};
+
+typedef struct mizu_arrow_col_s {
+  int kind;                  /**< MIZU_ARROW_* */
+  const mizu_cvt_row *row;   /**< CVT */
+  int str_form;              /**< STR / DICT: 1 utf8, 2 large_utf8, 3 view */
+  double ts_scale;           /**< TS / TD: the unit in seconds */
+  const char *tz;            /**< TS: the tzone the leaf blob writes */
+  int idx_w;                 /**< DICT: the index width in bytes */
+  int idx_signed;            /**< DICT */
+  const int32_t *lev_offs;   /**< DICT: the canonical levels (nlev + 1 */
+  const uint8_t *lev_bytes;  /**<   offsets into the packed bytes, */
+  int64_t nlev;              /**<   nlev levels, */
+  int64_t lev_blen;          /**<   lev_blen packed bytes; borrowed) */
+} mizu_arrow_col;
+
+/** Classify every column off the schema (a struct schema; the type map of
+   DESIGN.md's frame section), vet every batch (buffer counts, offsets,
+   null_count range, column lengths, a uint8 column's nulls, unnamed /
+   duplicate names, a zero-column frame) and validate the dictionaries
+   (batch 0's levels canonical, a null level or a level set that differs
+   across batches declines, every index range-checked). batches are
+   caller-owned and must outlive the handle; the writer reads them only
+   inside mizu_arrow_write. peer_caps is the peer's capability mask: the
+   stage's capability conjunction and the per-column leaf choices key off
+   it. MIZU_OK, or MIZU_ERR with the decline in the thread-local slot
+   (mizu_last_error_message) naming the column, its format and the
+   remedy. */
+MIZU_API mizu_status mizu_arrow_open(mizu_arrow **out,
+                                     const ArrowSchema *schema,
+                                     const ArrowArray *const *batches,
+                                     size_t n_batches, uint32_t peer_caps);
+
+/** The per-column classification, for a binding's own emitters over the
+   same batches (pymizu's inline frame forms). col shall be in range. */
+MIZU_API void mizu_arrow_col_info(const mizu_arrow *, int64_t col,
+                                  mizu_arrow_col *out);
+
+/** A remote-leaf override (pymizu's provenance match): column col crosses
+   as directory tag 33 — the identifier span, the referenced leaf's attrs
+   size and validity claim read off the referenced region
+   (mizu_mizl_elem), and one REFHELD OR per distinct referenced region at
+   write. ident is the referenced region's name, ref_base / ref_size its
+   mapping, ref_leaf the referenced 0-based directory leaf; register only
+   for a peer with MIZU_CAP_MIZL_REF. 0, or -1 on a torn referenced tree
+   (the caller leaves the column local). Overrides precede the first
+   mizu_arrow_size / mizu_arrow_stage call. */
+MIZU_API int mizu_arrow_remote(mizu_arrow *, int64_t col,
+                               const char *ident, size_t ident_len,
+                               void *ref_base, size_t ref_size,
+                               int64_t ref_leaf);
+
+/** The root-blob override: a complete 'I' stream for the frame attributes
+   the caller built (pymizu's custom row_names). Absent, the writer emits
+   names + class data.frame + the automatic c(NA, -n) row.names. */
+MIZU_API void mizu_arrow_root_blob(mizu_arrow *, const void *blob,
+                                   size_t len);
+
+/** The tzone override: the POSIXct leaf blob writes tz verbatim (a
+   same-language sender's naivety-preserving form; the classified default
+   writes "UTC" for a naive timestamp). */
+MIZU_API void mizu_arrow_tz(mizu_arrow *, int64_t col, const char *tz);
+
+/** The region span in bytes: runs the size pass on first call (the result
+   memoizes; overrides registered after it do not move the span). */
+MIZU_API size_t mizu_arrow_size(mizu_arrow *);
+
+/** The one-call stage over the handle seam, valid only during a stage_fn
+   call. First the gate, touching no shared state: the capability
+   conjunction (MIZU_CAP_MIZL | MIZU_CAP_ATTRS, plus MIZU_CAP_MIZS when any
+   column is a string) off the classification and the peer_caps given at
+   open, then the churn check. Then mizu_stage_reap, the spill checkout,
+   the write, the SHM_VEC stamp (name payload, aux type VEC + used bytes)
+   and mizu_stage_retain_zc. MIZU_OK staged; otherwise a non-OK status —
+   the gate's decline or the spill status when no region — with nothing
+   claimed: the caller's copy tiers take every non-OK alike. The caller
+   pins nothing: the region is self-contained unless it registered remote
+   leaves, whose pins are its own. warn (zeroed here) returns the
+   conversion counts; the binding raises them after the stage returns. */
+MIZU_API mizu_status mizu_arrow_stage(mizu_handle *, mizu_arrow *,
+                                      mizu_slot_hdr *hdr,
+                                      unsigned char *payload,
+                                      mizu_arrow_warn *warn);
+MIZU_API void mizu_arrow_close(mizu_arrow *);
+
 // Utilities ----------------------------------------------------------------------
 
 /** Monotonic seconds (the spin/deadline clock) and the current pid

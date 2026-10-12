@@ -167,10 +167,22 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_morsel_span_of);
   refs += sink((mizu_any_fn) &mizu_morsel_lost);
 
+  /* The Arrow frame writer and the conversion kernels. */
+  refs += sink((mizu_any_fn) &mizu_cvt_for_arrow);
+  refs += sink((mizu_any_fn) &mizu_cvt_convert);
+  refs += sink((mizu_any_fn) &mizu_arrow_open);
+  refs += sink((mizu_any_fn) &mizu_arrow_col_info);
+  refs += sink((mizu_any_fn) &mizu_arrow_remote);
+  refs += sink((mizu_any_fn) &mizu_arrow_root_blob);
+  refs += sink((mizu_any_fn) &mizu_arrow_tz);
+  refs += sink((mizu_any_fn) &mizu_arrow_size);
+  refs += sink((mizu_any_fn) &mizu_arrow_stage);
+  refs += sink((mizu_any_fn) &mizu_arrow_close);
+
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 106);
+  assert(refs == 116);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

@@ -436,4 +436,14 @@ static inline MIZU_MAYBE_UNUSED int mizu_binding_check(const mizu_binding *b,
   return 0;
 }
 
+// Arrow frame writer internals (arrow.c) ------------------------------------------
+
+/* The raw layout write into caller memory (base sized mizu_arrow_size) and
+   the frame's total row count: the unit tier's byte-compare surface.
+   Bindings stage through mizu_arrow_stage; only tests/unit/test_arrow.c
+   calls these. The write runs the memoized size pass first when
+   mizu_arrow_size didn't. */
+void mizu_arrow_write(mizu_arrow *, void *base, mizu_arrow_warn *);
+int64_t mizu_arrow_rows(const mizu_arrow *);
+
 #endif /* MIZU_INTERNAL_H */
