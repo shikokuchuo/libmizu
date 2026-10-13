@@ -174,8 +174,8 @@ Byte 0: `'I'` (0x49). Byte 1: format version (0x01). Then exactly one value: a s
 |---|---|---|---|
 | 0x00 nil | — | `NULL` | `None` |
 | 0x01 lgl1 | u8: 0/1/2=NA | `logical(1)` | `bool` (NA → `None`, documented lossy) |
-| 0x02 int | i64; INT64_MIN = NA | `NA_integer_` ↔ INT64_MIN; otherwise `integer(1)` if in (INT_MIN, INT_MAX], else `integer64(1)` (bit64 layout). −2^31 is `NA_integer_` in R, so it takes the integer64 home like any value past int32. R never writes 0x02 from an integer64 (0x0e) | `int`; INT64_MIN → `None` (documented lossy, as lgl1 — a Python −2^63 arrives in R as `NA_integer_` and relays back as `None`: the `MIZU_TYPE_INT64` sentinel collision, documented) |
-| 0x03 real | f64 bits | `numeric(1)` | `float` (NaN payloads bitwise-preserved; `NA_real_` arrives as NaN) |
+| 0x02 int | i64; INT64_MIN = NA (this stream has no validity section — the sentinel is the whole null record; see Validity as data) | `NA_integer_` ↔ INT64_MIN; otherwise `integer(1)` if in (INT_MIN, INT_MAX], else `integer64(1)` (bit64 layout). −2^31 is `NA_integer_` in R, so it takes the integer64 home like any value past int32. R never writes 0x02 from an integer64 (0x0e) | `int`; INT64_MIN → `None` (documented lossy, as lgl1 — a Python −2^63 arrives in R as `NA_integer_` and relays back as `None`: the `MIZU_TYPE_INT64` sentinel collision, documented) |
+| 0x03 real | f64 bits (`NA_real_` crosses as its NaN payload; no validity section here either — see Validity as data) | `numeric(1)` | `float` (NaN payloads bitwise-preserved; `NA_real_` arrives as NaN) |
 | 0x04 str | i32 len (−1 = NA) + UTF-8 | `character(1)`; `NA_character_` ↔ len −1; written as UTF-8 (latin1 translates — `identical()`-clean), CE_BYTES and invalid UTF-8 decline; read as CE_UTF8 | `str`; NA ↔ `None` (documented lossy, as strv) |
 | 0x05 bytes | u64 count + bytes | `raw` (read only: R writes every raw vector as 0x0a rawv under the atomic-vector rule — raw has no scalar form) | `bytes` (written by exact-type `bytes`; a relayed `bytes` returns as a uint8 array, the home a top-level `bytes` already has on the RAW wire type — documented) |
 | 0x06–0x0a lglv/intv/realv/cplxv/rawv | u64 count + raw element bytes | atomic vector (NA sentinels per `MIZU_TYPE_*`) | numpy array; lglv and intv follow the §3 item 2 fused-scan rule on every copy tier — lglv: `bool_` if no NA, else int32 with `INT_MIN`; intv: int32 if no `INT_MIN` element, else float64 (every int32 is exact there) with R's `NA_real_` payload for each missing; no numpy → memoryview/list (sentinels in place, documented) |
@@ -503,12 +503,12 @@ The column kinds:
 - **DATE / TS / TD**: date32 → a REAL leaf of days + the Date blob; `timestamp[unit, tz]` and `duration[unit]` (units s/m/u/n) → a REAL leaf of seconds + the POSIXct or difftime blob, the zone name riding the POSIXct blob. The ns unit is the `tscale` case below.
 
 The conversion kernels (`mizu_cvt_for_arrow` / `mizu_cvt_convert`) single-source the fixed-width rows every binding previously kept: identity copy, sign- and zero-widening narrow ints to int32, uint32 and uint64 to double (past 2^53 → `NA_real_`), float16 and float32 to double (exact), bool byte- and bit-packed to logical, complex64 to complex128.
-The producer's validity bitmap is authoritative — copied into the region's validity tail verbatim for a single offset-0 batch, rebuilt honouring the batch offset otherwise — and the data carries the R NA sentinels at null slots, patched in the copy; an Arrow NaN is a value and stays NaN.
+The producer's validity bitmap is authoritative (the validity-as-data section below) — copied into the region's validity tail verbatim for a single offset-0 batch, rebuilt honouring the batch offset otherwise — and the data carries the R NA sentinels at null slots, patched in the copy; an Arrow NaN is a value and stays NaN.
 A uint8 column's nulls declines (R raw has no NA).
 The loss events accumulate as counts (`mizu_arrow_warn`: uint64 past 2^53, a genuine INT32_MIN) which the binding raises after the stage returns, never mid-stage.
 The write is always the foreign form — bulk CE_UTF8 marks and the validity tail — so the bytes are peer-agnostic: an R reader takes the sentinels and ignores the tail, a Python reader takes the bitmap.
 
-**The verbatim nanosecond form.** A `timestamp[ns]` or `duration[ns]` column for a peer advertising `MIZU_CAP_MIZL_TSN` (bit 5) stages verbatim: an INT64 leaf (the identity i64 row, NaT the `INT64_MIN` sentinel) whose blob gains `tscale` (strv `"ns"`) beside `class` + `tzone` or `class` + `units` — the i64 counts' scale label, the non-verbatim blob needing none (its REAL values are always seconds, so `units` is fixed).
+**The verbatim nanosecond form.** A `timestamp[ns]` or `duration[ns]` column for a peer advertising `MIZU_CAP_MIZL_TSN` (bit 5) stages verbatim: an INT64 leaf (the identity i64 row, NaT the `INT64_MIN` sentinel) whose blob gains `tscale` (the 0x04 str scalar `"ns"`) beside `class` + `tzone` or `class` + `units` — the i64 counts' scale label, the non-verbatim blob needing none (its REAL values are always seconds, so `units` is fixed).
 Without the bit the same column takes the REAL-seconds form (the 1e-9 rescale; sub-µs resolution rounds, as the whitelist rows document).
 One bit, one layout variant — the versioning rule's new-bit-for-a-gated-shape case.
 
@@ -522,6 +522,30 @@ The overrides register before the first `mizu_arrow_size` / `mizu_arrow_stage` c
 
 Wire invariants: a frame is one self-contained MIZL region — the 64-byte header, one 32-byte directory entry per column, the column bodies at 64-byte-aligned offsets, the leaf blobs, the root frame blob, then the validity tail — framed SHM_VEC with the exact used byte count; remote leaves are the only outgoing references, their REFHELD pins the writer's own.
 Staging is transactional: the writer is pure C over caller-owned memory until the layout write lands in the region.
+
+### Validity as data
+
+When a MIZH or MIZL header's validity pair is not `{0, 0}`, the section it locates is the **authoritative null record** for the layout: the in-band sentinels (`NA_real_`'s NaN payload, `INT_MIN`, `INT64_MIN`) are the null-slot fill, not the record. `{0, -1}` asserts authoritatively null-free.
+The declaration is semantic, not byte-level: the section already exists, so it needs no capability bit — a pre-dating reader simply never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions. `MIZU_ABI_VERSION` stays 1.
+
+**The fill invariant.** A writer that emits a section writes the wire type's sentinel at every clear bit.
+The bitmap and the sentinels never disagree in the null direction, so a reader that ignores the section (R's value reads) still reads every null as NA; they may disagree only in the other direction — a *set* bit over a sentinel value is a genuine value.
+
+Readers split on whether the boundary has a null concept.
+At one (an Arrow export, a Frame export) a carried bitmap applies verbatim, and on an absent section (`{0, 0}`) the reader derives it lazily from the sentinels — one rule for every atomic wire type, REAL included (its test is the payload, not `isnan`: an Arrow NaN is a value and stays valid).
+At a boundary without one (R values, numpy) a set valid bit over a sentinel value is a genuine value; where the read walks the bitmap anyway it warns and names the fidelity accessor, but the landing itself is unchanged — the one irreducible collapse, R's data model.
+
+Writers emit the section whenever the source carries a null record (an Arrow validity bitmap, a foreign fused build).
+A writer whose data model has no genuine-sentinel concept may leave `{0, 0}`; `{0, -1}` asserts null-free and makes a genuine sentinel a value on every Python read, so the stamp belongs on data the writer knows cannot carry a null.
+The `'I'` stream has no validity section — the sentinels are its whole null record, as the tag table's 0x02/0x03 cells document.
+
+**The uint64 verbatim form.** A `'L'` (uint64) frame column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages verbatim: an INT64 leaf — the identity i64 lanes, the validity machinery unchanged — whose attrs blob carries a u64 marker key.
+Without the bit the same column takes the conversion (double; past 2^53 → `NA_real_`, counted) — one bit, one layout variant, the TSN precedent.
+Both bindings advertise the bit, so every current-version pair crosses uint64 frames verbatim; the R landing keeps the column a view (double + NA at materialization, exact at the Arrow export), which removes the sign-flip path and makes advertising safe there.
+A verbatim region relayed to a pre-cap reader splits by reader: an old pymizu declines on the unknown attr key (its attributed-column fill rejects an unmatched attrs set); an old mizu/mori applies the dict as-is and reads sign-flipped int64 with a stray attribute.
+The degradation is channel-scoped: pool worker joins CAS the whole identity word, so a pool's workers never mix versions — the conversion runs for pre-cap channel peers and mixed-version submitters only. `MIZU_ABI_VERSION` stays 1 under the append-only cap policy.
+
+A dedicated null-mask tier was considered and rejected: it duplicates the section machinery, costs a capability bit, and buys nothing.
 
 ## The binding seam
 

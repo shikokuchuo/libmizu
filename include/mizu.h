@@ -331,7 +331,10 @@ MIZU_API size_t mizu_type_elt_size(int type);
    nested header / the string block carries its own), and [48-55] is the
    total null count across that header's remaining leaves. Reserved-zero
    means absent, so a pre-dating reader simply never looks; the section
-   needs no capability bit. */
+   needs no capability bit. When the pair is not {0, 0} the section is the
+   authoritative null record: the in-band sentinels are the null-slot fill,
+   and a writer emitting a section writes the wire type's sentinel at every
+   clear bit (DESIGN.md's validity-as-data rules are normative). */
 #define MIZU_HDR_VALID_OFF   ((size_t) 40)
 #define MIZU_HDR_VALID_COUNT ((size_t) 48)
 

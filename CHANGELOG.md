@@ -13,6 +13,22 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The validity section's semantics are normative in DESIGN.md ("validity
+  as data"): when a MIZH/MIZL header's validity pair is not `{0, 0}` the
+  section is the authoritative null record and the in-band sentinels are
+  the null-slot fill, with the fill invariant (a writer emitting a section
+  writes the wire type's sentinel at every clear bit), the reader rules
+  (a carried bitmap applies verbatim at null-concept boundaries; an absent
+  section derives lazily from the sentinels — one rule for every atomic
+  wire type, REAL's test the payload not `isnan`) and the writer rules
+  (emit when the source carries a null record; `{0, -1}` only on data
+  known null-free). The uint64 verbatim form is specified beside it: a
+  `'L'` frame column stages as an INT64 leaf with a u64 marker attr for a
+  peer advertising `MIZU_CAP_MIZL_U64V` (bit 6), both bindings advertise,
+  and the degradation for pre-cap readers is channel-scoped. No byte
+  change from the validity declaration: the section needs no capability
+  bit and `MIZU_ABI_VERSION` is untouched.
+
 - The Arrow frame writer (`src/arrow.c`): an Arrow C Data Interface →
   MIZL writer in the core, promoted from pymizu's `shmframe.c` so both
   bindings stage frames through one implementation. The Arrow structs are
