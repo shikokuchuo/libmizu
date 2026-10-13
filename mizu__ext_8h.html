@@ -226,6 +226,10 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_MIZL_TSN</b>&#160;&#160;&#160;(1u &lt;&lt; 5)</td></tr>
 <tr class="memdesc:ab76ac0a4c96d06f733bc4a41cd65f206"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads MIZL INT64 leaves carrying a tscale attribute — verbatim nanosecond timestamps and durations <br /></td></tr>
 <tr class="separator:ab76ac0a4c96d06f733bc4a41cd65f206"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a71e04ff99f9c14f8489830de32422dc2" id="r_a71e04ff99f9c14f8489830de32422dc2"><td class="memItemLeft" align="right" valign="top"><a id="a71e04ff99f9c14f8489830de32422dc2" name="a71e04ff99f9c14f8489830de32422dc2"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_MIZL_U64V</b>&#160;&#160;&#160;(1u &lt;&lt; 6)</td></tr>
+<tr class="memdesc:a71e04ff99f9c14f8489830de32422dc2"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads MIZL INT64 leaves carrying a u64 attribute — verbatim uint64 frame columns <br /></td></tr>
+<tr class="separator:a71e04ff99f9c14f8489830de32422dc2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5b840ab0de642c2462a22c967295f6e2" id="r_a5b840ab0de642c2462a22c967295f6e2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a5b840ab0de642c2462a22c967295f6e2">MIZU_IDENT</a>(lang,  caps)&#160;&#160;&#160;  ((uint64_t) (uint8_t) (lang) | ((uint64_t) (uint32_t) (caps) &lt;&lt; 32))</td></tr>
 <tr class="memdesc:a5b840ab0de642c2462a22c967295f6e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The identity word: the language in bits 0-7, the 32-bit capability mask in bits 32-63, bits 8-31 reserved — written zero and ignored by readers (a negotiation word, so a later field needs no reader taught to skip it).  <br /></td></tr>
 <tr class="separator:a5b840ab0de642c2462a22c967295f6e2"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -294,6 +298,9 @@ Macros</h2></td></tr>
 <tr class="memitem:a9fae6f584ee66174120859aa6fc21ab7" id="r_a9fae6f584ee66174120859aa6fc21ab7"><td class="memItemLeft" align="right" valign="top"><a id="a9fae6f584ee66174120859aa6fc21ab7" name="a9fae6f584ee66174120859aa6fc21ab7"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_TSCALE</b>&#160;&#160;&#160;&quot;tscale&quot;</td></tr>
 <tr class="separator:a9fae6f584ee66174120859aa6fc21ab7"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:af3a91cf264ca8ad63e824d302c1952a6" id="r_af3a91cf264ca8ad63e824d302c1952a6"><td class="memItemLeft" align="right" valign="top"><a id="af3a91cf264ca8ad63e824d302c1952a6" name="af3a91cf264ca8ad63e824d302c1952a6"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_U64</b>&#160;&#160;&#160;&quot;u64&quot;</td></tr>
+<tr class="separator:af3a91cf264ca8ad63e824d302c1952a6"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a845b6a0165d0d69a7f5a185859df4419" id="r_a845b6a0165d0d69a7f5a185859df4419"><td class="memItemLeft" align="right" valign="top"><a id="a845b6a0165d0d69a7f5a185859df4419" name="a845b6a0165d0d69a7f5a185859df4419"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_FACTOR</b>&#160;&#160;&#160;&quot;factor&quot;</td></tr>
 <tr class="separator:a845b6a0165d0d69a7f5a185859df4419"><td class="memSeparator" colspan="2">&#160;</td></tr>
