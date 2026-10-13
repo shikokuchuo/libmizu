@@ -73,8 +73,8 @@ cplxv-na | rt | all | cplxv[cplx(1,2),cplx(na,na)]
 cplxv-empty | rt | all | cplxv[]
 strv | rt | R | strv["a","bc","hé"]
 strv-na | rt | R | strv["a",na,"c"]
-py-strv | dec | PY | strv["a",na,"c"] => list(str("a"),nil,str("c")) | a list of str-or-None; Python re-encodes a 0x0c list
-py-strv-plain | dec | PY | strv["a","bc"] => list(str("a"),str("bc"))
+py-strv | rt | PY | strv["a",na,"c"] | Python's strv home is a list of str-or-None, re-encoded the strv form
+py-strv-plain | rt | PY | strv["a","bc"]
 strv-empty | rt | R | strv[]
 py-strv-empty | dec | PY | strv[] => list()
 i64v | rt | all | i64v[1,-1,9223372036854775807,-9223372036854775807]
@@ -95,9 +95,9 @@ tuple | enc | PY | tuple(int(1),str("a")) | a tuple encodes 0x0c and reads back 
 
 # --- attr shapes ---
 factor | rt | R | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor"))
-py-factor | dec | PY | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor")) => list(str("a"),str("b"),str("b")) | a standalone factor -> a list of str-or-None
+py-factor | dec | PY | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor")) => list(str("a"),str("b"),str("b")) | a standalone factor -> a list of str-or-None; the re-encode is the strv form, not the factor
 factor-na | rt | R | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) | a factor with an NA code
-py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) => list(str("x"),nil,str("y"))
+py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) => list(str("x"),nil,str("y")) | the re-encode is the strv form, not the factor
 frame-1col | rt | all | attr(list(realv[1,2]), names=str("x"), class=str("data.frame"), row.names=intv[na,-2]) | a one-column frame, automatic row names
 frame-0row | rt | all | attr(list(intv[],strv[]), names=strv["a","b"], class=str("data.frame"), row.names=intv[na,0]) | a zero-row frame: c(NA, 0)
 frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=str("f"), class=str("factor")), i64v[5,na]), names=strv["n","f","i"], class=str("data.frame"), row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column
@@ -142,7 +142,7 @@ task-name-py2r | task | all | task(2, 0, 30064771075, str("stats::quantile"), li
 task-source-r2py | task | all | task(3, 1, 30064771074, str("x + 1"), list(), dict(x=int(41))) | source kind, the trailing-expression convention
 task-source-py2r | task | all | task(2, 1, 30064771075, str("x * 2"), list(), dict(x=int(21))) | source kind for R workers
 task-empty | task | all | task(2, 0, 30064771075, str("base::pi"), list(), dict()) | both argument fields always present, either may be empty
-task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=list(str("x"),str("y")))), dict()) | ordinary interop values nest in the argument fields (a strv stays home: Python re-encodes it a 0x0c list)
+task-nested | task | all | task(3, 0, 30064771074, str("builtins.len"), list(list(int(1),str("a"),nil),dict(k=strv["x","y"])), dict()) | ordinary interop values nest in the argument fields (a list of strs crosses as a 0x0b strv)
 
 # --- refs (F1): a region identifier as an ordinary value leaf ---
 task-ref-positional | task | all | task(3, 0, 30064771074, str("numpy.mean"), list(ref("mizu_a1b2c3d4e5f6")), dict()) | a view re-sent as a positional argument (REF)
