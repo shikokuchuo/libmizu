@@ -13,6 +13,21 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The Arrow frame writer's verbatim uint64 form: a `'L'` (uint64) column
+  for a peer advertising the new `MIZU_CAP_MIZL_U64V` capability bit
+  (bit 6) stages as an INT64 leaf — the identity lanes, the validity
+  machinery unchanged — whose attrs blob is `{u64 = TRUE}` (new
+  vocabulary macro `MIZU_IX_ATTR_U64`); a peer short of the bit gets the
+  REAL conversion as before. `mizu_arrow_warn` gains `n_int64` (a
+  genuine `INT64_MIN` on a masked int64 identity column — reads as NA in
+  R), counted beside `n_intmin` on the masked walk only with the
+  verbatim rows excluded (a twin `CVT_ROW_I64_V` keyed out by pointer
+  compare); `mizu_arrow_stage` zeroes the struct, so existing
+  initializers are unaffected. `mizu_arrow_col` gains the
+  `u64_verbatim` out-field for a binding's own emitters. No ABI bump
+  (capability bits are append-only); the fuzzers need no rows
+  (`fuzz_arrow` opens caps-less, so its `'L'` rows stay on the
+  conversion path, as its TSN rows do).
 - The validity section's semantics are normative in DESIGN.md ("validity
   as data"): when a MIZH/MIZL header's validity pair is not `{0, 0}` the
   section is the authoritative null record and the in-band sentinels are

@@ -266,18 +266,25 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
   return w;
 }
 
+/* The verbatim rows share the identity i64 row's contents: the pointer
+   compare keys them out of the n_int64 count (a cap-peer reads their
+   lanes exactly, so an INT64_MIN pattern there is a genuine value). */
+static const mizu_cvt_row CVT_ROW_I64_V;
+
 /* The masked variant (Arrow nulls): word-wise over the validity bitmap —
    an all-ones word a 64-lane convert, a zero word a 64-sentinel fill,
    mixed the per-lane select. off is the element offset: a bit offset
-   into the bitmap (the word reads absorb it). Genuine INT_MIN values are
-   counted on the int32 identity row (they read as NA_integer_ in R); the
-   other rows cannot produce one. */
+   into the bitmap (the word reads absorb it). Genuine sentinel values
+   are counted on the int32 and int64 identity rows (they read as
+   NA_integer_ / NA_integer64_ in R); the other rows cannot produce one. */
 static void convert_masked(uint8_t *dst, const uint8_t *src,
                            const uint8_t *valid, uint64_t off, size_t n,
                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   const size_t wo = row->w_out, wi = row->w_in;
   const int count_min = row->wire == MIZU_TYPE_INT &&
     row->cvt == MIZU_CVT_COPY;
+  const int count_min64 = row->wire == MIZU_TYPE_INT64 &&
+    row->cvt == MIZU_CVT_COPY && row != &CVT_ROW_I64_V;
   size_t i = 0;
   while (i < n) {
     size_t lanes = n - i < 64 ? n - i : 64;
@@ -294,6 +301,12 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
         uint64_t cnt = 0;
         for (size_t j = 0; j < lanes; j++) cnt += d[j] == INT32_MIN;
         warn->n_intmin += cnt;
+      } else if (count_min64) {
+        cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
+        const int64_t *d = (const int64_t *) (dst + i * wo);
+        uint64_t cnt = 0;
+        for (size_t j = 0; j < lanes; j++) cnt += d[j] == INT64_MIN;
+        warn->n_int64 += cnt;
       } else {
         cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
       }
@@ -307,6 +320,10 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
             int32_t v;
             memcpy(&v, dst + (i + j) * wo, 4);
             warn->n_intmin += v == INT32_MIN;
+          } else if (count_min64) {
+            int64_t v;
+            memcpy(&v, dst + (i + j) * wo, 8);
+            warn->n_int64 += v == INT64_MIN;
           }
         } else {
           cvt_fill_na(dst + (i + j) * wo, 1, row->wire);
@@ -343,6 +360,7 @@ static const mizu_cvt_row CVT_ROW_U16 = { MIZU_TYPE_INT, MIZU_CVT_U16_INT, 2, 4 
 static const mizu_cvt_row CVT_ROW_I32 = { MIZU_TYPE_INT, MIZU_CVT_COPY, 4, 4 };
 static const mizu_cvt_row CVT_ROW_U32 = { MIZU_TYPE_REAL, MIZU_CVT_U32_REAL, 4, 8 };
 static const mizu_cvt_row CVT_ROW_I64 = { MIZU_TYPE_INT64, MIZU_CVT_COPY, 8, 8 };
+static const mizu_cvt_row CVT_ROW_I64_V = { MIZU_TYPE_INT64, MIZU_CVT_COPY, 8, 8 };
 static const mizu_cvt_row CVT_ROW_U64 = { MIZU_TYPE_REAL, MIZU_CVT_U64_REAL, 8, 8 };
 static const mizu_cvt_row CVT_ROW_F16 = { MIZU_TYPE_REAL, MIZU_CVT_F16_REAL, 2, 8 };
 static const mizu_cvt_row CVT_ROW_F32 = { MIZU_TYPE_REAL, MIZU_CVT_F32_REAL, 4, 8 };
@@ -454,6 +472,17 @@ static void arrow_ixe_class(arrow_ixe *e, const char *const *names,
     lens[i] = (int64_t) strlen(names[i]);
   }
   arrow_ixe_strv(e, n, strs, lens);
+}
+
+/* The u64 marker dict {u64 = TRUE} — the verbatim uint64 form's leaf:
+   INT64 lanes the reader interprets unsigned. */
+static size_t arrow_blob_u64(uint8_t *dst) {
+  arrow_ixe e = { dst, 0 };
+  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
+  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 1));
+  arrow_ixe_key(&e, MIZU_IX_ATTR_U64);
+  ARROW_IXE_PUT(&e, mizu_ix_put_lgl(ARROW_IXE_DST(&e), 1));
+  return e.total;
 }
 
 /* The frame dict's names value: the corpus's scalar form at length 1. */
@@ -587,6 +616,8 @@ typedef struct {
   int idx_w;            /* DICT: the index width */
   int idx_signed;       /* DICT */
   int64_t str_bytes;    /* STR: the packed byte total (the open's walk) */
+  int u64_verbatim;     /* CVT 'L': the MIZU_CAP_MIZL_U64V verdict,
+                           resolved at classify */
 } arrow_pcol;
 
 typedef struct {
@@ -726,6 +757,14 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
     pc->ts_verbatim = f[2] == 'n' &&
       (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
     pc->kind = MIZU_ARROW_TD;
+    return 0;
+  }
+  if (f[0] == 'L' && f[1] == '\0') {
+    /* uint64: verbatim (an INT64 leaf + the u64 blob attr) for a peer
+       advertising MIZU_CAP_MIZL_U64V, else the REAL conversion */
+    pc->kind = MIZU_ARROW_CVT;
+    pc->row = &CVT_ROW_U64;
+    pc->u64_verbatim = (a->peer_caps & MIZU_CAP_MIZL_U64V) != 0;
     return 0;
   }
   const mizu_cvt_row *row = mizu_cvt_for_arrow(f);
@@ -990,6 +1029,7 @@ static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
   switch (pc->kind) {
   case MIZU_ARROW_CVT:
     c->body = a->rows * pc->row->w_out;
+    if (pc->u64_verbatim) c->blob = (int64_t) arrow_blob_u64(NULL);
     break;
   case MIZU_ARROW_STR:
     c->body = mizu_mizs_geometry(a->rows).data + pc->str_bytes;
@@ -1299,8 +1339,17 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
       entry.attrs_size = (int32_t) c->blob;
       switch (pc->kind) {
       case MIZU_ARROW_CVT:
-        entry.sexptype = pc->row->wire;
-        arrow_write_cvt(dst, a, i, pc->row, warn);
+        if (pc->u64_verbatim) {
+          /* uint64 verbatim: the identity i64 lanes (the excluded twin —
+             an INT64_MIN pattern is a genuine value here), the u64
+             marker the reader's unsigned interpretation */
+          entry.sexptype = MIZU_TYPE_INT64;
+          arrow_write_cvt(dst, a, i, &CVT_ROW_I64_V, warn);
+          arrow_blob_u64(dst + c->body);
+        } else {
+          entry.sexptype = pc->row->wire;
+          arrow_write_cvt(dst, a, i, pc->row, warn);
+        }
         break;
       case MIZU_ARROW_STR:
         entry.sexptype = MIZU_TYPE_STR;
@@ -1322,7 +1371,7 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
           /* the ns counts verbatim: the identity i64 row, NaT the INT64
              sentinel, the tscale pair the scale label */
           entry.sexptype = MIZU_TYPE_INT64;
-          arrow_write_cvt(dst, a, i, &CVT_ROW_I64, warn);
+          arrow_write_cvt(dst, a, i, &CVT_ROW_I64_V, warn);
           arrow_blob_ts(dst + c->body, c->tz, 1);
         } else {
           entry.sexptype = MIZU_TYPE_REAL;
@@ -1333,7 +1382,7 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
       case MIZU_ARROW_TD:
         if (pc->ts_verbatim) {
           entry.sexptype = MIZU_TYPE_INT64;
-          arrow_write_cvt(dst, a, i, &CVT_ROW_I64, warn);
+          arrow_write_cvt(dst, a, i, &CVT_ROW_I64_V, warn);
           arrow_blob_difftime(dst + c->body, 1);
         } else {
           entry.sexptype = MIZU_TYPE_REAL;
@@ -1517,6 +1566,7 @@ void mizu_arrow_col_info(const mizu_arrow *a, int64_t col,
   out->lev_bytes = a->lev_bytes[col];
   out->nlev = a->nlevs[col];
   out->lev_blen = a->lev_blens[col];
+  out->u64_verbatim = pc->u64_verbatim;
 }
 
 int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,

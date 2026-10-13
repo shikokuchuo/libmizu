@@ -505,12 +505,13 @@ The column kinds:
 The conversion kernels (`mizu_cvt_for_arrow` / `mizu_cvt_convert`) single-source the fixed-width rows every binding previously kept: identity copy, sign- and zero-widening narrow ints to int32, uint32 and uint64 to double (past 2^53 → `NA_real_`), float16 and float32 to double (exact), bool byte- and bit-packed to logical, complex64 to complex128.
 The producer's validity bitmap is authoritative (the validity-as-data section below) — copied into the region's validity tail verbatim for a single offset-0 batch, rebuilt honouring the batch offset otherwise — and the data carries the R NA sentinels at null slots, patched in the copy; an Arrow NaN is a value and stays NaN.
 A uint8 column's nulls declines (R raw has no NA).
-The loss events accumulate as counts (`mizu_arrow_warn`: uint64 past 2^53, a genuine INT32_MIN) which the binding raises after the stage returns, never mid-stage.
+The loss events accumulate as counts (`mizu_arrow_warn`: uint64 past 2^53, a genuine INT32_MIN, a genuine INT64_MIN) which the binding raises after the stage returns, never mid-stage; the sentinel counts run only on the masked walk (a null-free column takes no walk and never counts), and the verbatim rows (nanosecond temporal, uint64) are excluded — a cap-peer reads those lanes exactly.
 The write is always the foreign form — bulk CE_UTF8 marks and the validity tail — so the bytes are peer-agnostic: an R reader takes the sentinels and ignores the tail, a Python reader takes the bitmap.
 
 **The verbatim nanosecond form.** A `timestamp[ns]` or `duration[ns]` column for a peer advertising `MIZU_CAP_MIZL_TSN` (bit 5) stages verbatim: an INT64 leaf (the identity i64 row, NaT the `INT64_MIN` sentinel) whose blob gains `tscale` (the 0x04 str scalar `"ns"`) beside `class` + `tzone` or `class` + `units` — the i64 counts' scale label, the non-verbatim blob needing none (its REAL values are always seconds, so `units` is fixed).
 Without the bit the same column takes the REAL-seconds form (the 1e-9 rescale; sub-µs resolution rounds, as the whitelist rows document).
 One bit, one layout variant — the versioning rule's new-bit-for-a-gated-shape case.
+The uint64 column's verbatim form is the same shape: a `'L'` column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages as an INT64 leaf whose blob is `{u64 = TRUE}`, else the REAL conversion — the validity-as-data section below is normative for both.
 
 `mizu_arrow_stage` is the one-call stage over the handle seam, valid inside a binding's `stage` hook.
 The gate runs first, touching no shared state: the capability conjunction (`MIZU_CAP_MIZL` | `MIZU_CAP_ATTRS`, plus `MIZU_CAP_MIZS` when any column is a string) off the classification and the peer's mask, then the churn check.

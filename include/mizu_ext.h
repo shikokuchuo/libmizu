@@ -139,6 +139,8 @@ extern "C" {
    directory tag 33 */
 #define MIZU_CAP_MIZL_TSN (1u << 5) /**< reads MIZL INT64 leaves carrying
    a tscale attribute — verbatim nanosecond timestamps and durations */
+#define MIZU_CAP_MIZL_U64V (1u << 6) /**< reads MIZL INT64 leaves carrying
+   a u64 attribute — verbatim uint64 frame columns */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -1506,6 +1508,7 @@ MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 #define MIZU_IX_ATTR_ROWNAMES "row.names"
 #define MIZU_IX_ATTR_TZONE    "tzone"
 #define MIZU_IX_ATTR_TSCALE   "tscale"
+#define MIZU_IX_ATTR_U64      "u64"
 
 #define MIZU_IX_CLASS_FACTOR    "factor"
 #define MIZU_IX_CLASS_DATE      "Date"
@@ -2055,6 +2058,7 @@ typedef struct mizu_cvt_row_s {
 typedef struct mizu_arrow_warn_s {
   uint64_t n_range;   /**< uint64 past 2^53 -> NA_real_ */
   uint64_t n_intmin;  /**< a genuine int32 INT32_MIN: reads as NA in R */
+  uint64_t n_int64;   /**< a genuine int64 INT64_MIN: reads as NA in R */
 } mizu_arrow_warn;
 
 /** The Arrow-format keying of the conversion table (every supported row a
@@ -2104,6 +2108,8 @@ typedef struct mizu_arrow_col_s {
   const uint8_t *lev_bytes;  /**<   offsets into the packed bytes, */
   int64_t nlev;              /**<   nlev levels, */
   int64_t lev_blen;          /**<   lev_blen packed bytes; borrowed) */
+  int u64_verbatim;          /**< CVT 'L': the MIZU_CAP_MIZL_U64V verdict
+   (the leaf writes INT64 + the u64 blob attr, not the REAL conversion) */
 } mizu_arrow_col;
 
 /** Classify every column off the schema (a struct schema; the type map of

@@ -822,6 +822,89 @@ static void test_temporal_ns(void) {
   mizu_arrow_close(a);
 }
 
+static void test_uint64_verbatim(void) {
+  /* 'L': the verbatim INT64 leaf + the u64 blob attr with a capable peer
+     word, the REAL conversion without; the n_int64 count and its
+     exclusions */
+  ArrowSchema cl, ci, root;
+  ArrowSchema *kids[2] = { &cl, &ci };
+  mk_schema(&cl, "L", "u", NULL, 0, NULL, 0);
+  mk_schema(&ci, "l", "i", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+
+  /* element 1 null in both; u's element 2 an INT64_MIN pattern (2^63
+     unsigned), i's element 0 a genuine INT64_MIN marked valid */
+  const uint8_t bm = 0x05;
+  const uint64_t uv[3] = { 42, 0, 0x8000000000000000ULL };
+  const int64_t iv[3] = { INT64_MIN, 0, 7 };
+  const void *ub[2] = { &bm, uv };
+  const void *ib[2] = { &bm, iv };
+  ArrowArray au, ai, batch;
+  ArrowArray *bk[2] = { &au, &ai };
+  mk_array(&au, 3, 1, 0, 2, ub, NULL, NULL);
+  mk_array(&ai, 3, 1, 0, 2, ib, NULL, NULL);
+  mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+  size_t total;
+  mizu_arrow_warn warn;
+  mizu_arrow *a;
+  mizu_mizl_entry e;
+
+  /* the capable word: the verbatim INT64 leaf, the u64 pair present; the
+     u64 column's INT64_MIN-pattern lane does not count */
+  uint8_t *buf = frame_write(&root, batches, 1, MIZU_CAP_MIZL_U64V, &total,
+                             &warn, &a);
+  assert(warn.n_int64 == 1 && warn.n_range == 0 && warn.n_intmin == 0);
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  assert(e.sexptype == MIZU_TYPE_INT64 && e.attrs_size > 0);
+  const int64_t *v = (const int64_t *) (buf + e.data_offset);
+  assert(v[0] == 42 && v[1] == MIZU_NA_INT64);
+  uint64_t bits;
+  memcpy(&bits, &v[2], 8);
+  assert(bits == 0x8000000000000000ULL);   /* verbatim */
+  const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(blob, (size_t) e.attrs_size, "u64", 3) != NULL);
+  blob_check(blob, (size_t) e.attrs_size);
+  assert(mizu_mizl_elem(buf, total, 1, &e) == 0);
+  assert(e.sexptype == MIZU_TYPE_INT64 && e.attrs_size == 0);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* a peer word short of the bit: the REAL conversion, the attr absent */
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  assert(warn.n_range == 1 && warn.n_int64 == 1 && warn.n_intmin == 0);
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  assert(e.sexptype == MIZU_TYPE_REAL && e.attrs_size == 0);
+  const double *d = (const double *) (buf + e.data_offset);
+  assert(d[0] == 42.0);
+  memcpy(&bits, &d[2], 8);
+  assert(bits == MIZU_NA_REAL_BITS);   /* 2^63 is past 2^53: the NA fill */
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* the masked-path scope: a null-free column takes no walk and never
+     counts, a genuine sentinel included */
+  {
+    ArrowSchema ci1, root1;
+    ArrowSchema *kids1[1] = { &ci1 };
+    mk_schema(&ci1, "l", "i", NULL, 0, NULL, 0);
+    mk_schema(&root1, "+s", NULL, kids1, 1, NULL, 0);
+    const int64_t xv[2] = { INT64_MIN, 5 };
+    const void *xb[2] = { NULL, xv };
+    ArrowArray ax, bx;
+    ArrowArray *kx[1] = { &ax };
+    mk_array(&ax, 2, 0, 0, 2, xb, NULL, NULL);
+    mk_array(&bx, 2, 0, 0, 1, NULL, kx, NULL);
+    bx.n_children = 1;
+    const ArrowArray *b1[1] = { &bx };
+    buf = frame_write(&root1, b1, 1, 0, &total, &warn, &a);
+    assert(warn.n_int64 == 0);
+    free(buf);
+    mizu_arrow_close(a);
+  }
+}
+
 // Declines ------------------------------------------------------------------------------
 
 static void test_declines(void) {
@@ -1251,6 +1334,7 @@ int main(void) {
   test_dict_declines();
   test_temporal();
   test_temporal_ns();
+  test_uint64_verbatim();
   test_declines();
   test_remote();
   test_root_blob_override();
