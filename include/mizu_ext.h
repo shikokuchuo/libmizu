@@ -2216,6 +2216,28 @@ MIZU_API size_t mizu_arrow_col_body(const mizu_arrow *, int64_t col,
 MIZU_API size_t mizu_arrow_col_blob(const mizu_arrow *, int64_t col,
                                     uint8_t *dst);
 
+/** One column's 'I' value form (the inline small-table path): the plain
+   vectors bare (the cvt tag off the row's wire type; the strv form over
+   mizu_arrow_str_at, a malformed record put as NA like a null), the
+   attr-marked forms splicing mizu_arrow_col_blob's bare dict. Returns the
+   byte count; dst NULL sizes. col shall be in range (0 returned otherwise).
+   The conversion counts accumulate into warn on the writing pass only. */
+MIZU_API size_t mizu_arrow_write_ix_col(const mizu_arrow *, int64_t col,
+                                        uint8_t *dst, mizu_arrow_warn *warn);
+
+/** One complete 'I' stream of the whole frame (the small-table path):
+   the header, the attr mark, the list of the columns' value forms
+   (mizu_arrow_write_ix_col), then the root dict {names, class =
+   "data.frame", row.names = c(NA, -n)} — one C write straight off the
+   Arrow buffers where a below-gate frame previously converted back to a
+   language value first. The root dict is always the automatic form (the
+   root-blob override is the region writer's); the MIZL-only leaves (the
+   ns INT64 counts, the u64 lanes) never appear. Returns the byte count;
+   dst NULL sizes. The conversion counts accumulate into warn on the
+   writing pass only. */
+MIZU_API size_t mizu_arrow_write_ix(const mizu_arrow *, uint8_t *dst,
+                                    mizu_arrow_warn *warn);
+
 /** A remote-leaf override (pymizu's provenance match): column col crosses
    as directory tag 33 — the identifier span, the referenced leaf's attrs
    size and validity claim read off the referenced region

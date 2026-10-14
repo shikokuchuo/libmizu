@@ -1536,6 +1536,273 @@ static void test_col_writers(void) {
   mizu_arrow_close(a);
 }
 
+// The inline small-table form (mizu_arrow_write_ix) -----------------------------
+
+/* Frame A ("x" int32 {1, NA, 999}, "s" utf8 {"a", NA, "bc"}) as the
+   complete 'I' stream — 148 bytes, the pin for byte identity with the
+   bindings' historical inline emitters. */
+static void expect_stream_a(uint8_t *e) {
+  size_t o = 0;
+  e[o] = 0x49; e[o + 1] = 0x01; o += 2;                 /* 'I' header */
+  e[o] = MIZU_IX_TAG_ATTR; o += 1;
+  e[o] = MIZU_IX_TAG_LIST; p64(e, o + 1, 2); o += 9;    /* list(2) */
+  /* x: intv(3) {1, NA, 999} */
+  e[o] = MIZU_IX_TAG_INTV; p64(e, o + 1, 3); o += 9;
+  p32(e, o, 1); p32(e, o + 4, MIZU_NA_INT32); p32(e, o + 8, 999); o += 12;
+  /* s: strv(3) {"a", NA, "bc"} (the null put as len -1) */
+  e[o] = MIZU_IX_TAG_STRV; p64(e, o + 1, 3); o += 9;
+  p32(e, o, 1); e[o + 4] = 'a'; o += 5;
+  p32(e, o, -1); o += 4;
+  p32(e, o, 2); raw(e, o + 4, "bc", 2); o += 6;
+  /* the root dict {names, class, row.names} */
+  e[o] = MIZU_IX_TAG_DICT; p64(e, o + 1, 3); o += 9;
+  p32(e, o, 5); raw(e, o + 4, "names", 5); o += 9;
+  e[o] = MIZU_IX_TAG_STRV; p64(e, o + 1, 2); o += 9;
+  p32(e, o, 1); e[o + 4] = 'x'; o += 5;
+  p32(e, o, 1); e[o + 4] = 's'; o += 5;
+  p32(e, o, 5); raw(e, o + 4, "class", 5); o += 9;
+  e[o] = MIZU_IX_TAG_STR; p32(e, o + 1, 10);
+  raw(e, o + 5, "data.frame", 10); o += 15;
+  p32(e, o, 9); raw(e, o + 4, "row.names", 9); o += 13;
+  e[o] = MIZU_IX_TAG_INTV; p64(e, o + 1, 2); o += 9;
+  p32(e, o, MIZU_NA_INT32); p32(e, o + 4, -3); o += 8;
+  assert(o == 148);
+}
+
+static void test_write_ix(void) {
+  /* frame A's arrays (test_frame_a) through the inline writer */
+  ArrowSchema cx, cs, root;
+  ArrowSchema *kids[2] = { &cx, &cs };
+  mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+  const uint8_t bm_x = 0x05, bm_s = 0x05;
+  const int32_t xdata[3] = { 1, -2, 999 };
+  const int32_t soffs[4] = { 0, 1, 1, 3 };
+  const char sbytes[3] = { 'a', 'b', 'c' };
+  const void *xbufs[2] = { &bm_x, xdata };
+  const void *sbufs[3] = { &bm_s, soffs, sbytes };
+  ArrowArray ax, as, batch;
+  ArrowArray *bkids[2] = { &ax, &as };
+  mk_array(&ax, 3, 1, 0, 2, xbufs, NULL, NULL);
+  mk_array(&as, 3, 1, 0, 3, sbufs, NULL, NULL);
+  mk_array(&batch, 3, 0, 0, 1, NULL, bkids, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+  size_t n = mizu_arrow_write_ix(a, NULL, &warn);
+  assert(n == 148);
+  /* the size pass touches no counts */
+  assert(warn.n_range == 0 && warn.n_intmin == 0 && warn.n_int64 == 0);
+  uint8_t *buf = calloc(1, n);
+  assert(buf != NULL);
+  assert(mizu_arrow_write_ix(a, buf, &warn) == n);
+  uint8_t *exp = calloc(1, n);
+  assert(exp != NULL);
+  expect_stream_a(exp);
+  assert(memcmp(buf, exp, n) == 0);
+  /* the stream parses end to end */
+  blob_check(buf, n);
+  /* the per-column writer: the slices match the frame stream (the root
+     dict's 91 bytes follow them) */
+  size_t off = 2 + 1 + 9;   /* header, attr, list begin */
+  for (int64_t i = 0; i < 2; i++) {
+    size_t cn = mizu_arrow_write_ix_col(a, i, NULL, &warn);
+    assert(cn != 0);
+    uint8_t *cbuf = calloc(1, cn);
+    assert(cbuf != NULL);
+    assert(mizu_arrow_write_ix_col(a, i, cbuf, &warn) == cn);
+    assert(memcmp(cbuf, buf + off, cn) == 0);
+    free(cbuf);
+    off += cn;
+  }
+  assert(off == n - 91);
+  assert(mizu_arrow_write_ix_col(a, 2, NULL, &warn) == 0);   /* in range */
+  free(exp);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
+static void test_write_ix_kinds(void) {
+  /* one column per remaining kind: a dictionary, date32, timestamp[ms]
+     with a zone, duration[s], int64, uint64 past 2^53, string_view */
+  ArrowSchema lv, cd, cdt, cts, ctd, ci, cu, cv, root;
+  ArrowSchema *kids[7] = { &cd, &cdt, &cts, &ctd, &ci, &cu, &cv };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
+  mk_schema(&cdt, "tdD", "dt", NULL, 0, NULL, 0);
+  mk_schema(&cts, "tsm:UTC", "ts", NULL, 0, NULL, 0);
+  mk_schema(&ctd, "tDs", "td", NULL, 0, NULL, 0);
+  mk_schema(&ci, "l", "i64", NULL, 0, NULL, 0);
+  mk_schema(&cu, "L", "u", NULL, 0, NULL, 0);
+  mk_schema(&cv, "vu", "v", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 7, NULL, 0);
+
+  const char levbytes[2] = { 'a', 'b' };
+  const int32_t levoffs[3] = { 0, 1, 2 };
+  const int8_t codes[2] = { 0, 1 };
+  const uint8_t dtbm = 0x01;   /* slot 1 null */
+  const int32_t days[2] = { 19000, 0 };
+  const int64_t tsv[2] = { 1000, 2000 };
+  const int64_t tdv[2] = { 60, 120 };
+  const int64_t i64v[2] = { 5, -7 };
+  const uint64_t u64v[2] = { 9007199254740993ULL, 3 };
+  uint8_t views[32];
+  memset(views, 0, sizeof views);
+  int32_t l0 = 2, l1 = 20;
+  memcpy(views, &l0, 4);
+  views[4] = 'h'; views[5] = 'i';
+  memcpy(views + 16, &l1, 4);
+  char longs[20];
+  memset(longs, 'z', sizeof longs);
+  int32_t bi = 0, bo = 0;
+  memcpy(views + 16 + 8, &bi, 4);
+  memcpy(views + 16 + 12, &bo, 4);
+  const void *db[3] = { NULL, levoffs, levbytes };
+  const void *cb[2] = { NULL, codes };
+  const void *dtb[2] = { &dtbm, days };
+  const void *tsb[2] = { NULL, tsv };
+  const void *tdb[2] = { NULL, tdv };
+  const void *ib[2] = { NULL, i64v };
+  const void *ub[2] = { NULL, u64v };
+  const void *vb[3] = { NULL, views, longs };
+  ArrowArray dict, ad, adt, ats, atd, ai, au, av, batch;
+  ArrowArray *bk[7] = { &ad, &adt, &ats, &atd, &ai, &au, &av };
+  mk_array(&dict, 2, 0, 0, 3, db, NULL, NULL);
+  mk_array(&ad, 2, 0, 0, 2, cb, NULL, &dict);
+  mk_array(&adt, 2, 1, 0, 2, dtb, NULL, NULL);
+  mk_array(&ats, 2, 0, 0, 2, tsb, NULL, NULL);
+  mk_array(&atd, 2, 0, 0, 2, tdb, NULL, NULL);
+  mk_array(&ai, 2, 0, 0, 2, ib, NULL, NULL);
+  mk_array(&au, 2, 0, 0, 2, ub, NULL, NULL);
+  mk_array(&av, 2, 0, 0, 3, vb, NULL, NULL);
+  mk_array(&batch, 2, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 7;
+  const ArrowArray *batches[1] = { &batch };
+
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+  size_t n = mizu_arrow_write_ix(a, NULL, &warn);
+  uint8_t *buf = calloc(1, n);
+  assert(buf != NULL);
+  assert(mizu_arrow_write_ix(a, buf, &warn) == n);
+  assert(warn.n_range == 1 && warn.n_intmin == 0 && warn.n_int64 == 0);
+  blob_check(buf, n);
+
+  /* walk the column slices */
+  size_t off = 2 + 1 + 9;
+  size_t csz[7];
+  for (int64_t i = 0; i < 7; i++) {
+    csz[i] = mizu_arrow_write_ix_col(a, i, NULL, &warn);
+    assert(csz[i] != 0);
+    off += csz[i];
+  }
+  assert(off < n);
+  /* d: attr + intv {1, 2} + the bare factor dict (no stream header) */
+  const uint8_t *s = buf + 2 + 1 + 9;
+  assert(s[0] == MIZU_IX_TAG_ATTR && s[1] == MIZU_IX_TAG_INTV);
+  int32_t code[2];
+  memcpy(code, s + 10, 8);
+  assert(code[0] == 1 && code[1] == 2);
+  assert(s[18] == MIZU_IX_TAG_DICT);
+  assert(find_span(s, csz[0], "levels", 6) != NULL);
+  assert(find_span(s, csz[0], "factor", 6) != NULL);
+  /* dt: attr + realv {19000.0, the R NA payload} + the Date dict */
+  s += csz[0];
+  assert(s[0] == MIZU_IX_TAG_ATTR && s[1] == MIZU_IX_TAG_REALV);
+  double dv[2];
+  memcpy(dv, s + 10, 16);
+  uint64_t dbits;
+  memcpy(&dbits, &dv[1], 8);
+  assert(dv[0] == 19000.0 && dbits == 0x7FF00000000007A2ULL);
+  assert(find_span(s, csz[1], "Date", 4) != NULL);
+  /* ts: realv epoch seconds; the dict names the zone, never tscale */
+  s += csz[1];
+  assert(s[0] == MIZU_IX_TAG_ATTR && s[1] == MIZU_IX_TAG_REALV);
+  memcpy(dv, s + 10, 16);
+  assert(dv[0] == 1.0 && dv[1] == 2.0);
+  assert(find_span(s, csz[2], "POSIXct", 7) != NULL);
+  assert(find_span(s, csz[2], "UTC", 3) != NULL);
+  assert(find_span(s, csz[2], "tscale", 6) == NULL);
+  /* td: realv seconds; the difftime dict with units */
+  s += csz[2];
+  assert(s[0] == MIZU_IX_TAG_ATTR && s[1] == MIZU_IX_TAG_REALV);
+  memcpy(dv, s + 10, 16);
+  assert(dv[0] == 60.0 && dv[1] == 120.0);
+  assert(find_span(s, csz[3], "difftime", 8) != NULL);
+  assert(find_span(s, csz[3], "secs", 4) != NULL);
+  /* i64: the i64v tag, the lanes verbatim */
+  s += csz[3];
+  assert(s[0] == MIZU_IX_TAG_I64V);
+  int64_t lanes[2];
+  memcpy(lanes, s + 9, 16);
+  assert(lanes[0] == 5 && lanes[1] == -7);
+  /* u: the REAL conversion, past-2^53 -> NA */
+  s += csz[4];
+  assert(s[0] == MIZU_IX_TAG_REALV);
+  memcpy(dv, s + 9, 16);
+  memcpy(&dbits, &dv[0], 8);
+  assert(dbits == MIZU_NA_REAL_BITS && dv[1] == 3.0);
+  /* v: strv, the inline short string and the buffered long one */
+  s += csz[5];
+  assert(s[0] == MIZU_IX_TAG_STRV);
+  int32_t sl0, sl1;
+  memcpy(&sl0, s + 9, 4);
+  memcpy(&sl1, s + 9 + 4 + 2, 4);
+  assert(sl0 == 2 && memcmp(s + 13, "hi", 2) == 0);
+  assert(sl1 == 20 && memcmp(s + 19, longs, 20) == 0);
+  /* the root dict names all seven */
+  assert(find_span(buf + off, n - off, "i64", 3) != NULL);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* the one-column frame: the names value takes the scalar form */
+  ArrowSchema cs2, r2;
+  ArrowSchema *kids2[1] = { &cs2 };
+  mk_schema(&cs2, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&r2, "+s", NULL, kids2, 1, NULL, 0);
+  const int32_t so[2] = { 0, 3 };
+  const char sb[3] = { 'a', 'b', 'c' };
+  const void *sv[3] = { NULL, so, sb };
+  ArrowArray as, b2;
+  ArrowArray *bk2[1] = { &as };
+  mk_array(&as, 1, 0, 0, 3, sv, NULL, NULL);
+  mk_array(&b2, 1, 0, 0, 1, NULL, bk2, NULL);
+  b2.n_children = 1;
+  const ArrowArray *batches2[1] = { &b2 };
+  assert(mizu_arrow_open(&a, &r2, batches2, 1, 0) == MIZU_OK);
+  n = mizu_arrow_write_ix(a, NULL, &warn);
+  buf = calloc(1, n);
+  assert(buf != NULL);
+  assert(mizu_arrow_write_ix(a, buf, &warn) == n);
+  blob_check(buf, n);
+  /* the scalar str tag ahead of the one name's length */
+  const uint8_t *nm = (const uint8_t *) find_span(buf, n, "\x04\x01\x00\x00\x00" "s", 6);
+  assert(nm != NULL);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* the zero-row frame: a parseable stream, row.names c(NA, 0) */
+  ArrowSchema ci0, r0;
+  ArrowSchema *kids0[1] = { &ci0 };
+  mk_schema(&ci0, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&r0, "+s", NULL, kids0, 1, NULL, 0);
+  assert(mizu_arrow_open(&a, &r0, NULL, 0, 0) == MIZU_OK);
+  n = mizu_arrow_write_ix(a, NULL, &warn);
+  buf = calloc(1, n);
+  assert(buf != NULL);
+  assert(mizu_arrow_write_ix(a, buf, &warn) == n);
+  blob_check(buf, n);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 int main(void) {
   test_frame_a();
   test_cvt_types();
@@ -1559,6 +1826,8 @@ int main(void) {
   test_stage();
   test_col_info();
   test_col_writers();
+  test_write_ix();
+  test_write_ix_kinds();
   printf("test_arrow: OK\n");
   return 0;
 }

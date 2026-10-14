@@ -523,11 +523,11 @@ static size_t arrow_blob_difftime(uint8_t *dst, int tsn) {
 
 /* The frame dict {names, class = "data.frame", row.names}: row.names the
    automatic c(NA, -n) (a caller's custom form rides the root-blob
-   override). */
-static size_t arrow_blob_frame(uint8_t *dst, const ArrowSchema *schema,
+   override). The bare dict serves the inline frame form
+   (mizu_arrow_write_ix); the blob adds the stream header. */
+static size_t arrow_frame_dict(uint8_t *dst, const ArrowSchema *schema,
                                int ncols, int64_t rows) {
   arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 3));
   arrow_ixe_key(&e, MIZU_IX_ATTR_NAMES);
   arrow_ixe_names(&e, schema, ncols);
@@ -543,6 +543,13 @@ static size_t arrow_blob_frame(uint8_t *dst, const ArrowSchema *schema,
     arrow_ixe_intv(&e, 2, vals, na);
   }
   return e.total;
+}
+
+static size_t arrow_blob_frame(uint8_t *dst, const ArrowSchema *schema,
+                               int ncols, int64_t rows) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_frame_dict(dst != NULL ? dst + n : NULL, schema, ncols,
+                              rows);
 }
 
 // The plan --------------------------------------------------------------------------
@@ -1558,6 +1565,77 @@ size_t mizu_arrow_col_blob(const mizu_arrow *a, int64_t col, uint8_t *dst) {
     /* CVT / STR: no attribute dict on the by-value tiers */
     return 0;
   }
+}
+
+/* One column's 'I' value form (the small-table path): the plain vectors
+   bare, the attr-marked forms splicing mizu_arrow_col_blob's bare dict
+   (it emits the dict without the stream header — exactly the inline attr
+   shape). A string column walks its elements through mizu_arrow_str_at,
+   a malformed record put as NA like a null (every record was validated
+   at open, so == 1 in practice — the put never sees a garbage span).
+   The MIZL-only leaves (the ns INT64 counts, the u64 lanes) never appear
+   here: the body writers are the by-value forms. */
+static size_t arrow_ix_col(const mizu_arrow *a, int64_t col, uint8_t *dst,
+                           mizu_arrow_warn *warn) {
+  const arrow_pcol *pc = &a->cols[col];
+  const uint64_t rows = (uint64_t) a->rows;
+  arrow_ixe e = { dst, 0 };
+  switch (pc->kind) {
+  case MIZU_ARROW_CVT:
+    ARROW_IXE_PUT(&e, arrow_ixe_vec_begin(ARROW_IXE_DST(&e),
+                                          mizu_ix_tag_of(pc->row->wire),
+                                          rows));
+    e.total += mizu_arrow_col_body(a, col, ARROW_IXE_DST(&e), warn);
+    return e.total;
+  case MIZU_ARROW_STR:
+    ARROW_IXE_PUT(&e, mizu_ix_put_strv_begin(ARROW_IXE_DST(&e), rows));
+    for (size_t b = 0; b < a->nb; b++) {
+      const ArrowArray *ba = a->batches[b]->children[col];
+      for (int64_t k = 0; k < ba->length; k++) {
+        const uint8_t *s;
+        int32_t len;
+        if (mizu_arrow_str_at(ba, k, pc->str_form, &s, &len) != 1) {
+          ARROW_IXE_PUT(&e, mizu_ix_put_strelt(ARROW_IXE_DST(&e), NULL, -1));
+        } else {
+          ARROW_IXE_PUT(&e, mizu_ix_put_strelt(ARROW_IXE_DST(&e), s, len));
+        }
+      }
+    }
+    return e.total;
+  default:
+    break;
+  }
+  /* the attr-marked forms (CVT and STR returned above): the 1-based codes
+     an intv, the days/seconds a realv, then the bare dict */
+  const int tag = pc->kind == MIZU_ARROW_DICT ? MIZU_IX_TAG_INTV :
+    MIZU_IX_TAG_REALV;
+  ARROW_IXE_PUT(&e, mizu_ix_put_attr(ARROW_IXE_DST(&e)));
+  ARROW_IXE_PUT(&e, arrow_ixe_vec_begin(ARROW_IXE_DST(&e), tag, rows));
+  e.total += mizu_arrow_col_body(a, col, ARROW_IXE_DST(&e), warn);
+  e.total += mizu_arrow_col_blob(a, col, ARROW_IXE_DST(&e));
+  return e.total;
+}
+
+size_t mizu_arrow_write_ix_col(const mizu_arrow *a, int64_t col,
+                               uint8_t *dst, mizu_arrow_warn *warn) {
+  if (col < 0 || col >= a->ncols) return 0;
+  return arrow_ix_col(a, col, dst, warn);
+}
+
+size_t mizu_arrow_write_ix(const mizu_arrow *a, uint8_t *dst,
+                           mizu_arrow_warn *warn) {
+  arrow_ixe e = { dst, 0 };
+  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
+  ARROW_IXE_PUT(&e, mizu_ix_put_attr(ARROW_IXE_DST(&e)));
+  ARROW_IXE_PUT(&e, mizu_ix_put_list_begin(ARROW_IXE_DST(&e),
+                                           (uint64_t) a->ncols));
+  for (int64_t i = 0; i < a->ncols; i++)
+    e.total += arrow_ix_col(a, i, ARROW_IXE_DST(&e), warn);
+  /* the root dict's automatic form; the root-blob override is the region
+     writer's and does not apply to the inline form */
+  e.total += arrow_frame_dict(ARROW_IXE_DST(&e), a->schema, a->ncols,
+                              a->rows);
+  return e.total;
 }
 
 int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,

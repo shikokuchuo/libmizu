@@ -10,6 +10,8 @@ mizu_arrow_stage
 mizu_arrow_str_at
 mizu_arrow_tz
 mizu_arrow_valid
+mizu_arrow_write_ix
+mizu_arrow_write_ix_col
 mizu_aux_hi
 mizu_aux_rawspill_pool
 mizu_aux_shm_vec

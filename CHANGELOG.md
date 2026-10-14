@@ -13,6 +13,21 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The Arrow frame writer's inline small-table form: `mizu_arrow_write_ix`
+  (one complete `'I'` stream of the whole frame — header, attr mark, the
+  list of the columns' value forms, then the root dict `{names, class =
+  "data.frame", row.names = c(NA, -n)}`) and `mizu_arrow_write_ix_col`
+  (one column's value form), both dst-NULL-sizing and built on the
+  per-column writers and `mizu_arrow_str_at`, the string walk's malformed
+  record put as NA like a null. A below-gate frame now crosses with one C
+  write straight off the Arrow buffers where it previously converted back
+  to a language value first; the stream is byte-identical to the bindings'
+  historical inline emitters (the root dict is always the automatic form —
+  the root-blob override is the region writer's — and the MIZL-only leaves
+  never appear). No ABI bump: a same-language reader already accepts an
+  `'I'` stream on the value tiers (the first-byte dispatch precedes the
+  private codecs).
+
 - The Arrow frame writer's per-column ext writers `mizu_arrow_col_body`
   (a column's by-value body bytes over every batch — the same loops the
   MIZL leaves use) and `mizu_arrow_col_blob` (its attribute dict as a
