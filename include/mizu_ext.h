@@ -2141,8 +2141,7 @@ MIZU_API void mizu_arrow_col_info(const mizu_arrow *, int64_t col,
    write. ident is the referenced region's name, ref_base / ref_size its
    mapping, ref_leaf the referenced 0-based directory leaf; register only
    for a peer with MIZU_CAP_MIZL_REF. 0, or -1 on a torn referenced tree
-   (the caller leaves the column local). Overrides precede the first
-   mizu_arrow_size / mizu_arrow_stage call. */
+   (the caller leaves the column local). */
 MIZU_API int mizu_arrow_remote(mizu_arrow *, int64_t col,
                                const char *ident, size_t ident_len,
                                void *ref_base, size_t ref_size,
@@ -2160,7 +2159,8 @@ MIZU_API void mizu_arrow_root_blob(mizu_arrow *, const void *blob,
 MIZU_API void mizu_arrow_tz(mizu_arrow *, int64_t col, const char *tz);
 
 /** The region span in bytes: runs the size pass on first call (the result
-   memoizes; overrides registered after it do not move the span). */
+   memoizes; an override registered after it re-runs the pass on the next
+   call). */
 MIZU_API size_t mizu_arrow_size(mizu_arrow *);
 
 /** The one-call stage over the handle seam, valid only during a stage_fn

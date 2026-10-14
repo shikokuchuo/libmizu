@@ -1589,17 +1589,20 @@ int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,
     re.valid[0] == 0 && re.valid[1] == -1 ? -1 : 0;
   r->used = 1;
   a->any_remote = 1;
+  a->sized = 0;   /* the override moves the span: re-run the size pass */
   return 0;
 }
 
 void mizu_arrow_root_blob(mizu_arrow *a, const void *blob, size_t len) {
   a->root_blob = blob;
   a->root_blob_len = len;
+  a->sized = 0;
 }
 
 void mizu_arrow_tz(mizu_arrow *a, int64_t col, const char *tz) {
   if (col < 0 || col >= a->ncols) return;
   a->cols[col].tz_o = tz;
+  a->sized = 0;
 }
 
 size_t mizu_arrow_size(mizu_arrow *a) {

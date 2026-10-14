@@ -1178,6 +1178,103 @@ static void test_tz_override(void) {
   mizu_arrow_close(a);
 }
 
+static void test_override_after_size(void) {
+  /* an override registered after the size pass re-runs it: the span and
+     the layout track the override, not the memo */
+  enum { N = 100 };
+  ArrowSchema ct, cx, root;
+  ArrowSchema *kids[2] = { &ct, &cx };
+  mk_schema(&ct, "tsu:", "t", NULL, 0, NULL, 0);
+  mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+  int64_t ts[N];
+  int32_t x[N];
+  for (int i = 0; i < N; i++) { ts[i] = 1700000000 + i; x[i] = i; }
+  const void *tb[2] = { NULL, ts };
+  const void *xb[2] = { NULL, x };
+  ArrowArray at, ax, batch;
+  ArrowArray *bk[2] = { &at, &ax };
+  mk_array(&at, N, 0, 0, 2, tb, NULL, NULL);
+  mk_array(&ax, N, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, N, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+
+  /* tz: a 100-char override outgrows the classified "UTC" past any
+     alignment quantum */
+  char longtz[101];
+  memset(longtz, 'Z', 100);
+  longtz[100] = 0;
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  size_t before = mizu_arrow_size(a);
+  mizu_arrow_tz(a, 0, longtz);
+  size_t after = mizu_arrow_size(a);
+  assert(after > before);
+  uint8_t *buf = calloc(1, after);
+  mizu_arrow_write(a, buf, &warn);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, after, 0, &e) == 0);
+  const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(blob, (size_t) e.attrs_size, longtz, 100) != NULL);
+  assert(find_span(blob, (size_t) e.attrs_size, "UTC", 3) == NULL);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* root blob: a caller-built form with a long pad value */
+  char pad[101];
+  memset(pad, 'P', 100);
+  pad[100] = 0;
+  uint8_t rb[256];
+  size_t n = 0;
+  n += mizu_ix_put_header(rb + n);
+  n += mizu_ix_put_dict_begin(rb + n, 4);
+  n += mizu_ix_put_key(rb + n, "names", 5);
+  n += mizu_ix_put_strv_begin(rb + n, 2);
+  n += mizu_ix_put_strelt(rb + n, "t", 1);
+  n += mizu_ix_put_strelt(rb + n, "x", 1);
+  n += mizu_ix_put_key(rb + n, "class", 5);
+  n += mizu_ix_put_str(rb + n, "tbl", 3);
+  n += mizu_ix_put_key(rb + n, "row.names", 9);
+  n += mizu_ix_put_str(rb + n, "a", 1);
+  n += mizu_ix_put_key(rb + n, "pad", 3);
+  n += mizu_ix_put_str(rb + n, pad, 100);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  before = mizu_arrow_size(a);
+  mizu_arrow_root_blob(a, rb, n);
+  after = mizu_arrow_size(a);
+  assert(after > before);
+  buf = calloc(1, after);
+  mizu_arrow_write(a, buf, &warn);
+  int64_t aoff, asz, valid[2];
+  assert(frame_check(buf, after, &aoff, &asz, valid) == 2);
+  assert(asz == (int64_t) n);
+  assert(memcmp(buf + aoff, rb, n) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* remote: the local int32 leaf collapses to the identifier span */
+  size_t reftotal;
+  uint8_t *ref = ref_region(0, &reftotal);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  before = mizu_arrow_size(a);
+  const char *ident = "/mizu_testref";
+  assert(mizu_arrow_remote(a, 1, ident, strlen(ident), ref, reftotal,
+                           0) == 0);
+  after = mizu_arrow_size(a);
+  assert(after < before);
+  buf = calloc(1, after);
+  mizu_arrow_write(a, buf, &warn);
+  assert(mizu_mizl_elem(buf, after, 1, &e) == 0);
+  assert(e.sexptype == 33);
+  assert(e.data_size == (int64_t) strlen("/mizu_testref[1]"));
+  free(buf);
+  mizu_arrow_close(a);
+  free(ref);
+}
+
 // The stage ------------------------------------------------------------------------------
 
 static mizu_binding bytesb;
@@ -1339,6 +1436,7 @@ int main(void) {
   test_remote();
   test_root_blob_override();
   test_tz_override();
+  test_override_after_size();
   test_stage();
   test_col_info();
   printf("test_arrow: OK\n");
