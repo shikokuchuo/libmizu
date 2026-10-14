@@ -2025,6 +2025,77 @@ typedef struct ArrowArrayStream {
 } ArrowArrayStream;
 #endif
 
+/* The element helpers: pure accessors over the ABI structs, dual-form like
+   the 'I' cursor's — the frame writer's own loops and a binding's 'I'
+   emitters share the one definition. */
+MIZU_EXT_INLINE int mizu_ext_arrow_valid_impl(const ArrowArray *arr,
+                                              int64_t k) {
+  if (arr->null_count == 0 || arr->buffers[0] == NULL) return 1;
+  int64_t i = arr->offset + k;
+  const uint8_t *bm = (const uint8_t *) arr->buffers[0];
+  return (bm[i >> 3] >> (i & 7)) & 1;
+}
+
+MIZU_EXT_INLINE int mizu_ext_arrow_str_at_impl(const ArrowArray *arr,
+                                               int64_t k, int form,
+                                               const uint8_t **ptr,
+                                               int32_t *len) {
+  if (!mizu_ext_arrow_valid_impl(arr, k)) return 0;
+  int64_t i = arr->offset + k;
+  if (form == 1) {
+    const int32_t *offs = (const int32_t *) arr->buffers[1];
+    if (offs[i] < 0 || offs[i + 1] < offs[i]) return -1;
+    *ptr = (const uint8_t *) arr->buffers[2] + offs[i];
+    *len = offs[i + 1] - offs[i];
+  } else if (form == 2) {
+    const int64_t *offs = (const int64_t *) arr->buffers[1];
+    if (offs[i] < 0 || offs[i + 1] < offs[i] ||
+        offs[i + 1] - offs[i] > INT32_MAX)
+      return -1;
+    *ptr = (const uint8_t *) arr->buffers[2] + offs[i];
+    *len = (int32_t) (offs[i + 1] - offs[i]);
+  } else {
+    const uint8_t *vw = (const uint8_t *) arr->buffers[1] + i * 16;
+    int32_t l;
+    memcpy(&l, vw, 4);
+    if (l < 0) return -1;
+    if (l <= 12) {
+      *ptr = vw + 4;
+    } else {
+      int32_t bi, off;
+      memcpy(&bi, vw + 8, 4);
+      memcpy(&off, vw + 12, 4);
+      if (bi < 0 || 2 + (int64_t) bi >= arr->n_buffers || off < 0) return -1;
+      *ptr = (const uint8_t *) arr->buffers[2 + bi] + off;
+    }
+    *len = l;
+  }
+  return 1;
+}
+
+#ifdef MIZU_EXT_NO_INLINES
+MIZU_API int mizu_arrow_valid(const ArrowArray *, int64_t k);
+MIZU_API int mizu_arrow_str_at(const ArrowArray *, int64_t k, int form,
+                               const uint8_t **ptr, int32_t *len);
+#else
+/** The validity bit for element k of a batch (Arrow LSB-first). */
+MIZU_EXT_INLINE int mizu_arrow_valid(const ArrowArray *arr, int64_t k) {
+  return mizu_ext_arrow_valid_impl(arr, k);
+}
+/** The string forms' per-batch element access: utf8 (i32 offsets),
+   large_utf8 (i64), string_view (16-byte views). 0 on a null (ptr/len
+   unset), -1 on a malformed record. The Arrow C Data Interface carries no
+   buffer lengths, so the byte extent stays the producer's word; what is
+   checked here are the catastrophic cases — a view's buffer index past
+   the pointer array, negative lengths or offsets, and non-monotonic
+   offset spans (which would size one way and gather another). */
+MIZU_EXT_INLINE int mizu_arrow_str_at(const ArrowArray *arr, int64_t k,
+                                      int form, const uint8_t **ptr,
+                                      int32_t *len) {
+  return mizu_ext_arrow_str_at_impl(arr, k, form, ptr, len);
+}
+#endif
+
 /** The ArrowSchema flags word bits the writer reads (the spec's values). */
 #define MIZU_ARROW_FLAG_DICTIONARY_ORDERED 1
 #define MIZU_ARROW_FLAG_NULLABLE 2
@@ -2084,9 +2155,9 @@ MIZU_API void mizu_cvt_convert(uint8_t *dst, const uint8_t *src,
 typedef struct mizu_arrow mizu_arrow;
 
 /** The per-column classification, mizu_arrow_col_info's out-param: the
-   kind, the conversion row, and the string / dictionary / temporal
-   particulars a binding's own emitters need. The borrowed level spans are
-   valid until mizu_arrow_close. */
+   kind, the conversion row, and the string-form particulars a binding's
+   own emitters key on. The column bodies and attribute dicts are the
+   per-column writers below. */
 enum {
   MIZU_ARROW_CVT = 0,  /**< fixed-width, through the cvt row */
   MIZU_ARROW_STR,      /**< utf8 / large_utf8 / string_view -> MIZS */
@@ -2100,14 +2171,6 @@ typedef struct mizu_arrow_col_s {
   int kind;                  /**< MIZU_ARROW_* */
   const mizu_cvt_row *row;   /**< CVT */
   int str_form;              /**< STR / DICT: 1 utf8, 2 large_utf8, 3 view */
-  double ts_scale;           /**< TS / TD: the unit in seconds */
-  const char *tz;            /**< TS: the tzone the leaf blob writes */
-  int idx_w;                 /**< DICT: the index width in bytes */
-  int idx_signed;            /**< DICT */
-  const int32_t *lev_offs;   /**< DICT: the canonical levels (nlev + 1 */
-  const uint8_t *lev_bytes;  /**<   offsets into the packed bytes, */
-  int64_t nlev;              /**<   nlev levels, */
-  int64_t lev_blen;          /**<   lev_blen packed bytes; borrowed) */
   int u64_verbatim;          /**< CVT 'L': the MIZU_CAP_MIZL_U64V verdict
    (the leaf writes INT64 + the u64 blob attr, not the REAL conversion) */
 } mizu_arrow_col;
@@ -2133,6 +2196,26 @@ MIZU_API mizu_status mizu_arrow_open(mizu_arrow **out,
    same batches (pymizu's inline frame forms). col shall be in range. */
 MIZU_API void mizu_arrow_col_info(const mizu_arrow *, int64_t col,
                                   mizu_arrow_col *out);
+
+/** One column's by-value body bytes over every batch — the cvt lanes, a
+   dictionary's 1-based codes, date / timestamp / duration doubles; the
+   same loops the MIZL writer's leaves use, for a binding's own 'I'
+   emitters. Returns the byte count; dst NULL sizes. 0 for a string
+   column: the 'I' string form is the binding's per-element emitter
+   (mizu_arrow_str_at), the MIZS block region-only. The converting form
+   always — the MIZL-only verbatim leaves (the ns INT64 counts, the u64
+   lanes) never appear here. The conversion counts accumulate into warn
+   like the MIZL write's. */
+MIZU_API size_t mizu_arrow_col_body(const mizu_arrow *, int64_t col,
+                                    uint8_t *dst, mizu_arrow_warn *warn);
+
+/** One column's attribute dict as a bare 0x0d dict value (the §3.5 blob
+   without its stream header — a binding splices it into its own 'I' attr
+   form). Returns the byte count; dst NULL sizes. 0 for a plain column
+   (CVT, STR): the by-value tiers carry no attribute dict on them, and
+   the MIZL-only marker pairs (tscale, u64) never appear here. */
+MIZU_API size_t mizu_arrow_col_blob(const mizu_arrow *, int64_t col,
+                                    uint8_t *dst);
 
 /** A remote-leaf override (pymizu's provenance match): column col crosses
    as directory tag 33 — the identifier span, the referenced leaf's attrs

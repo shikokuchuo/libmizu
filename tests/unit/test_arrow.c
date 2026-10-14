@@ -1408,12 +1408,131 @@ static void test_col_info(void) {
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
   mizu_arrow_col ci;
   mizu_arrow_col_info(a, 0, &ci);
-  assert(ci.kind == MIZU_ARROW_DICT && ci.idx_w == 2 && ci.idx_signed);
-  assert(ci.nlev == 2 && ci.lev_offs[2] == 7 && ci.lev_blen == 7);
-  assert(memcmp(ci.lev_bytes, "lowhigh", 7) == 0);
+  assert(ci.kind == MIZU_ARROW_DICT && ci.str_form == 1);
   mizu_arrow_col_info(a, 1, &ci);
-  assert(ci.kind == MIZU_ARROW_TS && ci.ts_scale == 1e-3);
-  assert(strcmp(ci.tz, "UTC") == 0);
+  assert(ci.kind == MIZU_ARROW_TS);
+  mizu_arrow_close(a);
+}
+
+/* The per-column writers: the body and dict slices match the MIZL frame
+   write byte-for-byte on a non-verbatim column; on a verbatim-verdict
+   column they emit the by-value form instead. */
+static void test_col_writers(void) {
+  ArrowSchema lv, cd, ct, root;
+  ArrowSchema *kids[2] = { &cd, &ct };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "s", "d", NULL, 0, &lv, 0);
+  mk_schema(&ct, "tsm:UTC", "t", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+  const char levbytes[7] = { 'l', 'o', 'w', 'h', 'i', 'g', 'h' };
+  const int32_t levoffs[3] = { 0, 3, 7 };
+  ArrowArray dict, ai, at, batch;
+  const void *db[3] = { NULL, levoffs, levbytes };
+  mk_array(&dict, 2, 0, 0, 3, db, NULL, NULL);
+  const int16_t codes[1] = { 1 };
+  const int64_t tsv[1] = { 1000 };
+  const void *cb[2] = { NULL, codes };
+  const void *tb[2] = { NULL, tsv };
+  ArrowArray *bk[2] = { &ai, &at };
+  mk_array(&ai, 1, 0, 0, 2, cb, NULL, &dict);
+  mk_array(&at, 1, 0, 0, 2, tb, NULL, NULL);
+  mk_array(&batch, 1, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  size_t total = mizu_arrow_size(a);
+  uint8_t *frame = calloc(1, total);
+  mizu_arrow_write(a, frame, &warn);
+
+  /* the dict column: the 1-based codes and the factor dict */
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(frame, total, 0, &e) == 0);
+  size_t bn = mizu_arrow_col_body(a, 0, NULL, &warn);
+  assert(bn == (size_t) e.data_size - (size_t) e.attrs_size);
+  uint8_t *buf = calloc(1, bn + 64);
+  assert(mizu_arrow_col_body(a, 0, buf, &warn) == bn);
+  assert(memcmp(buf, frame + e.data_offset, bn) == 0);
+  size_t dn = mizu_arrow_col_blob(a, 0, NULL);
+  assert(dn == (size_t) e.attrs_size - mizu_ix_put_header(NULL));
+  assert(mizu_arrow_col_blob(a, 0, buf) == dn);
+  assert(memcmp(buf, frame + e.data_offset + bn +
+                mizu_ix_put_header(NULL), dn) == 0);
+
+  /* the timestamp column: the epoch-second doubles and the POSIXct dict */
+  assert(mizu_mizl_elem(frame, total, 1, &e) == 0);
+  bn = mizu_arrow_col_body(a, 1, NULL, &warn);
+  assert(bn == (size_t) e.data_size - (size_t) e.attrs_size);
+  assert(mizu_arrow_col_body(a, 1, buf, &warn) == bn);
+  assert(memcmp(buf, frame + e.data_offset, bn) == 0);
+  dn = mizu_arrow_col_blob(a, 1, NULL);
+  assert(dn == (size_t) e.attrs_size - mizu_ix_put_header(NULL));
+  assert(mizu_arrow_col_blob(a, 1, buf) == dn);
+  assert(memcmp(buf, frame + e.data_offset + bn +
+                mizu_ix_put_header(NULL), dn) == 0);
+
+  free(buf);
+  free(frame);
+  mizu_arrow_close(a);
+
+  /* the verbatim verdicts (peer_caps with TSN | U64V): the per-column
+     writers still emit the by-value forms — second-seconds doubles, no
+     tscale pair */
+  ArrowSchema cn, cu, r2;
+  ArrowSchema *kids2[2] = { &cn, &cu };
+  mk_schema(&cn, "tsn:UTC", "t", NULL, 0, NULL, 0);
+  mk_schema(&cu, "L", "u", NULL, 0, NULL, 0);
+  mk_schema(&r2, "+s", NULL, kids2, 2, NULL, 0);
+  const uint64_t uv[1] = { 42 };
+  const void *ub[2] = { NULL, uv };
+  ArrowArray an, au, b2;
+  ArrowArray *bk2[2] = { &an, &au };
+  mk_array(&an, 1, 0, 0, 2, tb, NULL, NULL);
+  mk_array(&au, 1, 0, 0, 2, ub, NULL, NULL);
+  mk_array(&b2, 1, 0, 0, 1, NULL, bk2, NULL);
+  b2.n_children = 2;
+  const ArrowArray *batches2[1] = { &b2 };
+  assert(mizu_arrow_open(&a, &r2, batches2, 1,
+                         MIZU_CAP_MIZL_TSN | MIZU_CAP_MIZL_U64V) == MIZU_OK);
+  buf = calloc(1, 256);
+  /* the ns column: 8 bytes of double seconds, the blob without tscale */
+  assert(mizu_arrow_col_body(a, 0, buf, &warn) == 8);
+  double sec;
+  memcpy(&sec, buf, 8);
+  assert(sec == 1000.0 * 1e-9);
+  size_t zn = mizu_arrow_col_blob(a, 0, buf + 16);
+  assert(zn != 0);
+  assert(find_span(buf + 16, zn, "tscale", 6) == NULL);
+  assert(find_span(buf + 16, zn, "UTC", 3) != NULL);
+  /* the u64 column: 8 bytes of double, no blob */
+  assert(mizu_arrow_col_body(a, 1, buf, &warn) == 8);
+  memcpy(&sec, buf, 8);
+  assert(sec == 42.0);
+  assert(mizu_arrow_col_blob(a, 1, NULL) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* a string column: the per-column writers return 0 — the binding's
+     per-element 'I' emitter serves it */
+  ArrowSchema cs, r3;
+  ArrowSchema *kids3[1] = { &cs };
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&r3, "+s", NULL, kids3, 1, NULL, 0);
+  const int32_t so[2] = { 0, 3 };
+  const char sb[3] = { 'a', 'b', 'c' };
+  const void *sv[3] = { NULL, so, sb };
+  ArrowArray as, b3;
+  ArrowArray *bk3[1] = { &as };
+  mk_array(&as, 1, 0, 0, 3, sv, NULL, NULL);
+  mk_array(&b3, 1, 0, 0, 1, NULL, bk3, NULL);
+  b3.n_children = 1;
+  const ArrowArray *batches3[1] = { &b3 };
+  assert(mizu_arrow_open(&a, &r3, batches3, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_col_body(a, 0, NULL, &warn) == 0);
+  assert(mizu_arrow_col_blob(a, 0, NULL) == 0);
   mizu_arrow_close(a);
 }
 
@@ -1439,6 +1558,7 @@ int main(void) {
   test_override_after_size();
   test_stage();
   test_col_info();
+  test_col_writers();
   printf("test_arrow: OK\n");
   return 0;
 }

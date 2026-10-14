@@ -47,57 +47,9 @@ static void arrow_store_na_r(uint8_t *dst) {
   memcpy(dst, &bits, 8);
 }
 
-// The Arrow element helpers -------------------------------------------------------
-
-/* The validity bit for element k of a batch (Arrow LSB-first). */
-static int arrow_valid(const ArrowArray *a, int64_t k) {
-  if (a->null_count == 0 || a->buffers[0] == NULL) return 1;
-  int64_t i = a->offset + k;
-  const uint8_t *bm = (const uint8_t *) a->buffers[0];
-  return (bm[i >> 3] >> (i & 7)) & 1;
-}
-
-/* The string forms' per-batch element access: utf8 (i32 offsets),
-   large_utf8 (i64), string_view (16-byte views). 0 on a null (ptr/len
-   unset), -1 on a malformed record. The Arrow C Data Interface carries no
-   buffer lengths, so the byte extent stays the producer's word; what is
-   checked here are the catastrophic cases — a view's buffer index past
-   the pointer array, negative lengths or offsets, and non-monotonic
-   offset spans (which would size one way and gather another). */
-static int arrow_str_at(const ArrowArray *a, int64_t k, int form,
-                        const uint8_t **ptr, int32_t *len) {
-  if (!arrow_valid(a, k)) return 0;
-  int64_t i = a->offset + k;
-  if (form == 1) {
-    const int32_t *offs = (const int32_t *) a->buffers[1];
-    if (offs[i] < 0 || offs[i + 1] < offs[i]) return -1;
-    *ptr = (const uint8_t *) a->buffers[2] + offs[i];
-    *len = offs[i + 1] - offs[i];
-  } else if (form == 2) {
-    const int64_t *offs = (const int64_t *) a->buffers[1];
-    if (offs[i] < 0 || offs[i + 1] < offs[i] ||
-        offs[i + 1] - offs[i] > INT32_MAX)
-      return -1;
-    *ptr = (const uint8_t *) a->buffers[2] + offs[i];
-    *len = (int32_t) (offs[i + 1] - offs[i]);
-  } else {
-    const uint8_t *vw = (const uint8_t *) a->buffers[1] + i * 16;
-    int32_t l;
-    memcpy(&l, vw, 4);
-    if (l < 0) return -1;
-    if (l <= 12) {
-      *ptr = vw + 4;
-    } else {
-      int32_t bi, off;
-      memcpy(&bi, vw + 8, 4);
-      memcpy(&off, vw + 12, 4);
-      if (bi < 0 || 2 + (int64_t) bi >= a->n_buffers || off < 0) return -1;
-      *ptr = (const uint8_t *) a->buffers[2 + bi] + off;
-    }
-    *len = l;
-  }
-  return 1;
-}
+// The Arrow element helpers: the validity bit and the per-element string
+// access are the ext tier's dual-form mizu_arrow_valid / mizu_arrow_str_at
+// (mizu_ext.h) ----------------------------------------------------------------
 
 /* A batch's exact null count (Arrow's -1 "not computed" resolved). */
 static int64_t arrow_batch_nulls(const ArrowArray *a) {
@@ -475,14 +427,19 @@ static void arrow_ixe_class(arrow_ixe *e, const char *const *names,
 }
 
 /* The u64 marker dict {u64 = TRUE} — the verbatim uint64 form's leaf:
-   INT64 lanes the reader interprets unsigned. */
-static size_t arrow_blob_u64(uint8_t *dst) {
+   INT64 lanes the reader interprets unsigned. The bare dict serves the
+   per-column blob writer; the blob adds the stream header. */
+static size_t arrow_u64_dict(uint8_t *dst) {
   arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 1));
   arrow_ixe_key(&e, MIZU_IX_ATTR_U64);
   ARROW_IXE_PUT(&e, mizu_ix_put_lgl(ARROW_IXE_DST(&e), 1));
   return e.total;
+}
+
+static size_t arrow_blob_u64(uint8_t *dst) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_u64_dict(dst != NULL ? dst + n : NULL);
 }
 
 /* The frame dict's names value: the corpus's scalar form at length 1. */
@@ -501,48 +458,24 @@ static void arrow_ixe_names(arrow_ixe *e, const ArrowSchema *schema, int n) {
   }
 }
 
-/* The factor dict {levels, class = "factor"} — the inline attr shape's
-   form exactly, as a complete stream. */
-static size_t arrow_blob_factor(uint8_t *dst, const uint8_t *bytes,
-                                const int32_t *offs, int64_t nlev) {
-  arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
-  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 2));
-  arrow_ixe_key(&e, MIZU_IX_ATTR_LEVELS);
-  if (nlev == 1) {
-    ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), bytes,
-                                      offs[1] - offs[0]));
-  } else {
-    ARROW_IXE_PUT(&e, mizu_ix_put_strv_begin(ARROW_IXE_DST(&e),
-                                             (uint64_t) nlev));
-    for (int64_t i = 0; i < nlev; i++)
-      ARROW_IXE_PUT(&e, mizu_ix_put_strelt(ARROW_IXE_DST(&e),
-                                           bytes + offs[i],
-                                           offs[i + 1] - offs[i]));
-  }
-  arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
-  {
-    static const char *cls[1] = { MIZU_IX_CLASS_FACTOR };
-    arrow_ixe_class(&e, cls, 1);
-  }
-  return e.total;
-}
-
-static size_t arrow_blob_date(uint8_t *dst) {
+static size_t arrow_date_dict(uint8_t *dst) {
   static const char *cls[1] = { MIZU_IX_CLASS_DATE };
   arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 1));
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   arrow_ixe_class(&e, cls, 1);
   return e.total;
 }
 
+static size_t arrow_blob_date(uint8_t *dst) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_date_dict(dst != NULL ? dst + n : NULL);
+}
+
 /* tsn: the verbatim ns form's extra pair — the i64 counts' scale label. */
-static size_t arrow_blob_ts(uint8_t *dst, const char *tz, int tsn) {
+static size_t arrow_ts_dict(uint8_t *dst, const char *tz, int tsn) {
   static const char *cls[2] = { MIZU_IX_CLASS_POSIXCT, MIZU_IX_CLASS_POSIXT };
   arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), tsn ? 3 : 2));
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   arrow_ixe_class(&e, cls, 2);
@@ -556,13 +489,17 @@ static size_t arrow_blob_ts(uint8_t *dst, const char *tz, int tsn) {
   return e.total;
 }
 
+static size_t arrow_blob_ts(uint8_t *dst, const char *tz, int tsn) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_ts_dict(dst != NULL ? dst + n : NULL, tz, tsn);
+}
+
 /* The difftime dict {class = "difftime", units = "secs"} — the layout
    column's doubles are seconds, so the blob is unit-fixed (tscale names
    the verbatim form's i64 counts instead). */
-static size_t arrow_blob_difftime(uint8_t *dst, int tsn) {
+static size_t arrow_difftime_dict(uint8_t *dst, int tsn) {
   static const char *cls[1] = { MIZU_IX_CLASS_DIFFTIME };
   arrow_ixe e = { dst, 0 };
-  ARROW_IXE_PUT(&e, mizu_ix_put_header(ARROW_IXE_DST(&e)));
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), tsn ? 3 : 2));
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   arrow_ixe_class(&e, cls, 1);
@@ -574,6 +511,11 @@ static size_t arrow_blob_difftime(uint8_t *dst, int tsn) {
     ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), "ns", 2));
   }
   return e.total;
+}
+
+static size_t arrow_blob_difftime(uint8_t *dst, int tsn) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_difftime_dict(dst != NULL ? dst + n : NULL, tsn);
 }
 
 /* The frame dict {names, class = "data.frame", row.names}: row.names the
@@ -615,6 +557,7 @@ typedef struct {
   const char *tz_o;     /* TS: the tzone override (NULL: the classified) */
   int idx_w;            /* DICT: the index width */
   int idx_signed;       /* DICT */
+  int64_t nlev;         /* DICT: the canonical level count (batch 0's) */
   int64_t str_bytes;    /* STR: the packed byte total (the open's walk) */
   int u64_verbatim;     /* CVT 'L': the MIZU_CAP_MIZL_U64V verdict,
                            resolved at classify */
@@ -646,10 +589,6 @@ struct mizu_arrow {
   arrow_pcol *cols;
   arrow_scol *scols;
   arrow_remote *remotes;
-  int32_t **lev_offs;    /* per-dictionary-column canonical levels */
-  uint8_t **lev_bytes;   /*   (batch 0's), read at validation */
-  int64_t *nlevs;
-  int64_t *lev_blens;
   int64_t *tab;          /* the validity table scratch (2 * ncols) */
   const void *root_blob; /* the root-blob override (borrowed) */
   size_t root_blob_len;
@@ -660,6 +599,47 @@ struct mizu_arrow {
   size_t root_size;      /* the root blob's byte count */
   size_t total;
 };
+
+
+/* The factor dict {levels, class = "factor"} — the inline attr shape's
+   form exactly. The levels walk batch 0's dictionary (validated at open:
+   every record resolves, so the arrow_str_at verdict is exactly == 1);
+   a zero-batch column writes the empty strv. */
+static size_t arrow_factor_dict(uint8_t *dst, const mizu_arrow *a, int col) {
+  const arrow_pcol *pc = &a->cols[col];
+  const ArrowArray *dict = a->nb != 0 ?
+    a->batches[0]->children[col]->dictionary : NULL;
+  arrow_ixe e = { dst, 0 };
+  ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 2));
+  arrow_ixe_key(&e, MIZU_IX_ATTR_LEVELS);
+  if (pc->nlev == 1) {
+    const uint8_t *s;
+    int32_t len;
+    (void) mizu_arrow_str_at(dict, 0, pc->str_form, &s, &len);
+    ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), s, len));
+  } else {
+    ARROW_IXE_PUT(&e, mizu_ix_put_strv_begin(ARROW_IXE_DST(&e),
+                                             (uint64_t) pc->nlev));
+    for (int64_t i = 0; i < pc->nlev; i++) {
+      const uint8_t *s;
+      int32_t len;
+      (void) mizu_arrow_str_at(dict, i, pc->str_form, &s, &len);
+      ARROW_IXE_PUT(&e, mizu_ix_put_strelt(ARROW_IXE_DST(&e), s, len));
+    }
+  }
+  arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
+  {
+    static const char *cls[1] = { MIZU_IX_CLASS_FACTOR };
+    arrow_ixe_class(&e, cls, 1);
+  }
+  return e.total;
+}
+
+/* The factor blob: the dict as a complete stream. */
+static size_t arrow_blob_factor(uint8_t *dst, const mizu_arrow *a, int col) {
+  size_t n = mizu_ix_put_header(dst);
+  return n + arrow_factor_dict(dst != NULL ? dst + n : NULL, a, col);
+}
 
 // Classification ---------------------------------------------------------------------
 
@@ -828,27 +808,18 @@ static int arrow_check_batch(mizu_arrow *a, const ArrowArray *b) {
 // The dictionary validation -------------------------------------------------------------
 
 /* The dictionary levels of batch 0 (the canonical set later batches must
-   match): read into offsets + bytes. */
-static int arrow_levels_read(mizu_arrow *a, int col, int32_t **off_out,
-                             uint8_t **bytes_out, int64_t *nlev_out,
-                             int64_t *blen_out) {
+   match): validated in place — the borrowed dictionary ArrowArray serves
+   every later read (the level-match and the factor blob walk it through
+   arrow_str_at), so no offsets or bytes are copied out. */
+static int arrow_levels_check(mizu_arrow *a, int col) {
   const char *nm = a->schema->children[col]->name;
+  arrow_pcol *pc = &a->cols[col];
   if (a->nb == 0) {
     /* a zero-row stream serves no batch: the canonical levels are empty */
-    int32_t *offs = malloc(4);
-    if (offs == NULL) {
-      mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
-      return -1;
-    }
-    offs[0] = 0;
-    *off_out = offs;
-    *bytes_out = NULL;
-    *nlev_out = 0;
-    *blen_out = 0;
+    pc->nlev = 0;
     return 0;
   }
-  const ArrowArray *first = a->batches[0]->children[col];
-  const ArrowArray *dict = first->dictionary;
+  const ArrowArray *dict = a->batches[0]->children[col]->dictionary;
   if (dict == NULL || dict->n_buffers < 3 || dict->buffers == NULL ||
       (dict->length > 0 &&
        (dict->buffers[1] == NULL || dict->buffers[2] == NULL))) {
@@ -856,72 +827,48 @@ static int arrow_levels_read(mizu_arrow *a, int col, int32_t **off_out,
                         "column '%s': an invalid Arrow dictionary export", nm);
     return -1;
   }
-  int form = a->cols[col].str_form;
-  int64_t nlev = dict->length;
-  int32_t *offs = malloc(((size_t) nlev + 1) * 4);
-  uint8_t *bytes = NULL;
-  size_t blen = 0;
-  if (offs == NULL) goto nomem;
-  offs[0] = 0;
-  for (int64_t i = 0; i < nlev; i++) {
+  int64_t blen = 0;
+  for (int64_t i = 0; i < dict->length; i++) {
     const uint8_t *s;
     int32_t len;
-    if (!arrow_valid(dict, i)) {
+    if (!mizu_arrow_valid(dict, i)) {
       /* a null level: decline (R factor levels are non-NA) */
-      free(offs);
-      free(bytes);
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "column '%s': a dictionary column with a null "
                           "level has no portable home", nm);
       return -1;
     }
-    if (arrow_str_at(dict, i, form, &s, &len) != 1) {
-      free(offs);
-      free(bytes);
+    if (mizu_arrow_str_at(dict, i, pc->str_form, &s, &len) != 1) {
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "column '%s': an invalid Arrow dictionary export",
                           nm);
       return -1;
     }
-    if (blen + (size_t) len > INT32_MAX) {
-      free(offs);
-      free(bytes);
+    if (blen + (int64_t) len > INT32_MAX) {
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "column '%s': dictionary levels past the int32 "
                           "offset range", nm);
       return -1;
     }
-    uint8_t *nb = realloc(bytes, blen + (size_t) len + 1);
-    if (nb == NULL) goto nomem;
-    bytes = nb;
-    memcpy(bytes + blen, s, (size_t) len);
-    blen += (size_t) len;
-    offs[i + 1] = (int32_t) blen;
+    blen += (int64_t) len;
   }
-  *off_out = offs;
-  *bytes_out = bytes;
-  *nlev_out = nlev;
-  *blen_out = (int64_t) blen;
+  pc->nlev = dict->length;
   return 0;
-nomem:
-  free(offs);
-  free(bytes);
-  mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
-  return -1;
 }
 
-/* A later batch's dictionary must equal the canonical set. */
-static int arrow_levels_match(mizu_arrow *a, int col, const ArrowArray *dict,
-                              const int32_t *offs, const uint8_t *bytes,
-                              int64_t nlev) {
-  if (dict == NULL || dict->length != nlev) return 0;
-  int form = a->cols[col].str_form;
-  for (int64_t i = 0; i < nlev; i++) {
-    const uint8_t *s;
-    int32_t len;
-    if (arrow_str_at(dict, i, form, &s, &len) != 1) return 0;
-    if (offs[i + 1] - offs[i] != len ||
-        memcmp(bytes + offs[i], s, (size_t) len) != 0)
+/* A later batch's dictionary must equal batch 0's canonical set. */
+static int arrow_levels_match(mizu_arrow *a, int col,
+                              const ArrowArray *dict) {
+  const arrow_pcol *pc = &a->cols[col];
+  const ArrowArray *d0 = a->batches[0]->children[col]->dictionary;
+  if (dict == NULL || dict->length != pc->nlev) return 0;
+  for (int64_t i = 0; i < pc->nlev; i++) {
+    const uint8_t *s0, *s;
+    int32_t l0, l;
+    if (mizu_arrow_str_at(dict, i, pc->str_form, &s, &l) != 1) return 0;
+    /* batch 0's record was validated at open: == 1 */
+    if (mizu_arrow_str_at(d0, i, pc->str_form, &s0, &l0) != 1 || l0 != l ||
+        memcmp(s0, s, (size_t) l) != 0)
       return 0;
   }
   return 1;
@@ -934,14 +881,11 @@ static int arrow_validate_dicts(mizu_arrow *a) {
     arrow_pcol *pc = &a->cols[i];
     if (pc->kind != MIZU_ARROW_DICT) continue;
     const char *nm = a->schema->children[i]->name;
-    if (arrow_levels_read(a, i, &a->lev_offs[i], &a->lev_bytes[i],
-                          &a->nlevs[i], &a->lev_blens[i]) < 0)
+    if (arrow_levels_check(a, i) < 0)
       return -1;
     for (size_t b = 0; b < a->nb; b++) {
       const ArrowArray *ba = a->batches[b]->children[i];
-      if (b != 0 && !arrow_levels_match(a, i, ba->dictionary,
-                                        a->lev_offs[i], a->lev_bytes[i],
-                                        a->nlevs[i])) {
+      if (b != 0 && !arrow_levels_match(a, i, ba->dictionary)) {
         mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                             "column '%s': a dictionary column whose levels "
                             "differ across batches", nm);
@@ -949,7 +893,7 @@ static int arrow_validate_dicts(mizu_arrow *a) {
       }
       const uint8_t *idx = (const uint8_t *) ba->buffers[1];
       for (int64_t k = 0; k < ba->length; k++) {
-        if (!arrow_valid(ba, k)) continue;
+        if (!mizu_arrow_valid(ba, k)) continue;
         int64_t j = ba->offset + k, c;
         switch (pc->idx_w) {
         case 1:
@@ -968,7 +912,7 @@ static int arrow_validate_dicts(mizu_arrow *a) {
           c = ((const int64_t *) idx)[j];
           break;
         }
-        if (c < 0 || c >= a->nlevs[i]) {
+        if (c < 0 || c >= pc->nlev) {
           mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                               "column '%s': a dictionary index outside the "
                               "levels", nm);
@@ -1008,7 +952,7 @@ static int arrow_size_str(mizu_arrow *a, int col) {
     for (int64_t k = 0; k < ba->length; k++) {
       const uint8_t *s;
       int32_t len;
-      int rc = arrow_str_at(ba, k, pc->str_form, &s, &len);
+      int rc = mizu_arrow_str_at(ba, k, pc->str_form, &s, &len);
       if (rc < 0) goto malformed;
       if (rc > 0) bytes += len;
     }
@@ -1036,8 +980,7 @@ static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
     break;
   case MIZU_ARROW_DICT:
     c->body = a->rows * 4;
-    c->blob = (int64_t) arrow_blob_factor(NULL, a->lev_bytes[col],
-                                          a->lev_offs[col], a->nlevs[col]);
+    c->blob = (int64_t) arrow_blob_factor(NULL, a, col);
     break;
   case MIZU_ARROW_DATE:
     c->body = a->rows * 8;
@@ -1098,7 +1041,7 @@ static void arrow_size_pass(mizu_arrow *a) {
 
 // The write pass -------------------------------------------------------------------------
 
-static void arrow_write_cvt(uint8_t *dst, mizu_arrow *a, int col,
+static void arrow_write_cvt(uint8_t *dst, const mizu_arrow *a, int col,
                             const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   size_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
@@ -1172,7 +1115,7 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
       int32_t len;
       /* the size walk already validated every element (a malformed
          record declined at open), so this is exactly == 1 */
-      if (arrow_str_at(ba, k, pc->str_form, &s, &len) == 1) {
+      if (mizu_arrow_str_at(ba, k, pc->str_form, &s, &len) == 1) {
         memcpy(data + run, s, (size_t) len);
         run += len;
       } else {
@@ -1187,7 +1130,7 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
 }
 
 /* A dictionary column: the INT32 leaf of 1-based R codes (NA = INT_MIN). */
-static void arrow_write_dict(uint8_t *dst, mizu_arrow *a, int col) {
+static void arrow_write_dict(uint8_t *dst, const mizu_arrow *a, int col) {
   const arrow_pcol *pc = &a->cols[col];
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
@@ -1195,7 +1138,7 @@ static void arrow_write_dict(uint8_t *dst, mizu_arrow *a, int col) {
     const uint8_t *idx = (const uint8_t *) ba->buffers[1];
     for (int64_t k = 0; k < ba->length; k++) {
       int32_t v;
-      if (!arrow_valid(ba, k)) {
+      if (!mizu_arrow_valid(ba, k)) {
         v = MIZU_NA_INT32;
       } else {
         int64_t i = ba->offset + k, c;
@@ -1225,13 +1168,13 @@ static void arrow_write_dict(uint8_t *dst, mizu_arrow *a, int col) {
 }
 
 /* A date32 column: the REAL leaf of epoch-day doubles (NaT = NA payload). */
-static void arrow_write_date(uint8_t *dst, mizu_arrow *a, int col) {
+static void arrow_write_date(uint8_t *dst, const mizu_arrow *a, int col) {
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
     const int32_t *days = (const int32_t *) ba->buffers[1];
     for (int64_t k = 0; k < ba->length; k++) {
-      if (!arrow_valid(ba, k)) {
+      if (!mizu_arrow_valid(ba, k)) {
         arrow_store_na_r(dst + 8 * (done + k));
       } else {
         double v = (double) days[ba->offset + k];
@@ -1243,14 +1186,14 @@ static void arrow_write_date(uint8_t *dst, mizu_arrow *a, int col) {
 }
 
 /* A timestamp column: the REAL leaf of epoch-second doubles. */
-static void arrow_write_ts(uint8_t *dst, mizu_arrow *a, int col) {
+static void arrow_write_ts(uint8_t *dst, const mizu_arrow *a, int col) {
   const arrow_pcol *pc = &a->cols[col];
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
     const int64_t *counts = (const int64_t *) ba->buffers[1];
     for (int64_t k = 0; k < ba->length; k++) {
-      if (!arrow_valid(ba, k)) {
+      if (!mizu_arrow_valid(ba, k)) {
         arrow_store_na_r(dst + 8 * (done + k));
       } else {
         double v = (double) counts[ba->offset + k] * pc->ts_scale;
@@ -1279,7 +1222,7 @@ static void arrow_bitmap_write(uint8_t *dst, mizu_arrow *a, int col,
     const ArrowArray *ba = a->batches[b]->children[col];
     if (ba->null_count != 0 && ba->buffers[0] != NULL) {
       for (int64_t k = 0; k < ba->length; k++) {
-        if (!arrow_valid(ba, k)) {
+        if (!mizu_arrow_valid(ba, k)) {
           int64_t i = done + k;
           dst[i >> 3] &= (uint8_t) ~(1u << (i & 7));
         }
@@ -1358,8 +1301,7 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
       case MIZU_ARROW_DICT:
         entry.sexptype = MIZU_TYPE_INT;
         arrow_write_dict(dst, a, i);
-        arrow_blob_factor(dst + c->body, a->lev_bytes[i], a->lev_offs[i],
-                          a->nlevs[i]);
+        arrow_blob_factor(dst + c->body, a, i);
         break;
       case MIZU_ARROW_DATE:
         entry.sexptype = MIZU_TYPE_REAL;
@@ -1486,21 +1428,24 @@ mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
   a->nb = n_batches;
   a->peer_caps = peer_caps;
   a->ncols = (int) schema->n_children;
-  a->cols = calloc((size_t) a->ncols, sizeof(*a->cols));
-  a->scols = calloc((size_t) a->ncols, sizeof(*a->scols));
-  a->remotes = calloc((size_t) a->ncols, sizeof(*a->remotes));
-  a->lev_offs = calloc((size_t) a->ncols, sizeof(*a->lev_offs));
-  a->lev_bytes = calloc((size_t) a->ncols, sizeof(*a->lev_bytes));
-  a->nlevs = calloc((size_t) a->ncols, sizeof(*a->nlevs));
-  a->lev_blens = calloc((size_t) a->ncols, sizeof(*a->lev_blens));
-  a->tab = calloc((size_t) a->ncols * 2, sizeof(*a->tab));
-  if (a->cols == NULL || a->scols == NULL || a->remotes == NULL ||
-      a->lev_offs == NULL || a->lev_bytes == NULL || a->nlevs == NULL ||
-      a->lev_blens == NULL || a->tab == NULL) {
+  /* one block (cols is the base, freed at close): the per-column plans and
+     sizes, the remote-leaf overrides, the validity-table scratch — every
+     member 8-aligned by construction (the structs pad to 8, tab is i64) */
+  const size_t ncolsa = (size_t) a->ncols;
+  uint8_t *blk = calloc(ncolsa, sizeof(*a->cols) + sizeof(*a->scols) +
+                        sizeof(*a->remotes) + 2 * sizeof(*a->tab));
+  if (blk == NULL) {
     mizu_arrow_close(a);
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
     return MIZU_ERR;
   }
+  a->cols = (arrow_pcol *) blk;
+  a->scols = (arrow_scol *) (blk + ncolsa * sizeof(*a->cols));
+  a->remotes = (arrow_remote *) (blk + ncolsa * (sizeof(*a->cols) +
+                                                 sizeof(*a->scols)));
+  a->tab = (int64_t *) (blk + ncolsa * (sizeof(*a->cols) +
+                                        sizeof(*a->scols) +
+                                        sizeof(*a->remotes)));
   /* the names: every column named, no duplicates */
   for (int i = 0; i < a->ncols; i++) {
     const char *nm = schema->children[i] != NULL ?
@@ -1558,15 +1503,51 @@ void mizu_arrow_col_info(const mizu_arrow *a, int64_t col,
   out->kind = pc->kind;
   out->row = pc->row;
   out->str_form = pc->str_form;
-  out->ts_scale = pc->ts_scale;
-  out->tz = pc->tz_o != NULL ? pc->tz_o : pc->tz;
-  out->idx_w = pc->idx_w;
-  out->idx_signed = pc->idx_signed;
-  out->lev_offs = a->lev_offs[col];
-  out->lev_bytes = a->lev_bytes[col];
-  out->nlev = a->nlevs[col];
-  out->lev_blen = a->lev_blens[col];
   out->u64_verbatim = pc->u64_verbatim;
+}
+
+size_t mizu_arrow_col_body(const mizu_arrow *a, int64_t col, uint8_t *dst,
+                           mizu_arrow_warn *warn) {
+  if (col < 0 || col >= a->ncols) return 0;
+  const arrow_pcol *pc = &a->cols[col];
+  const int64_t rows = a->rows;
+  switch (pc->kind) {
+  case MIZU_ARROW_CVT:
+    if (dst != NULL) arrow_write_cvt(dst, a, (int) col, pc->row, warn);
+    return (size_t) rows * pc->row->w_out;
+  case MIZU_ARROW_DICT:
+    if (dst != NULL) arrow_write_dict(dst, a, (int) col);
+    return (size_t) rows * 4;
+  case MIZU_ARROW_DATE:
+    if (dst != NULL) arrow_write_date(dst, a, (int) col);
+    return (size_t) rows * 8;
+  case MIZU_ARROW_TS:
+  case MIZU_ARROW_TD:
+    if (dst != NULL) arrow_write_ts(dst, a, (int) col);
+    return (size_t) rows * 8;
+  default:
+    /* STR: the 'I' string form is the binding's per-element emitter
+       (mizu_arrow_str_at), the MIZS block region-only */
+    return 0;
+  }
+}
+
+size_t mizu_arrow_col_blob(const mizu_arrow *a, int64_t col, uint8_t *dst) {
+  if (col < 0 || col >= a->ncols) return 0;
+  const arrow_pcol *pc = &a->cols[col];
+  switch (pc->kind) {
+  case MIZU_ARROW_DICT:
+    return arrow_factor_dict(dst, a, (int) col);
+  case MIZU_ARROW_DATE:
+    return arrow_date_dict(dst);
+  case MIZU_ARROW_TS:
+    return arrow_ts_dict(dst, pc->tz_o != NULL ? pc->tz_o : pc->tz, 0);
+  case MIZU_ARROW_TD:
+    return arrow_difftime_dict(dst, 0);
+  default:
+    /* CVT / STR: no attribute dict on the by-value tiers */
+    return 0;
+  }
 }
 
 int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,
@@ -1645,19 +1626,6 @@ mizu_status mizu_arrow_stage(mizu_handle *h, mizu_arrow *a,
 
 void mizu_arrow_close(mizu_arrow *a) {
   if (a == NULL) return;
-  if (a->lev_offs != NULL) {
-    for (int i = 0; i < a->ncols; i++) {
-      free(a->lev_offs[i]);
-      free(a->lev_bytes != NULL ? a->lev_bytes[i] : NULL);
-    }
-  }
-  free(a->lev_offs);
-  free(a->lev_bytes);
-  free(a->nlevs);
-  free(a->lev_blens);
-  free(a->tab);
-  free(a->cols);
-  free(a->scols);
-  free(a->remotes);
+  free(a->cols);   /* the one block: scols / remotes / tab ride it */
   free(a);
 }

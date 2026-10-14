@@ -1,11 +1,15 @@
 mizu_arrow_close
+mizu_arrow_col_blob
+mizu_arrow_col_body
 mizu_arrow_col_info
 mizu_arrow_open
 mizu_arrow_remote
 mizu_arrow_root_blob
 mizu_arrow_size
 mizu_arrow_stage
+mizu_arrow_str_at
 mizu_arrow_tz
+mizu_arrow_valid
 mizu_aux_hi
 mizu_aux_rawspill_pool
 mizu_aux_shm_vec

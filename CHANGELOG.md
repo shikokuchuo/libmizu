@@ -13,6 +13,21 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The Arrow frame writer's per-column ext writers `mizu_arrow_col_body`
+  (a column's by-value body bytes over every batch — the same loops the
+  MIZL leaves use) and `mizu_arrow_col_blob` (its attribute dict as a
+  bare `0x0d` dict value, the §3.5 blob without its stream header), both
+  dst-NULL-sizing, so a binding's own `'I'` emitters share the core's
+  byte-level code instead of copying it. The validity and per-element
+  string accessors move to `mizu_ext.h` as the dual-form
+  `mizu_arrow_valid` / `mizu_arrow_str_at`. `mizu_arrow_col` shrinks to
+  the particulars the emitters still key on (`kind`, `row`, `str_form`,
+  `u64_verbatim`); the dictionary levels are no longer copied out at
+  open (validation walks batch 0's borrowed dictionary, which the level
+  match and the factor blob now read directly). The frame-size memo
+  re-runs after any override (`mizu_arrow_remote` / `_root_blob` /
+  `_tz`), so overrides no longer need to precede the first size call.
+
 - The Arrow frame writer's verbatim uint64 form: a `'L'` (uint64) column
   for a peer advertising the new `MIZU_CAP_MIZL_U64V` capability bit
   (bit 6) stages as an INT64 leaf — the identity lanes, the validity

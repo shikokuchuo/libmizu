@@ -221,3 +221,12 @@ size_t mizu_ix_write_err(unsigned char *dst, uint32_t inline_max,
                                     msg_n, detail, detail_n, has_index,
                                     index);
 }
+
+int mizu_arrow_valid(const ArrowArray *arr, int64_t k) {
+  return mizu_ext_arrow_valid_impl(arr, k);
+}
+
+int mizu_arrow_str_at(const ArrowArray *arr, int64_t k, int form,
+                      const uint8_t **ptr, int32_t *len) {
+  return mizu_ext_arrow_str_at_impl(arr, k, form, ptr, len);
+}

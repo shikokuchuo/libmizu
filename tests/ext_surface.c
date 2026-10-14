@@ -172,6 +172,10 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_cvt_convert);
   refs += sink((mizu_any_fn) &mizu_arrow_open);
   refs += sink((mizu_any_fn) &mizu_arrow_col_info);
+  refs += sink((mizu_any_fn) &mizu_arrow_col_body);
+  refs += sink((mizu_any_fn) &mizu_arrow_col_blob);
+  refs += sink((mizu_any_fn) &mizu_arrow_valid);
+  refs += sink((mizu_any_fn) &mizu_arrow_str_at);
   refs += sink((mizu_any_fn) &mizu_arrow_remote);
   refs += sink((mizu_any_fn) &mizu_arrow_root_blob);
   refs += sink((mizu_any_fn) &mizu_arrow_tz);
@@ -182,7 +186,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 116);
+  assert(refs == 120);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +
