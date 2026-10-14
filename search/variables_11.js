@@ -5,7 +5,5 @@ var searchData=
   ['task_5fid_2',['task_id',['../structmizu__entry__hdr__s.html#a39a545ebebecffcef0c80ff38481f284',1,'mizu_entry_hdr_s']]],
   ['task_5fkind_3',['task_kind',['../structmizu__ix__item__s.html#a3aa06f06365e74974e635bd88ae50b4a',1,'mizu_ix_item_s']]],
   ['tasks_5fby_5fstate_4',['tasks_by_state',['../structmizu__pool__status__s.html#a5dd2f25dc7332150d2131c77ec796097',1,'mizu_pool_status_s']]],
-  ['ts_5fscale_5',['ts_scale',['../structmizu__arrow__col__s.html#a475b7c89cdb8121b60162570f803406f',1,'mizu_arrow_col_s']]],
-  ['type_6',['type',['../structmizu__ix__item__s.html#a8c74298a41bb1a0051ed8f0b809a11de',1,'mizu_ix_item_s']]],
-  ['tz_7',['tz',['../structmizu__arrow__col__s.html#aae4d15d0e1409eff5d11a17aacc9978d',1,'mizu_arrow_col_s']]]
+  ['type_5',['type',['../structmizu__ix__item__s.html#a8c74298a41bb1a0051ed8f0b809a11de',1,'mizu_ix_item_s']]]
 ];
