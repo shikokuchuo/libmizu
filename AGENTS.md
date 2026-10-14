@@ -49,8 +49,8 @@ RngStreams, doxygen-awesome-css).
   kernels; the ABI structs live in `mizu_ext.h` under the spec's two
   include guards. The writer borrows the caller's ArrowArray structs
   AND the batches pointer array — both must outlive the handle until
-  `mizu_arrow_close`; the size pass is lazy-memoized, so overrides
-  precede the first `_size`/`_stage`). Also: `ext.c`
+  `mizu_arrow_close`; the size pass is lazy-memoized, re-running after
+  an override). Also: `ext.c`
   (exported half of `mizu_ext.h`; excluded from the amalgamation, which
   already carries the inlines), `err.c` (handle-bound error recorders),
   `rng_jump.c` (L'Ecuyer MRG32k3a stream jumping, for a future mizu_map),
