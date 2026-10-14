@@ -96,6 +96,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
      whole ring is hot on the peer, so one populate beats faulting on the
      hot path. Lazy attaches (map contexts) opt out. */
   void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                    /* NOLINTNEXTLINE(bugprone-branch-clone) */
                     MAP_SHARED | (populate ? MAP_POPULATE : 0), fd, 0);
   if (addr == MAP_FAILED) {
     close(fd);

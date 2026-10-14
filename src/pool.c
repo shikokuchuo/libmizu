@@ -582,8 +582,8 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
     (size_t) h.max_submitters * pool_ring_bytes(&h);
   for (uint32_t i = 0; i < h.max_workers; i++) {
     p->wk[i].id = (int32_t) i;
-    p->wk[i].deque_buf_off =
-      (int64_t) (deques_off + (size_t) i * ((size_t) h.deque_cap * h.slot));
+    p->wk[i].deque_buf_off = (int64_t) deques_off +
+      (int64_t) i * (int64_t) h.deque_cap * h.slot;
     p->wk[i].deque_cap = (int32_t) h.deque_cap;
     atomic_store_explicit(&p->wk[i].in_flight_rs, -1, memory_order_relaxed);
   }
@@ -1755,6 +1755,8 @@ static size_t pool_entry_copy_bytes(mizu_pool *p, const mizu_entry_hdr *eh) {
     if ((eh->ph.aux >> 8) < MIZU_NAME_MAX)
       return sizeof(*eh) + (uint32_t) (eh->ph.aux >> 8);
     break;
+  default:
+    break;
   }
   return p->hdr.slot;               /* torn or foreign header: full slot */
 }
@@ -2397,10 +2399,13 @@ static int pool_watch_owner(mizu_pool *p, mizu_parker *own_pk) {
 static void pool_remove_live_files(mizu_pool *p) {
   char path[1024];
   for (uint32_t i = 0; i < p->hdr.max_workers; i++)
-    if (pool_live_path(p, path, sizeof(path), "wk", i) == 0) remove(path);
+    if (pool_live_path(p, path, sizeof(path), "wk", i) == 0)
+      (void) remove(path);
   for (uint32_t j = 0; j < p->hdr.max_submitters; j++)
-    if (pool_live_path(p, path, sizeof(path), "sub", j) == 0) remove(path);
-  if (pool_live_path(p, path, sizeof(path), "owner", 0) == 0) remove(path);
+    if (pool_live_path(p, path, sizeof(path), "sub", j) == 0)
+      (void) remove(path);
+  if (pool_live_path(p, path, sizeof(path), "owner", 0) == 0)
+    (void) remove(path);
 }
 
 static void pool_orphan_teardown_try(mizu_pool *p) {
@@ -3047,6 +3052,7 @@ mizu_status mizu_pool_collect(mizu_pool *p, const mizu_task *t,
     double until = now + (double) budget / 1e9;
     if (deadline >= 0 && deadline < until) until = deadline;
     int caught;
+    /* NOLINTNEXTLINE(bugprone-assignment-in-if-condition) */
     MIZU_SPIN_WAIT((st = atomic_load_explicit(&rs->status,
                                              memory_order_acquire)) !=
                   MIZU_RS_PENDING, until, MIZU_SPIN_CLOCK_EVERY_LIGHT,

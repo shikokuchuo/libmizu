@@ -402,7 +402,7 @@ static int mizu_reap_unlink(const char *name,
    declines it. */
 static int mizu_reap_log(const char *path, unsigned long pid,
                         char ***list, size_t *cap, size_t *count) {
-  FILE *f = fopen(path, "rb");
+  FILE *f = fopen(path, "rbe");       /* 'e': O_CLOEXEC, per the liveness discipline */
   if (f == NULL) return 0;
   uint32_t rec;
   int rc = 0;
@@ -416,7 +416,7 @@ static int mizu_reap_log(const char *path, unsigned long pid,
       break;
     }
   }
-  fclose(f);
+  (void) fclose(f);
   return rc;
 }
 #endif

@@ -202,8 +202,8 @@ static void chan_survivor_unlink(mizu_channel *c) {
   } else {
     chan_unlink_region_name(c->shm.name);
   }
-  if (c->live_self_path[0] != '\0') remove(c->live_self_path);
-  if (c->live_peer_path[0] != '\0') remove(c->live_peer_path);
+  if (c->live_self_path[0] != '\0') (void) remove(c->live_self_path);
+  if (c->live_peer_path[0] != '\0') (void) remove(c->live_peer_path);
 }
 
 static int chan_probe_dead(mizu_channel *c) {
@@ -514,7 +514,7 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
 static void chan_wait_learn(mizu_channel *c, double t_wait) {
   if (t_wait < 0) return;
   c->wait_budget_ns = mizu_spin_learn((mizu_now() - t_wait) * 1e9,
-                                     (uint64_t) c->wait_budget_ns,
+                                     c->wait_budget_ns,
                                      (uint64_t) MIZU_SPIN_BUDGET_NS);
 }
 

@@ -4,11 +4,18 @@
 #   readability-magic-numbers            — wire-format constants are the point
 #   misc-include-cleaner                 — noisy with platform-guarded TUs
 #   readability-identifier-length        — hot-loop code uses short names
+#   readability-non-const-global-variables — deliberate process-global state
+#   readability-redundant-casting        — typedefs vary by platform: a cast
+#     redundant here is load-bearing there (uint64_t is long on Linux, long
+#     long on macOS/Windows)
 # Style-preference checks that fight the codebase's concise idiom:
 #   braces-around-statements, named-parameter (platform-guarded TUs omit
 #   params deliberately), uppercase-literal-suffix, math-missing-parentheses,
 #   isolate-declaration, concise-preprocessor, avoid-nested-conditional,
 #   redundant-casting; plus two noisy bugprone heuristics and mt-unsafe.
+#   function-cognitive-complexity      — the wait/collect state machines and
+#   wire parsers are branchy by design; splitting them obscures the protocol
+#   invariants their comments document.
 Checks: >
   bugprone-*,
   cert-*,
@@ -34,7 +41,8 @@ Checks: >
   -readability-redundant-casting,
   -bugprone-multi-level-implicit-pointer-conversion,
   -bugprone-easily-swappable-parameters,
-  -concurrency-mt-unsafe
+  -concurrency-mt-unsafe,
+  -readability-function-cognitive-complexity
 WarningsAsErrors: ''
 HeaderFilterRegex: '^(include|src)/'
 CheckOptions:

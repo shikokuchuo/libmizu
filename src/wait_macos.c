@@ -15,8 +15,12 @@
 #include <signal.h>
 #include <errno.h>
 
+/* Darwin's private ulock syscalls have no public header: the reserved
+   names are the ABI. */
+/* NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */
 extern int __ulock_wait(uint32_t operation, void *addr, uint64_t value,
                         uint32_t timeout_us);        /* 0 = forever */
+/* NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */
 extern int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 
 #define UL_COMPARE_AND_WAIT_SHARED 3

@@ -1535,7 +1535,8 @@ MIZU_EXT_INLINE int mizu_ext_ix_utf8_valid_impl(const void *s, size_t n) {
     const unsigned char c = b[i];
     if (c < 0x80) {
       i++;
-    } else if (c < 0xC2) {             /* stray continuation / overlong */
+    } else if (c < 0xC2 || c >= 0xF5) {   /* stray cont., overlong, or
+                                             past U+10FFFF */
       return 0;
     } else if (c < 0xE0) {             /* 2 bytes */
       if (i + 2 > n || (b[i + 1] & 0xC0) != 0x80) return 0;
@@ -1546,15 +1547,13 @@ MIZU_EXT_INLINE int mizu_ext_ix_utf8_valid_impl(const void *s, size_t n) {
       if (c == 0xE0 && b[i + 1] < 0xA0) return 0;   /* overlong */
       if (c == 0xED && b[i + 1] >= 0xA0) return 0;  /* surrogate */
       i += 3;
-    } else if (c < 0xF5) {             /* 4 bytes */
+    } else {                           /* 4 bytes: 0xF0..0xF4 */
       if (i + 4 > n || (b[i + 1] & 0xC0) != 0x80 ||
           (b[i + 2] & 0xC0) != 0x80 || (b[i + 3] & 0xC0) != 0x80)
         return 0;
       if (c == 0xF0 && b[i + 1] < 0x90) return 0;   /* overlong */
       if (c == 0xF4 && b[i + 1] > 0x8F) return 0;   /* > U+10FFFF */
       i += 4;
-    } else {
-      return 0;
     }
   }
   return 1;

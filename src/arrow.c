@@ -109,7 +109,7 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
     for (size_t i = 0; i < n; i++) {
       int8_t v;
       memcpy(&v, src + i, 1);
-      int32_t o = v;
+      int32_t o = (int32_t) v;
       memcpy(dst + 4 * i, &o, 4);
     }
     break;
@@ -180,6 +180,8 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
       double o[2] = { re, im };
       memcpy(dst + 16 * i, o, 16);
     }
+    break;
+  default:
     break;
   }
 }
@@ -336,6 +338,7 @@ const mizu_cvt_row *mizu_cvt_for_arrow(const char *f) {
   case 'f': return &CVT_ROW_F32;
   case 'g': return &CVT_ROW_F64;
   case 'b': return &CVT_ROW_BOOLBIT;
+  default: break;
   }
   return NULL;
 }
@@ -361,7 +364,7 @@ typedef struct {
   size_t total;
 } arrow_ixe;
 
-#define ARROW_IXE_PUT(x, call) do { (x)->total += call; } while (0)
+#define ARROW_IXE_PUT(x, call) do { (x)->total += (call); } while (0)
 #define ARROW_IXE_DST(x) ((x)->dst != NULL ? (x)->dst + (x)->total : NULL)
 
 /* The vector-tag wire header (tag + u64 count) for the emit-bytes forms. */
@@ -612,17 +615,20 @@ static size_t arrow_factor_dict(uint8_t *dst, const mizu_arrow *a, int col) {
   arrow_ixe e = { dst, 0 };
   ARROW_IXE_PUT(&e, mizu_ix_put_dict_begin(ARROW_IXE_DST(&e), 2));
   arrow_ixe_key(&e, MIZU_IX_ATTR_LEVELS);
-  if (pc->nlev == 1) {
-    const uint8_t *s;
-    int32_t len;
+  if (dict == NULL) {
+    /* the zero-batch column: the empty strv */
+    ARROW_IXE_PUT(&e, mizu_ix_put_strv_begin(ARROW_IXE_DST(&e), 0));
+  } else if (pc->nlev == 1) {
+    const uint8_t *s = NULL;
+    int32_t len = 0;
     (void) mizu_arrow_str_at(dict, 0, pc->str_form, &s, &len);
     ARROW_IXE_PUT(&e, mizu_ix_put_str(ARROW_IXE_DST(&e), s, len));
   } else {
     ARROW_IXE_PUT(&e, mizu_ix_put_strv_begin(ARROW_IXE_DST(&e),
                                              (uint64_t) pc->nlev));
     for (int64_t i = 0; i < pc->nlev; i++) {
-      const uint8_t *s;
-      int32_t len;
+      const uint8_t *s = NULL;
+      int32_t len = 0;
       (void) mizu_arrow_str_at(dict, i, pc->str_form, &s, &len);
       ARROW_IXE_PUT(&e, mizu_ix_put_strelt(ARROW_IXE_DST(&e), s, len));
     }
@@ -898,7 +904,7 @@ static int arrow_validate_dicts(mizu_arrow *a) {
         switch (pc->idx_w) {
         case 1:
           c = pc->idx_signed ? (int64_t) ((const int8_t *) idx)[j] :
-            (int64_t) ((const uint8_t *) idx)[j];
+            (int64_t) idx[j];
           break;
         case 2:
           c = pc->idx_signed ? (int64_t) ((const int16_t *) idx)[j] :
@@ -994,6 +1000,8 @@ static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
   case MIZU_ARROW_TD:
     c->body = a->rows * 8;
     c->blob = (int64_t) arrow_blob_difftime(NULL, pc->ts_verbatim);
+    break;
+  default:
     break;
   }
   for (size_t b = 0; b < a->nb; b++)
@@ -1145,7 +1153,7 @@ static void arrow_write_dict(uint8_t *dst, const mizu_arrow *a, int col) {
         switch (pc->idx_w) {
         case 1:
           c = pc->idx_signed ? (int64_t) ((const int8_t *) idx)[i] :
-            (int64_t) ((const uint8_t *) idx)[i];
+            (int64_t) idx[i];
           break;
         case 2:
           c = pc->idx_signed ? (int64_t) ((const int16_t *) idx)[i] :
@@ -1332,6 +1340,8 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
           arrow_blob_difftime(dst + c->body, 0);
         }
         break;
+      default:
+        break;
       }
       entry.data_size = c->body + c->blob;
     }
@@ -1357,26 +1367,27 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
   int64_t total_nulls = 0;
   int any_remote_unknown = 0;
   for (int i = 0; i < ncols; i++) {
+    const ptrdiff_t ti = 2 * (ptrdiff_t) i;
     if (a->remotes[i].used) {
-      tab[2 * i] = 0;
-      tab[2 * i + 1] = a->remotes[i].ref_claim;
+      tab[ti] = 0;
+      tab[ti + 1] = a->remotes[i].ref_claim;
       if (a->remotes[i].ref_claim != -1) any_remote_unknown = 1;
       continue;
     }
     if (a->cols[i].kind == MIZU_ARROW_STR) {
-      tab[2 * i] = 0;
-      tab[2 * i + 1] = 0;
+      tab[ti] = 0;
+      tab[ti + 1] = 0;
       continue;
     }
     if (a->scols[i].nulls == 0) {
-      tab[2 * i] = 0;
-      tab[2 * i + 1] = -1;
+      tab[ti] = 0;
+      tab[ti + 1] = -1;
       continue;
     }
     size_t off = MIZU_ALIGN64(cur);
     arrow_bitmap_write(base + off, a, i, rows);
-    tab[2 * i] = (int64_t) off;
-    tab[2 * i + 1] = a->scols[i].nulls;
+    tab[ti] = (int64_t) off;
+    tab[ti + 1] = a->scols[i].nulls;
     total_nulls += a->scols[i].nulls;
     cur = off + ((size_t) rows + 7) / 8;
   }
@@ -1384,7 +1395,6 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
     size_t tab_off = MIZU_ALIGN64(cur);
     memcpy(base + tab_off, tab, 16 * (size_t) ncols);
     mizu_mizh_validity_set(base, (int64_t) tab_off, total_nulls);
-    cur = tab_off + 16 * (size_t) ncols;
   } else {
     mizu_mizh_validity_set(base, 0, -1);
   }
