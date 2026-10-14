@@ -1019,6 +1019,12 @@ const <a class="el" href="structmizu__cvt__row__s.html">mizu_cvt_row</a> *&#160;
 <tr class="memitem:aaffb92799dbde8f5c4341013ecc2b806" id="r_aaffb92799dbde8f5c4341013ecc2b806"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806">mizu_arrow_col_blob</a> (const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst)</td></tr>
 <tr class="memdesc:aaffb92799dbde8f5c4341013ecc2b806"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's attribute dict as a bare 0x0d dict value (the §3.5 blob without its stream header — a binding splices it into its own 'I' attr form).  <br /></td></tr>
 <tr class="separator:aaffb92799dbde8f5c4341013ecc2b806"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a7927b5212da7eaf76ac2544ad14a1d1c" id="r_a7927b5212da7eaf76ac2544ad14a1d1c"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a7927b5212da7eaf76ac2544ad14a1d1c">mizu_arrow_write_ix_col</a> (const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst, <a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
+<tr class="memdesc:a7927b5212da7eaf76ac2544ad14a1d1c"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's 'I' value form (the inline small-table path): the plain vectors bare (the cvt tag off the row's wire type; the strv form over mizu_arrow_str_at, a malformed record put as NA like a null), the attr-marked forms splicing mizu_arrow_col_blob's bare dict.  <br /></td></tr>
+<tr class="separator:a7927b5212da7eaf76ac2544ad14a1d1c"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a87a9744e7df6506871ea9d287e59eaf9" id="r_a87a9744e7df6506871ea9d287e59eaf9"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a87a9744e7df6506871ea9d287e59eaf9">mizu_arrow_write_ix</a> (const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, uint8_t *dst, <a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
+<tr class="memdesc:a87a9744e7df6506871ea9d287e59eaf9"><td class="mdescLeft">&#160;</td><td class="mdescRight">One complete 'I' stream of the whole frame (the small-table path): the header, the attr mark, the list of the columns' value forms (mizu_arrow_write_ix_col), then the root dict {names, class = "data.frame", row.names = c(NA, -n)} — one C write straight off the Arrow buffers where a below-gate frame previously converted back to a language value first.  <br /></td></tr>
+<tr class="separator:a87a9744e7df6506871ea9d287e59eaf9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af2be1285ffcde97080f54dfb74ba01ec" id="r_af2be1285ffcde97080f54dfb74ba01ec"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#af2be1285ffcde97080f54dfb74ba01ec">mizu_arrow_remote</a> (<a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, const char *ident, size_t ident_len, void *ref_base, size_t ref_size, int64_t ref_leaf)</td></tr>
 <tr class="memdesc:af2be1285ffcde97080f54dfb74ba01ec"><td class="mdescLeft">&#160;</td><td class="mdescRight">A remote-leaf override (pymizu's provenance match): column col crosses as directory tag 33 — the identifier span, the referenced leaf's attrs size and validity claim read off the referenced region (mizu_mizl_elem), and one REFHELD OR per distinct referenced region at write.  <br /></td></tr>
 <tr class="separator:af2be1285ffcde97080f54dfb74ba01ec"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -3960,6 +3966,86 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>One column's attribute dict as a bare 0x0d dict value (the §3.5 blob without its stream header — a binding splices it into its own 'I' attr form). </p>
 <p>Returns the byte count; dst NULL sizes. 0 for a plain column (CVT, STR): the by-value tiers carry no attribute dict on them, and the MIZL-only marker pairs (tscale, u64) never appear here. </p>
+
+</div>
+</div>
+<a id="a7927b5212da7eaf76ac2544ad14a1d1c" name="a7927b5212da7eaf76ac2544ad14a1d1c"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a7927b5212da7eaf76ac2544ad14a1d1c">&#9670;&#160;</a></span>mizu_arrow_write_ix_col()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t mizu_arrow_write_ix_col </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>col</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint8_t *&#160;</td>
+          <td class="paramname"><em>dst</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *&#160;</td>
+          <td class="paramname"><em>warn</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>One column's 'I' value form (the inline small-table path): the plain vectors bare (the cvt tag off the row's wire type; the strv form over mizu_arrow_str_at, a malformed record put as NA like a null), the attr-marked forms splicing mizu_arrow_col_blob's bare dict. </p>
+<p>Returns the byte count; dst NULL sizes. col shall be in range (0 returned otherwise). The conversion counts accumulate into warn on the writing pass only. </p>
+
+</div>
+</div>
+<a id="a87a9744e7df6506871ea9d287e59eaf9" name="a87a9744e7df6506871ea9d287e59eaf9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a87a9744e7df6506871ea9d287e59eaf9">&#9670;&#160;</a></span>mizu_arrow_write_ix()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t mizu_arrow_write_ix </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *&#160;</td>
+          <td class="paramname">, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint8_t *&#160;</td>
+          <td class="paramname"><em>dst</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *&#160;</td>
+          <td class="paramname"><em>warn</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>One complete 'I' stream of the whole frame (the small-table path): the header, the attr mark, the list of the columns' value forms (mizu_arrow_write_ix_col), then the root dict {names, class = "data.frame", row.names = c(NA, -n)} — one C write straight off the Arrow buffers where a below-gate frame previously converted back to a language value first. </p>
+<p>The root dict is always the automatic form (the root-blob override is the region writer's); the MIZL-only leaves (the ns INT64 counts, the u64 lanes) never appear. Returns the byte count; dst NULL sizes. The conversion counts accumulate into warn on the writing pass only. </p>
 
 </div>
 </div>
