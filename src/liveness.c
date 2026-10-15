@@ -81,43 +81,118 @@ static int mizu_live_dir_default(char *buf, size_t size) {
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
 
 /* Consumers keep these in zero-initialized structs with 0 as the
    not-open sentinel, so a lock fd must never be 0: a process launched
    with stdin closed would otherwise leak the fd (and its flock) and
-   probe every peer as permanently alive. */
+   probe every peer as permanently alive. fds 1/2 bounce too: launched
+   with stdout/stderr closed the lock lands there, and a later dup2 /
+   freopen onto it would release the flock — a manufactured false DEAD. */
 static int mizu_live_fd_bounce(int fd) {
-  if (fd > 0) return fd;
+  if (fd > 2) return fd;
   int nfd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
   close(fd);
   return nfd;
+}
+
+/* Fork-inheritance guard: O_CLOEXEC covers exec'd children only — a
+   fork-without-exec child (an mclapply worker, a multiprocessing child)
+   inherits every liveness fd's open file description, so a dead holder
+   reads ALIVE while any forked child lives. Track every fd handed out;
+   an atfork child handler closes the child's copies — closing one fd of
+   a duplicated pair does not release the parent's flock, so the lock
+   then dies with the parent. The prepare handler holds the registry
+   mutex across the fork, so the child walks a consistent list. */
+typedef struct mizu_live_fd_s {
+  intptr_t fd;
+  struct mizu_live_fd_s *next;
+} mizu_live_fd;
+
+static pthread_mutex_t mizu_live_mu = PTHREAD_MUTEX_INITIALIZER;
+static mizu_live_fd *mizu_live_fds;
+
+static void mizu_live_atfork_prepare(void) {
+  pthread_mutex_lock(&mizu_live_mu);
+}
+
+static void mizu_live_atfork_parent(void) {
+  pthread_mutex_unlock(&mizu_live_mu);
+}
+
+static void mizu_live_atfork_child(void) {
+  for (mizu_live_fd *n = mizu_live_fds; n != NULL; n = n->next)
+    close((int) n->fd);
+  /* the nodes leak in the child (no free: the heap may be mid-mutation
+     from another thread at fork); its handles are dead by contract */
+  mizu_live_fds = NULL;
+  pthread_mutex_unlock(&mizu_live_mu);
+}
+
+static pthread_once_t mizu_live_once = PTHREAD_ONCE_INIT;
+
+static void mizu_live_atfork_install(void) {
+  (void) pthread_atfork(mizu_live_atfork_prepare, mizu_live_atfork_parent,
+                        mizu_live_atfork_child);
+}
+
+/* Serialize every open/close against the atfork prepare handler: the
+   child then sees exactly the tracked set — every tracked fd open, every
+   open liveness fd tracked. */
+static void mizu_live_registry_lock(void) {
+  (void) pthread_once(&mizu_live_once, mizu_live_atfork_install);
+  pthread_mutex_lock(&mizu_live_mu);
+}
+
+static int mizu_live_registry_add(intptr_t fd) {
+  mizu_live_fd *n = malloc(sizeof(*n));
+  if (n == NULL) return -1;
+  n->fd = fd;
+  n->next = mizu_live_fds;
+  mizu_live_fds = n;
+  return 0;
 }
 
 int mizu_live_open(const char *path, intptr_t *out) {
   /* O_CLOEXEC is required: flock is scoped to the open file
      description, so an inherited fd would keep the lock alive past the
      holder's death — a manufactured false ALIVE. */
+  mizu_live_registry_lock();
   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-  if (fd < 0) return -1;
-  /* Lock-file names are derivable and the default dir can be
-     world-writable (/dev/shm), so refuse a file another user pre-created:
-     a squatter taking the flock after the holder dies would feed the
-     reaper a permanent false ALIVE. */
-  struct stat st;
-  if (fstat(fd, &st) != 0 || st.st_uid != geteuid()) {
-    close(fd);
-    return -1;
+  if (fd >= 0) {
+    /* Lock-file names are derivable and the default dir can be
+       world-writable (/dev/shm), so refuse a file another user pre-created:
+       a squatter taking the flock after the holder dies would feed the
+       reaper a permanent false ALIVE. */
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_uid != geteuid()) {
+      close(fd);
+      fd = -1;
+    } else {
+      fd = mizu_live_fd_bounce(fd);
+      if (fd >= 0 && mizu_live_registry_add((intptr_t) fd) != 0) {
+        close(fd);
+        fd = -1;
+      }
+    }
   }
-  fd = mizu_live_fd_bounce(fd);
+  pthread_mutex_unlock(&mizu_live_mu);
   if (fd < 0) return -1;
   *out = (intptr_t) fd;
   return 0;
 }
 
 int mizu_live_open_existing(const char *path, intptr_t *out) {
+  mizu_live_registry_lock();
   int fd = open(path, O_RDWR | O_CLOEXEC);
-  if (fd < 0) return -1;
-  fd = mizu_live_fd_bounce(fd);
+  if (fd >= 0) {
+    fd = mizu_live_fd_bounce(fd);
+    if (fd >= 0 && mizu_live_registry_add((intptr_t) fd) != 0) {
+      close(fd);
+      fd = -1;
+    }
+  }
+  pthread_mutex_unlock(&mizu_live_mu);
   if (fd < 0) return -1;
   *out = (intptr_t) fd;
   return 0;
@@ -133,7 +208,19 @@ void mizu_live_unlock(intptr_t h) {
 }
 
 void mizu_live_close(intptr_t h) {
-  close((int) h);
+  /* Registry-gated: an untracked fd is a forked child's stale handle copy
+     (the atfork handler already closed the real descriptor) or a double
+     close — closing here could kill a descriptor since reused. */
+  mizu_live_registry_lock();
+  mizu_live_fd **pp = &mizu_live_fds;
+  while (*pp != NULL && (*pp)->fd != h) pp = &(*pp)->next;
+  if (*pp != NULL) {
+    mizu_live_fd *dead = *pp;
+    *pp = dead->next;
+    close((int) h);
+    free(dead);
+  }
+  pthread_mutex_unlock(&mizu_live_mu);
 }
 
 int mizu_live_ident(intptr_t h, uint64_t *dev, uint64_t *ino) {

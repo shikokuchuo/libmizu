@@ -395,6 +395,12 @@ mizu_shm *mizu_read_region(mizu_read_ctx *ctx, const uint8_t *name,
     char nbuf[MIZU_NAME_MAX];
     memcpy(nbuf, name, len);
     nbuf[len] = '\0';
+    /* the name rides a peer-writable slot: the exact grammar gate keeps
+       a "/../" traversal out of the open */
+    if (!mizu_name_valid(nbuf)) {
+      ctx->gone = 1;
+      return NULL;
+    }
     shm = mizu_shm_open_ro_heap(nbuf);
     if (shm == NULL) {
       /* the region died with its creator (Win32 mappings cannot outlive
@@ -457,10 +463,21 @@ static void mizu_ledger_drop(mizu_spill_fl *fl, uint32_t i) {
 }
 
 void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
-  uint32_t i = 0, visited = 0;
-  while (i < fl->led_n && visited < quota) {
+  uint32_t n = fl->led_n;
+  if (n == 0) {
+    fl->sweep_next = 0;
+    return;
+  }
+  /* Rotate the window across calls: long-held regions at the ledger
+     front must not starve the entries behind them on the quota-bounded
+     busy path (a full sweep self-corrects, but only on a free-list
+     miss). Swap-removal moves the tail into a dropped slot, so a drop
+     re-examines the same index; a kept entry advances with wrap. */
+  uint32_t window = quota < n ? quota : n;
+  uint32_t i = fl->sweep_next % n;
+  for (uint32_t visited = 0; visited < window && fl->led_n > 0; visited++) {
+    if (i >= fl->led_n) i = 0;
     mizu_shm *shm = fl->led_regions[i];
-    visited++;
     uint32_t count =
       atomic_load_explicit(mizu_zc_rc(shm->addr), memory_order_acquire);
     if (count == 0) {
@@ -471,6 +488,7 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
       i++;
     }
   }
+  fl->sweep_next = fl->led_n == 0 ? 0 : i % fl->led_n;
 }
 
 /* The death backstop, after the liveness verdict: a dead consumer's

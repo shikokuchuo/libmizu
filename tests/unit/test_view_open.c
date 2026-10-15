@@ -32,9 +32,20 @@ int main(void) {
   /* unbalanced flags reject nothing (0 is the default); a vanished name
      fails with the thread-local slot set, either form */
   mizu_shm *gone = NULL;
-  assert(mizu_shm_open_view_flags(&gone, "/mizu_no_such_region",
+  assert(mizu_shm_open_view_flags(&gone, "/mizu_0_0",
                                  MIZU_OPEN_VIEW_NOCOUNT) == MIZU_ERR);
   assert(mizu_last_error_category() != MIZU_ERRCAT_NONE);
+
+  /* the wire-name grammar gate: a traversal or malformed name is
+     refused before the open (whose counted add writes offset 24) */
+  const char *bad_names[] = {
+    "/mizu_../x", "/mizu_1", "/mizu_1_2x", "/mizu__1", "/etc/mizu_1_2"
+  };
+  for (size_t i = 0; i < sizeof bad_names / sizeof *bad_names; i++) {
+    mizu_shm *bad = NULL;
+    assert(mizu_shm_open_view_flags(&bad, bad_names[i], 0) == MIZU_ERR);
+    assert(bad == NULL);
+  }
 
   mizu_zc_unref(v1);
   mizu_zc_unref(v2);

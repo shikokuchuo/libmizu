@@ -174,7 +174,7 @@ static void bench_steal(uint32_t workers) {
       void *vals[CHUNK];
       size_t err = 0;
       if (mizu_pool_collect_all(ctrl, ring[head_slot], ring_n[head_slot],
-                               vals, &err, 60000) != MIZU_OK)
+                               vals, &err, NULL, 60000) != MIZU_OK)
         exit(1);
       for (size_t i = 0; i < ring_n[head_slot]; i++) mizu_bytes_free(vals[i]);
       collected += (int) ring_n[head_slot];

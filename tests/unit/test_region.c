@@ -7,6 +7,8 @@
 #include <string.h>
 #ifndef _WIN32
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -116,6 +118,72 @@ int main(void) {
       dup2(saved, 0);
       close(saved);
     }
+  }
+#endif
+
+#ifndef _WIN32
+  /* with stdout/stderr closed, a lock fd bounces off 1/2 as well: a
+     later dup2 / freopen onto it would release the flock (a false DEAD) */
+  {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      intptr_t h;
+      close(1);
+      if (mizu_live_open(path, &h) != 0 || h <= 2) _exit(1);
+      if (fcntl(1, F_GETFD) != -1) _exit(2);   /* fd 1 stays free */
+      mizu_live_close(h);
+      close(2);
+      if (mizu_live_open_existing(path, &h) != 0 || h <= 2) _exit(3);
+      if (fcntl(2, F_GETFD) != -1) _exit(4);   /* fd 2 stays free */
+      mizu_live_close(h);
+      _exit(0);
+    }
+    int st;
+    assert(waitpid(pid, &st, 0) == pid);
+    assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    remove(path);
+  }
+
+  /* a fork-without-exec child must not keep a dead holder's lock alive:
+     the holder forks a lingering grandchild and exits; the atfork
+     handler closed the grandchild's inherited fd at fork, so the probe
+     acquires as soon as the holder dies — not when the grandchild
+     finally exits */
+  {
+    char hpath[1100];
+    int hn = snprintf(hpath, sizeof(hpath), "%s/mizu_test_fork_%ld.live",
+                      dir, mizu_self_pid());
+    assert(hn > 0 && (size_t) hn < sizeof(hpath));
+    int pipefd[2];
+    assert(pipe(pipefd) == 0);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      close(pipefd[0]);
+      intptr_t h;
+      if (mizu_live_open(hpath, &h) != 0 ||
+          mizu_live_try(h) != MIZU_LIVE_ACQUIRED)
+        _exit(2);
+      if (write(pipefd[1], "1", 1) != 1) _exit(3);   /* the lock is held */
+      if (fork() == 0) {
+        sleep(2);                                    /* outlives the holder */
+        _exit(0);
+      }
+      _exit(0);                                      /* the holder dies */
+    }
+    close(pipefd[1]);
+    char c;
+    assert(read(pipefd[0], &c, 1) == 1);             /* wait for the lock */
+    close(pipefd[0]);
+    int st;
+    assert(waitpid(pid, &st, 0) == pid);             /* holder reaped */
+    intptr_t h2;
+    assert(mizu_live_open_existing(hpath, &h2) == 0);
+    assert(mizu_live_try(h2) == MIZU_LIVE_ACQUIRED); /* not HELD by the child */
+    mizu_live_unlock(h2);
+    mizu_live_close(h2);
+    remove(hpath);
   }
 #endif
 

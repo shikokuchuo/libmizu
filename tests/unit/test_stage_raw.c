@@ -186,6 +186,11 @@ int main(void) {
   raw_obj c64k = { data, 65536, MIZU_TYPE_REAL };
   chan_row(256, 0, 1, &c64k, MIZU_KIND_NIL, 0);
 
+  /* A non-atomic wire type has no element size: the reservation declines
+     instead of dividing by zero in the flat SHM_VEC reserve. */
+  raw_obj strv = { data, 262152, MIZU_TYPE_STR };
+  chan_row(256, 4u << 20, 0, &strv, MIZU_KIND_NIL, 0);
+
   /* A larger slot: inline budget 4080 moves the RAWVEC edge. */
   raw_obj w1 = { data, 4080, MIZU_TYPE_REAL };
   chan_row(4096, 4u << 20, 0, &w1, MIZU_KIND_RAWVEC, 0);

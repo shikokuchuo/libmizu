@@ -145,7 +145,7 @@ typedef struct mizu_binding_s mizu_binding;
    immutable thereafter; validated by the peer before any shared atomic is
    read or written. */
 #define MIZU_MAGIC        0x4D495A43u   /**< "MIZC" */
-#define MIZU_ABI_VERSION  2u
+#define MIZU_ABI_VERSION  1u
 
 typedef struct mizu_preamble_s {
   uint32_t magic;
@@ -832,7 +832,14 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
    consumed (its error object rides read_fn like any value into
    values_out[err]), and every other handle — the OK results ahead of
    it included — stays collectible. *err_index_out == n means all OK.
-   MIZU_TIMEOUT consumes nothing: every handle stays valid. */
+   A read failure after an all-OK wait returns MIZU_ERR with
+   *err_index_out the failing slot's index (unconsumed when retryable)
+   and *consumed_out the number of leading results already handed to
+   the sink / written to values_out — the consumed prefix, for the
+   binding to return or attach; every handle past the prefix stays
+   collectible. *consumed_out is n on a fully collected run, 0 when the
+   run reported a non-OK outcome. MIZU_TIMEOUT consumes nothing: every
+   handle stays valid. */
 MIZU_API mizu_status mizu_pool_collect(mizu_pool *, const mizu_task *,
                                     void **value_out, double timeout_ms);
 MIZU_API mizu_status mizu_pool_collect_any(mizu_pool *, const mizu_task *,
@@ -841,6 +848,7 @@ MIZU_API mizu_status mizu_pool_collect_any(mizu_pool *, const mizu_task *,
 MIZU_API mizu_status mizu_pool_collect_all(mizu_pool *, const mizu_task *,
                                         size_t n, void **values_out,
                                         size_t *err_index_out,
+                                        size_t *consumed_out,
                                         double timeout_ms);
 
 /** The sink-callback form of collect_all: each value is handed to sink
@@ -852,6 +860,7 @@ MIZU_API mizu_status mizu_pool_collect_all_fn(mizu_pool *, const mizu_task *,
                                            size_t n, mizu_obj_sink,
                                            void *ctx,
                                            size_t *err_index_out,
+                                           size_t *consumed_out,
                                            double timeout_ms);
 
 /** Task lifecycle trace hook: per-handle, per-process; NULL removes.

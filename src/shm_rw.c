@@ -237,6 +237,12 @@ mizu_status mizu_shm_open_rw(mizu_shm **out, const char *name, int populate) {
    its consumer-done signal. */
 mizu_status mizu_shm_open_view_flags(mizu_shm **out, const char *name,
                                    uint32_t flags) {
+  /* the name is wire-carried: the exact grammar gate keeps a "/../"
+     traversal out of the open (whose counted add writes offset 24) */
+  if (!mizu_name_valid(name)) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region name");
+    return MIZU_ERR;
+  }
   mizu_shm *shm = mizu_shm_open_rw_heap(name, 0);
   if (shm == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "cannot open region '%s'", name);

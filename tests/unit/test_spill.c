@@ -158,6 +158,25 @@ int main(void) {
   mizu_ledger_force(&h.fl, MIZU_LED_WK, 7);
   assert(h.fl.led_n == 0);
 
+  /* the quota sweep rotates its window across calls: long-held regions
+     at the ledger front must not starve the entries behind them */
+  mizu_shm *r[4];
+  for (int i = 0; i < 4; i++) {
+    r[i] = mizu_spill_region_get(&h.fl, 100);
+    mizu_stage_retain_zc(&h, r[i]);
+    mizu_keeper_commit(&h, tab, (uint32_t) i);
+    mizu_zc_ref(r[i]);                      /* held: stays lent */
+    mizu_keeper_release(&h, tab, (uint32_t) i);
+  }
+  assert(h.fl.led_n == 4);
+  uint32_t n0 = h.fl.n;
+  mizu_zc_unref(r[2]);                      /* releasable */
+  mizu_zc_unref(r[3]);
+  mizu_ledger_sweep(&h.fl, 2);              /* visits r[0], r[1]: held */
+  assert(h.fl.led_n == 4 && h.fl.n == n0);
+  mizu_ledger_sweep(&h.fl, 2);              /* wraps to r[2], r[3] */
+  assert(h.fl.led_n == 2 && h.fl.n == n0 + 2);
+
   /* free-list caps: a region past the byte cap is destroyed, not listed */
   mizu_shm *big = NULL;
   assert(mizu_shm_create_heap(&big, MIZU_SPILL_FL_BYTES + 4096) ==
@@ -213,6 +232,17 @@ int main(void) {
   assert(got != NULL && h.oc.hits == 1);
   mizu_shm *gone = mizu_read_region(&ctx, (const uint8_t *) "/mizu_0_0", 8);
   assert(gone == NULL && ctx.gone == 1);
+  /* the wire-name grammar gate: a traversal or malformed name is refused
+     before the open, reported gone like a vanished region */
+  const char *bad_names[] = {
+    "/mizu_../x", "/mizu_1", "/mizu_1_2x", "/mizu__1", "/etc/mizu_1_2"
+  };
+  for (size_t i = 0; i < sizeof bad_names / sizeof *bad_names; i++) {
+    ctx.gone = 0;
+    assert(mizu_read_region(&ctx, (const uint8_t *) bad_names[i],
+                           (uint32_t) strlen(bad_names[i])) == NULL);
+    assert(ctx.gone == 1);
+  }
   mizu_shm_close(target, 1);
   mizu_oc_teardown(&h.oc);
 

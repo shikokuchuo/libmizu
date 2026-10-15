@@ -232,6 +232,10 @@ int mizu_live_ident(intptr_t h, uint64_t *dev, uint64_t *ino);
 /* The join-token charset check shared by the channel and pool attach
    paths ("<pid hex>_<counter hex>"; NULL and empty are malformed). */
 int mizu_token_valid(const char *token);
+/* The exact region-name grammar for a wire-carried name (the prefix
+   plus "<hex>_<hex>", nothing else): the gate for the read-side opens
+   against a "/../" traversal from a corrupt or hostile peer. */
+int mizu_name_valid(const char *name);
 /* The pool header's magic + version + layout check (pool.c), the attach
    path's counterpart of mizu_preamble_validate. */
 const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
@@ -278,6 +282,7 @@ typedef struct mizu_spill_fl_s {
   mizu_shm *led_regions[MIZU_LEDGER_MAX];  /* lent: views outstanding */
   int32_t  led_key[MIZU_LEDGER_MAX];      /* consumer identity; -1 channel */
   uint32_t led_n;
+  uint32_t sweep_next;                  /* quota-sweep rotation start */
   /* ledger-overflow drops: the mapping closes at the drop; the name is
      kept so a REF in flight can still resolve, and unlinks at teardown */
   mizu_shm **dropped;

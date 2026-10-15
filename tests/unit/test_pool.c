@@ -22,6 +22,7 @@ static int exec_mode = 0;  /* 0 echo, 1 strand (no publish), 2 infra fail,
                               3 abandon (eval_mark + longjmp), 4 ERR inline,
                               5 ERR tiered */
 static int err_read = 0;   /* read_fn returns the ERR envelope's bytes */
+static int fail_read = 0;  /* read_fn fails the "rf" payload (no CONSUME) */
 
 static void array_sink(void *ctx, size_t i, void *obj) {
   ((void **) ctx)[i] = obj;
@@ -111,6 +112,9 @@ static int test_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
 
 static void *test_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
                        size_t limit, mizu_read_ctx *ctx) {
+  if (fail_read && hdr->kind == MIZU_KIND_INLINE && hdr->len == 2 &&
+      memcmp(payload, "rf", 2) == 0)
+    return NULL;   /* a retryable read failure (no MIZU_READ_CONSUME) */
   if (err_read && ctx->outcome == MIZU_RS_ERR) {
     /* read the envelope's bytes as if OK: verifies the framing crossed */
     mizu_read_ctx tmp = *ctx;
@@ -502,6 +506,32 @@ static void test_leave_fails_in_flight(void) {
   puts("ok leave_fails_in_flight");
 }
 
+/* leave fails every slot the worker was executing, not only the
+   announced claim: the second claim overwrote the announce, so the
+   first task's slot is found only by its worker_slot stamp — an orderly
+   leave runs no reaper to deliver that verdict. */
+static void test_leave_fails_executing(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_task t1 = submit_bytes(ctrl, "x", 1);
+  mizu_task t2 = submit_bytes(ctrl, "y", 1);
+  exec_mode = 1;   /* claim, never publish: strands both */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* announces t1 */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* announce overwritten */
+  exec_mode = 0;
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  pool_end();
+  puts("ok leave_fails_executing");
+}
+
 /* The unwind path: an abandoned catching = 0 eval (a binding's longjmp)
    mints the in-flight task's sink through mizu_pool_unwind_sink for the
    ERR publish; the worker loop heals and continues. */
@@ -610,6 +640,48 @@ static void test_submitter_reap(void) {
   mizu_pool_destroy(sub2);
   pool_end();
   puts("ok submitter_reap");
+}
+
+/* Submitter-slot lifecycle: an orderly destroy frees the slot outright
+   (nothing PENDING — no reaper needed); a destroy with PENDING work
+   leaves it LIVE and the next attach's claim probe reaps it. Either way
+   a live process is never denied attach by a dead registration. */
+static void test_sub_slot_recycle(void) {
+  pool_pair(1, 1, 2, 64, 64, 64, 512);   /* ctrl + one more submitter */
+  mizu_binding b;
+  make_binding(&b, 0);
+
+  /* orderly: two attaches through one slot, each destroyed clean */
+  for (int i = 0; i < 2; i++) {
+    mizu_pool *s;
+    assert(mizu_pool_attach(&s, token, &b) == MIZU_OK);
+    char c = (char) ('a' + i);
+    mizu_task t = submit_bytes(s, &c, 1);
+    assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+    collect_bytes(s, &t, &c, 1);
+    mizu_pool_destroy(s);   /* nothing outstanding: slot -> FREE */
+  }
+
+  /* a PENDING task outstanding keeps the slot LIVE past the destroy;
+     the claim probe reaps it (the task cancels and skips at pop) */
+  mizu_pool *s;
+  assert(mizu_pool_attach(&s, token, &b) == MIZU_OK);
+  mizu_task doomed = submit_bytes(s, "doomed", 6);
+  (void) doomed;
+  mizu_pool_destroy(s);
+
+  mizu_pool *s2;
+  assert(mizu_pool_attach(&s2, token, &b) == MIZU_OK);   /* probe + reap */
+  mizu_task t = submit_bytes(s2, "alive", 5);
+  exec_calls = 0;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* skips the cancelled */
+  assert(exec_calls == 0);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* runs "alive" */
+  assert(exec_calls == 1);
+  collect_bytes(s2, &t, "alive", 5);
+  mizu_pool_destroy(s2);
+  pool_end();
+  puts("ok sub_slot_recycle");
 }
 
 /* The park path: an idle step waits out its timeout (announce -> park ->
@@ -759,17 +831,20 @@ static void test_collect_all(void) {
   mizu_task t3 = submit_bytes(ctrl, "c", 1);
   mizu_task ts[3] = { t1, t2, t3 };
   void *vals[3] = { (void *) 1, (void *) 1, (void *) 1 };
-  size_t err = 99;
-  assert(mizu_pool_collect_all(ctrl, ts, 3, vals, &err, 0) == MIZU_TIMEOUT);
+  size_t err = 99, consumed = 99;
+  assert(mizu_pool_collect_all(ctrl, ts, 3, vals, &err, &consumed, 0) ==
+         MIZU_TIMEOUT);
   assert(vals[0] == NULL && vals[1] == NULL && vals[2] == NULL);
+  assert(consumed == 0);
 
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   err_read = 1;   /* read the ERR envelope's bytes as the value */
-  assert(mizu_pool_collect_all(ctrl, ts, 3, vals, &err, 1000) == MIZU_OK);
+  assert(mizu_pool_collect_all(ctrl, ts, 3, vals, &err, &consumed, 1000) ==
+         MIZU_OK);
   err_read = 0;
-  assert(err == 1);
+  assert(err == 1 && consumed == 0);
   /* only the reported handle is consumed and filled */
   assert(vals[0] == NULL && vals[2] == NULL);
   mizu_bytes *b = vals[1];
@@ -781,8 +856,9 @@ static void test_collect_all(void) {
   mizu_task t4 = submit_bytes(ctrl, "d", 1);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   err = 0;
-  assert(mizu_pool_collect_all(ctrl, &t4, 1, vals, &err, 1000) == MIZU_OK);
-  assert(err == 1);   /* == n: all OK */
+  assert(mizu_pool_collect_all(ctrl, &t4, 1, vals, &err, &consumed, 1000) ==
+         MIZU_OK);
+  assert(err == 1 && consumed == 1);   /* err == n: all OK */
   mizu_bytes_free(vals[0]);
 
   /* sink form: values delivered in input order as claimed */
@@ -794,13 +870,37 @@ static void test_collect_all(void) {
   vals[0] = vals[1] = NULL;
   err = 0;
   assert(mizu_pool_collect_all_fn(ctrl, ts3, 2, array_sink, vals, &err,
-                                 1000) == MIZU_OK);
-  assert(err == 2);
+                                 &consumed, 1000) == MIZU_OK);
+  assert(err == 2 && consumed == 2);
   mizu_bytes *b5 = vals[0], *b6 = vals[1];
   assert(b5->len == 1 && memcmp(b5->data, "e", 1) == 0);
   assert(b6->len == 1 && memcmp(b6->data, "f", 1) == 0);
   mizu_bytes_free(b5);
   mizu_bytes_free(b6);
+
+  /* a read failure mid-claim: MIZU_ERR names the failing slot (unconsumed
+     when retryable) and carries the consumed prefix out */
+  mizu_task u1 = submit_bytes(ctrl, "ok", 2);
+  mizu_task u2 = submit_bytes(ctrl, "rf", 2);
+  mizu_task u3 = submit_bytes(ctrl, "ok", 2);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  mizu_task us[3] = { u1, u2, u3 };
+  void *uvals[3] = { NULL, NULL, NULL };
+  err = 99;
+  consumed = 99;
+  fail_read = 1;
+  assert(mizu_pool_collect_all(ctrl, us, 3, uvals, &err, &consumed, 1000) ==
+         MIZU_ERR);
+  fail_read = 0;
+  assert(err == 1 && consumed == 1);
+  mizu_bytes *ub = uvals[0];
+  assert(ub->len == 2 && memcmp(ub->data, "ok", 2) == 0);
+  mizu_bytes_free(ub);
+  assert(uvals[1] == NULL && uvals[2] == NULL);
+  collect_bytes(ctrl, &u2, "rf", 2);  /* the failing slot: retryable */
+  collect_bytes(ctrl, &u3, "ok", 2);  /* past the failure: collectible */
   pool_end();
   puts("ok collect_all");
 }
@@ -1250,10 +1350,12 @@ int main(void) {
   test_err_publish();
   test_infra_failure_and_reap();
   test_leave_fails_in_flight();
+  test_leave_fails_executing();
   test_unwind();
   test_retire_lame_duck();
   test_orphan_drain();
   test_submitter_reap();
+  test_sub_slot_recycle();
   test_step_idle();
   test_ready_wait();
   test_trace();

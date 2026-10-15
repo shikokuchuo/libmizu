@@ -366,6 +366,7 @@ static int mizu_shm_os_unlink(const char *name) {
 
 #include <signal.h>
 #include <dirent.h>
+#include <ctype.h>
 
 static int mizu_pid_alive(pid_t pid) {
   if (pid <= 0) return 1;             /* never treat as reapable */
@@ -448,6 +449,16 @@ char **mizu_shm_reap(int *n) {
     char *end;
     long pid = strtol(pid_str, &end, 16);
     if (end == pid_str || *end != '_') continue;    /* not <pid>_<counter> */
+    /* the region grammar is exactly "mizu_<pid>_<ctr>" — the liveness
+       lock files sharing this directory ("mizu_<pid>_<ctr>.live.host",
+       "...wk.0", "...owner", ...) are not regions and must never be
+       unlinked here */
+    char *end2;
+    if (isxdigit((unsigned char) end[1]))
+      (void) strtoul(end + 1, &end2, 16);
+    else
+      end2 = (char *) end + 1;
+    if (end2 == end + 1 || *end2 != '\0') continue;  /* a lock file */
     if (mizu_pid_alive((pid_t) pid)) continue;       /* creator still alive */
 
     char shm_name[MIZU_NAME_MAX];                    /* shm name = "/" + entry */

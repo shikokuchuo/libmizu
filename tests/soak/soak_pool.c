@@ -190,7 +190,8 @@ static void run_submitter(void) {
   if (w.n != 0) {
     void **vals = calloc(w.n, sizeof(void *));
     size_t err = 0;
-    assert(mizu_pool_collect_all(p, w.task, w.n, vals, &err, 60000) == MIZU_OK);
+    assert(mizu_pool_collect_all(p, w.task, w.n, vals, &err, NULL,
+                                 60000) == MIZU_OK);
     assert(err == w.n);
     for (size_t i = 0; i < w.n; i++) {
       mizu_bytes *rb = vals[i];

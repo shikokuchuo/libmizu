@@ -227,12 +227,70 @@ static void test_reap_probe_cb_race(const char *self) {
   puts("ok reap_probe_cb_race");
 }
 
+#ifdef __linux__
+/* Lock files are not regions: the /dev/shm scan must skip
+   "mizu_<pid>_<ctr>.live.host", "....wk.0", etc. — reaping them under
+   live workers would blind the sibling probes (ENOENT reads
+   indeterminate, never a verdict). The unit tier creates no lock files
+   of its own, so this plants both grammars under one dead pid. */
+static void test_reap_skips_lock_files(void) {
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) _exit(0);
+  int st;
+  assert(waitpid(pid, &st, 0) == pid);         /* a guaranteed-dead pid */
+
+  char base[160];
+  int bn = snprintf(base, sizeof(base), "/dev/shm/mizu_%lx_9",
+                    (unsigned long) pid);
+  assert(bn > 0 && (size_t) bn < sizeof(base));
+  const char *suffixes[] = { ".live.host", ".live.peer", ".wk.0",
+                             ".sub.1", ".owner" };
+  for (size_t i = 0; i < sizeof suffixes / sizeof *suffixes; i++) {
+    char path[192];
+    int pn = snprintf(path, sizeof(path), "%s%s", base, suffixes[i]);
+    assert(pn > 0 && (size_t) pn < sizeof(path));
+    FILE *f = fopen(path, "we");
+    assert(f != NULL && fclose(f) == 0);
+  }
+  /* the exact region grammar under the same dead pid: must reap —
+     proves the scan ran rather than trivially matching nothing */
+  FILE *f = fopen(base, "we");
+  assert(f != NULL && fclose(f) == 0);
+
+  int n = 0;
+  char **reaped = mizu_shm_reap(&n);
+  int found = 0;
+  char want[MIZU_NAME_MAX];
+  int wn = snprintf(want, sizeof(want), "/mizu_%lx_9", (unsigned long) pid);
+  assert(wn > 0 && (size_t) wn < sizeof(want));
+  for (int i = 0; i < n; i++) {
+    if (strcmp(reaped[i], want) == 0) found = 1;
+    free(reaped[i]);
+  }
+  free(reaped);
+  assert(found);
+
+  for (size_t i = 0; i < sizeof suffixes / sizeof *suffixes; i++) {
+    char path[192];
+    int pn = snprintf(path, sizeof(path), "%s%s", base, suffixes[i]);
+    assert(pn > 0 && (size_t) pn < sizeof(path));
+    assert(access(path, F_OK) == 0);           /* still there */
+    assert(remove(path) == 0);
+  }
+  puts("ok reap_skips_lock_files");
+}
+#endif
+
 int main(int argc, char **argv) {
   if (argc == 4 && strcmp(argv[1], "child") == 0)
     reap_race_child(argv[2], atoi(argv[3]));   /* _exit()s, never returns */
   test_reap_probe_cb_race(argv[0]);   /* before the orphan test clutters
                                          and deletes its scratch TMPDIR */
   test_orphan_region();
+#ifdef __linux__
+  test_reap_skips_lock_files();
+#endif
   puts("test_reap: ok");
   return 0;
 }

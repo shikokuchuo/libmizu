@@ -77,3 +77,25 @@ int mizu_token_valid(const char *token) {
       return 0;
   return 1;
 }
+
+/* A wire-carried region name must be exactly the prefix plus
+   "<hex>_<hex>": it is length-bounded only before concatenation into
+   "/dev/shm%s" or handoff to the OS open, so a "/../" name would open
+   an arbitrary same-user file. One hex run, one underscore, one hex
+   run, NUL — nothing else. */
+int mizu_name_valid(const char *name) {
+  if (name == NULL) return 0;
+  const char *p = MIZU_PREFIX_LITERAL;
+  for (const char *q = p; *q != '\0'; q++)
+    if (name[q - p] != *q) return 0;
+  const char *q = name + strlen(p);
+  if (*q == '\0') return 0;
+  for (; *q != '\0'; q++)
+    if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f'))) break;
+  if (*q != '_' || q == name + strlen(p)) return 0;
+  q++;
+  if (*q == '\0') return 0;
+  for (; *q != '\0'; q++)
+    if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f'))) return 0;
+  return 1;
+}

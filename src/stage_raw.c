@@ -54,6 +54,9 @@ static uint8_t *raw_reserve_shm_vec(mizu_handle *h, uint64_t n, int wire_type,
 void *mizu_stage_raw_spill(mizu_handle *h, uint64_t n, int wire_type,
                           mizu_slot_hdr *hdr, uint8_t *payload,
                           uint32_t inline_max) {
+  /* non-atomic types have no element size: the flat SHM_VEC reserve would
+     divide by zero computing the element count */
+  if (mizu_type_elt_size(wire_type) == 0) return NULL;
   const uint64_t zc_gate = (uint64_t) inline_max > MIZU_ZC_FLOOR ?
     (uint64_t) inline_max : (uint64_t) MIZU_ZC_FLOOR;
   /* zc_ok implies !churn, so the arena-first condition below needs no

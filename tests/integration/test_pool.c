@@ -375,7 +375,8 @@ static void test_stop_live_workers(void) {
   }
   void *vals[4] = { NULL, NULL, NULL, NULL };
   size_t err = 99;
-  assert(mizu_pool_collect_all(ctrl, ts, 4, vals, &err, 10000) == MIZU_OK);
+  assert(mizu_pool_collect_all(ctrl, ts, 4, vals, &err, NULL, 10000) ==
+         MIZU_OK);
   assert(err == 4);
   for (int i = 0; i < 4; i++) {
     mizu_bytes *b = vals[i];

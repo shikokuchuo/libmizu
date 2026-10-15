@@ -209,6 +209,13 @@ static void chan_survivor_unlink(mizu_channel *c) {
 static int chan_probe_dead(mizu_channel *c) {
   if (c->verdict_dead) return 1;
   if (c->live_peer == 0) return 0;
+  /* Pre-attach the peer's lock is untaken by construction: acquiring it
+     here is no death verdict, and the survivor unlink would kill the
+     channel before it ever rendezvoused. Only destroy's own pre-ready
+     teardown reads the lock this early. */
+  if (c->side == MIZU_ENTITY_HOST &&
+      atomic_load_explicit(c->ready, memory_order_acquire) == 0)
+    return 0;
   if (mizu_live_try(c->live_peer) != MIZU_LIVE_ACQUIRED) return 0;
   c->verdict_dead = 1;
   chan_survivor_unlink(c);
@@ -458,7 +465,7 @@ static void chan_publish_head(mizu_channel *c) {
    handle error, as before — the binding carries its own message. */
 static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
                             void **out, uint32_t *rflags_out,
-                            const char **err_out) {
+                            const char **err_out, int *gone_out) {
   const mizu_slot_hdr *hdr = (const mizu_slot_hdr *) sl;
   const unsigned char *payload = sl + sizeof(mizu_slot_hdr);
   const unsigned char *bytes;
@@ -500,6 +507,7 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
   void *obj = c->h.binding.read(hdr, bytes, limit, &ctx);
   *rflags_out = ctx.flags;
   if (obj == NULL) {
+    *gone_out = ctx.gone;
     if (!(ctx.flags & MIZU_READ_CONSUME))
       *err_out = ctx.gone ? "payload region vanished" :
                             "payload read failed";
@@ -525,6 +533,12 @@ static void chan_wait_learn(mizu_channel *c, double t_wait) {
 static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
   double deadline = -1;
   double t_wait = -1;
+  /* set once the death-listener flag has fired but the lock probe reads
+     HELD (a forked child outliving its parent holds the lock's open file
+     description): the flag is a one-shot wake trigger, not a permanence,
+     so it must not veto the park below — the bounded park re-probes on
+     every wake and the verdict lands when the last holder exits */
+  int held = 0;
   chan_reap(c, 0);             /* recv is a reap trigger: the quiet-sender
                                   case pins at most cap payloads otherwise */
   for (;;) {
@@ -547,9 +561,11 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
       return chan_rx_avail(c) ? MIZU_OK : MIZU_CLOSED;
     if (c->verdict_dead)
       return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
-    if (atomic_load_explicit(&c->peer_dead, memory_order_acquire) &&
-        chan_probe_dead(c))
-      return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
+    if (atomic_load_explicit(&c->peer_dead, memory_order_acquire)) {
+      if (chan_probe_dead(c))
+        return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
+      held = 1;
+    }
 
     if (timeout_ms == 0) {
       chan_publish_head(c);
@@ -597,7 +613,8 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
     atomic_thread_fence(memory_order_seq_cst);
     if (chan_rx_avail(c) ||
         atomic_load_explicit(c->closedw, memory_order_acquire) != 0 ||
-        atomic_load_explicit(&c->peer_dead, memory_order_acquire) != 0) {
+        (!held &&
+         atomic_load_explicit(&c->peer_dead, memory_order_acquire) != 0)) {
       atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
       continue;
     }
@@ -635,11 +652,23 @@ static mizu_status chan_consume1(mizu_channel *c, void **out,
                                 const char **err_out) {
   mizu_chan_ring *r = &c->rx;
   uint32_t rflags = 0;
+  int gone = 0;
   mizu_status st = chan_read(c, r->slots + ((uint64_t) r->lhead & r->mask) * r->slot,
-                            out, &rflags, err_out);
-  if (st != MIZU_OK &&
-      !(may_consume_failure && (rflags & MIZU_READ_CONSUME)))
-    return st;
+                            out, &rflags, err_out, &gone);
+  if (st != MIZU_OK) {
+    int consume = (rflags & MIZU_READ_CONSUME) != 0;
+    if (!consume && gone) {
+      /* the producer closed or is dead, so the vanished payload can never
+         be recovered (its region died with the producer's teardown): do
+         not wedge the ring behind it — consume exactly as
+         MIZU_READ_CONSUME, still returning the error for this message, so
+         a live consumer drains to CLOSED */
+      uint32_t other = 3u ^ chan_closed_bit(c);
+      consume = c->verdict_dead ||
+        (atomic_load_explicit(c->closedw, memory_order_acquire) & other) != 0;
+    }
+    if (!(may_consume_failure && consume)) return st;
+  }
   r->lhead++;
   r->unpublished++;
   if (r->unpublished >= MIZU_HEAD_PUBLISH_K || !chan_rx_avail(c))

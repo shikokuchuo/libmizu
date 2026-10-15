@@ -308,12 +308,14 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
-- **Wire format, `MIZU_ABI_VERSION` 2 (pool):** the injection/deque
+- **Wire format (pool):** the injection/deque
   entry header carries the result slot's incarnation sequence
   (`rs_seq`) — `mizu_entry_hdr` grows to 40 bytes with the payload at
   offset 40 — and the result states gain `MIZU_RS_LOST`
-  (`mizu_pool_status.tasks_by_state` grows to 7 entries). Peers at ABI 1
-  are rejected at attach/join; both bindings re-vendor.
+  (`mizu_pool_status.tasks_by_state` grows to 7 entries). Pre-release:
+  `MIZU_ABI_VERSION` stays 1 (peers are same-build; an old reader fails
+  safe) — the standing exception to the bump-on-any-wire-change rule;
+  both bindings re-vendor.
 - Ext tier: `mizu_result_publish_died` is renamed
   `mizu_result_publish_lost` and publishes `MIZU_RS_LOST` — the
   payload-vanished terminal no longer carries a worker-death verdict
@@ -349,6 +351,15 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   verdict without waiting on a reaper. No wire-format change.
 - `mizu_stage_fn` gains the binding ctx; `mizu_exec_fn` receives a read
   ctx in place of the bare binding ctx.
+- `mizu_pool_collect_all` / `mizu_pool_collect_all_fn` gain a
+  `consumed_out` param: a read failure after an all-OK wait returns
+  `MIZU_ERR` with the failing slot's index in `err_index_out`
+  (unconsumed when retryable) and the number of leading results already
+  handed to the sink / written to `values_out` in `consumed_out` — the
+  consumed prefix the bindings previously discarded (R-12 / P-04 adopt
+  it). `n` on a fully collected run, 0 when the run reports a non-OK
+  outcome or times out. Ext-tier signature change; no wire-format
+  change.
 
 ### Fixed
 
@@ -406,3 +417,60 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   (R's verbatim form, `0x7FF00000000007A2`) reads as NA on the
   validity-bitmap paths. No ABI or wire change (the helpers are
   unreleased, Phase 0).
+- A host-side death probe before the peer has attached no longer reads
+  a verdict from the peer's untaken liveness lock: `chan_probe_dead`
+  gates on the ready word (host side only), so the full-ring
+  disambiguation returns `MIZU_FULL` and `mizu_channel_alive` reports no
+  verdict instead of unrecoverably unlinking the channel pre-rendezvous.
+- A receive with the death-listener flag set but the lock probe reading
+  HELD (a forked child or squatter outliving the peer holds the lock's
+  open file description) no longer spins unboundedly at 100% CPU with
+  the deadline and the interrupt hook unpolled: once the probe has
+  returned HELD the one-shot flag stops vetoing the park, and the
+  bounded park re-probes on every wake until the last holder exits.
+- A fork-without-exec child (an mclapply worker, a multiprocessing
+  child) no longer keeps a dead holder's liveness lock alive past its
+  death: every lock fd the library hands out is tracked, and a
+  `pthread_atfork` child handler closes the child's copies (closing one
+  fd of a duplicated pair never releases the parent's flock).
+  `mizu_live_close` is registry-gated, so a stale handle fd in the child
+  can never close a descriptor since reused. POSIX only — Win32 handles
+  were never inheritable.
+- A consumer can once more drain to `MIZU_CLOSED` when the producer
+  destroyed (or died) with a spilled payload in flight: the vanished
+  region fails its one read, and a `gone` failure with the producer
+  closed or verdict-dead is consumed exactly as `MIZU_READ_CONSUME`
+  instead of wedging the ring behind the slot forever.
+- An orderly submitter detach frees its registry slot: with nothing
+  PENDING, handle teardown cancels nothing — it frees the
+  published-but-uncollected results (releasing the producing workers'
+  keepers, exactly as the reaper would) and marks the slot FREE ahead of
+  the lock close. With PENDING work the slot stays LIVE and the next
+  attach's claim scan probes it (identity-checked lock acquire, then the
+  reaper's sweep) instead of skipping it — a live process is never
+  denied attach by a dead registration.
+- `mizu_pool_leave` now fails every result slot still stamped with the
+  worker's slot, not just the announced in-flight claim: a nested claim
+  overwrites the announce, and an orderly leave runs no death reaper to
+  fail the overwritten claims — their collectors parked forever.
+- A worker join failing after its slot CAS (parkers attach, scratch
+  allocation, owner watch) hands the slot back to FREE instead of
+  leaving it CLAIMING until the stop sweep.
+- The Linux orphan prune scan now requires the exact region grammar
+  (`mizu_<pid>_<counter>`, both hex): the liveness lock files sharing
+  `/dev/shm` (`....live.host`, `....wk.0`, `....owner`, ...) are no
+  longer enumerated as regions and unlinked from under live workers.
+- `mizu_stage_raw_spill` rejects a non-atomic `wire_type` (no element
+  size) at entry instead of dividing by zero in the flat SHM_VEC
+  reserve — binding misuse declines to the serialized tiers.
+- `mizu_live_fd_bounce` covers fds 1/2, not just 0: launched with
+  stdout/stderr closed, a lock fd landing there would have been released
+  by a later dup2/freopen onto it (a false DEAD).
+- The lent-region ledger's quota sweep rotates its start across calls
+  (`sweep_next`): four or more long-held regions at the ledger front no
+  longer starve every entry behind them on the busy-path sweeps.
+- Wire-carried region names are gated on the exact grammar (the prefix
+  plus `<hex>_<hex>`) at `mizu_read_region` and
+  `mizu_shm_open_view_flags` before any concatenation into `/dev/shm%s`:
+  a `/../` name from a corrupt or hostile peer no longer opens an
+  arbitrary same-user file.
