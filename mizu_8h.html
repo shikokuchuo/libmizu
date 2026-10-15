@@ -170,7 +170,7 @@ Macros</h2></td></tr>
 <tr class="memdesc:af8a8d9092ff351e1f53e8a34741a4527"><td class="mdescLeft">&#160;</td><td class="mdescRight">First 64-byte line of every channel region.  <br /></td></tr>
 <tr class="separator:af8a8d9092ff351e1f53e8a34741a4527"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a4ff520b33ea48d40f8c5ef180a4f7c22" id="r_a4ff520b33ea48d40f8c5ef180a4f7c22"><td class="memItemLeft" align="right" valign="top"><a id="a4ff520b33ea48d40f8c5ef180a4f7c22" name="a4ff520b33ea48d40f8c5ef180a4f7c22"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ABI_VERSION</b>&#160;&#160;&#160;2u</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ABI_VERSION</b>&#160;&#160;&#160;1u</td></tr>
 <tr class="separator:a4ff520b33ea48d40f8c5ef180a4f7c22"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ab4bf0c43ed5a523bdbf5739cbffb6c0f" id="r_ab4bf0c43ed5a523bdbf5739cbffb6c0f"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#ab4bf0c43ed5a523bdbf5739cbffb6c0f">MIZU_DROP_R</a>&#160;&#160;&#160;0x52u</td></tr>
 <tr class="memdesc:ab4bf0c43ed5a523bdbf5739cbffb6c0f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The drop's first byte is a wire-format tag, so a foreign child can dispatch on it: MIZU_DROP_R — a native serialize stream (the homogeneous format); MIZU_DROP_SOURCE — UTF-8 source text in the peer's language, the cross-language lingua franca.  <br /></td></tr>
@@ -771,12 +771,12 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_step</b> (mi
 <tr class="memitem:a2a162462ebe579596eb16a7d5158f701" id="r_a2a162462ebe579596eb16a7d5158f701"><td class="memItemLeft" align="right" valign="top"><a id="a2a162462ebe579596eb16a7d5158f701" name="a2a162462ebe579596eb16a7d5158f701"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_collect_any</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, size_t *index_out, void **value_out, double timeout_ms)</td></tr>
 <tr class="separator:a2a162462ebe579596eb16a7d5158f701"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a7c7adee30ffd696347f8408d628186fe" id="r_a7c7adee30ffd696347f8408d628186fe"><td class="memItemLeft" align="right" valign="top"><a id="a7c7adee30ffd696347f8408d628186fe" name="a7c7adee30ffd696347f8408d628186fe"></a>
-<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_collect_all</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, void **values_out, size_t *err_index_out, double timeout_ms)</td></tr>
-<tr class="separator:a7c7adee30ffd696347f8408d628186fe"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a28bd76e33da2fb102e3ef40147112976" id="r_a28bd76e33da2fb102e3ef40147112976"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a28bd76e33da2fb102e3ef40147112976">mizu_pool_collect_all_fn</a> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, <a class="el" href="mizu_8h.html#a728d7d2f1a8654a957e62f6f04b839be">mizu_obj_sink</a>, void *ctx, size_t *err_index_out, double timeout_ms)</td></tr>
-<tr class="memdesc:a28bd76e33da2fb102e3ef40147112976"><td class="mdescLeft">&#160;</td><td class="mdescRight">The sink-callback form of collect_all: each value is handed to sink as it is claimed (input order when all OK; the first non-OK outcome alone otherwise), so a binding can anchor every object before the next claim's read allocates.  <br /></td></tr>
-<tr class="separator:a28bd76e33da2fb102e3ef40147112976"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a594437fd3cc0010d67ee5875326c8280" id="r_a594437fd3cc0010d67ee5875326c8280"><td class="memItemLeft" align="right" valign="top"><a id="a594437fd3cc0010d67ee5875326c8280" name="a594437fd3cc0010d67ee5875326c8280"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_collect_all</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, void **values_out, size_t *err_index_out, size_t *consumed_out, double timeout_ms)</td></tr>
+<tr class="separator:a594437fd3cc0010d67ee5875326c8280"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aec72af1b5fe09ea567dcb2291af7d3f2" id="r_aec72af1b5fe09ea567dcb2291af7d3f2"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#aec72af1b5fe09ea567dcb2291af7d3f2">mizu_pool_collect_all_fn</a> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, <a class="el" href="mizu_8h.html#a728d7d2f1a8654a957e62f6f04b839be">mizu_obj_sink</a>, void *ctx, size_t *err_index_out, size_t *consumed_out, double timeout_ms)</td></tr>
+<tr class="memdesc:aec72af1b5fe09ea567dcb2291af7d3f2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The sink-callback form of collect_all: each value is handed to sink as it is claimed (input order when all OK; the first non-OK outcome alone otherwise), so a binding can anchor every object before the next claim's read allocates.  <br /></td></tr>
+<tr class="separator:aec72af1b5fe09ea567dcb2291af7d3f2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2ce2662fed0af1cf3052e531703ca38b" id="r_a2ce2662fed0af1cf3052e531703ca38b"><td class="memItemLeft" align="right" valign="top"><a id="a2ce2662fed0af1cf3052e531703ca38b" name="a2ce2662fed0af1cf3052e531703ca38b"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_set_trace</b> (mizu_pool *, mizu_trace_fn, void *ctx)</td></tr>
 <tr class="separator:a2ce2662fed0af1cf3052e531703ca38b"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -1881,12 +1881,12 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><div class="memdoc">
 
 <p>collect waits for the task's terminal state and sets *value_out to the read_fn's product — including for non-OK outcomes, where ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED / MIZU_RS_LOST) lets the read_fn build the binding's error object (a binding re-raises it: the task's own condition, the cancellation, or the worker-death error). </p>
-<p>MIZU_TIMEOUT consumes nothing. A task is collected exactly once: the slot is released as the value is produced. Valid on worker handles too — a nested collect helps (executes/steals) instead of sleeping, so exec_fn reenters from inside collect; on submitter handles (exec == NULL) the wait simply parks. (A binding's collect may omit the pool argument: its task handle carries the pool reference.) collect_any returns the first terminal handle (*index_out, 0-based; ties among already-terminal handles break to the earliest position); the reported handle is consumed, the rest stay collectible. collect_all fills values_out in input order once every task is terminal. On the first non-OK outcome by position it reports that handle only: *err_index_out is its index, the reported handle is consumed (its error object rides read_fn like any value into values_out[err]), and every other handle — the OK results ahead of it included — stays collectible. *err_index_out == n means all OK. MIZU_TIMEOUT consumes nothing: every handle stays valid. </p>
+<p>MIZU_TIMEOUT consumes nothing. A task is collected exactly once: the slot is released as the value is produced. Valid on worker handles too — a nested collect helps (executes/steals) instead of sleeping, so exec_fn reenters from inside collect; on submitter handles (exec == NULL) the wait simply parks. (A binding's collect may omit the pool argument: its task handle carries the pool reference.) collect_any returns the first terminal handle (*index_out, 0-based; ties among already-terminal handles break to the earliest position); the reported handle is consumed, the rest stay collectible. collect_all fills values_out in input order once every task is terminal. On the first non-OK outcome by position it reports that handle only: *err_index_out is its index, the reported handle is consumed (its error object rides read_fn like any value into values_out[err]), and every other handle — the OK results ahead of it included — stays collectible. *err_index_out == n means all OK. A read failure after an all-OK wait returns MIZU_ERR with err_index_out the failing slot's index (unconsumed when retryable) and *consumed_out the number of leading results already handed to the sink / written to values_out — the consumed prefix, for the binding to return or attach; every handle past the prefix stays collectible. *consumed_out is n on a fully collected run, 0 when the run reported a non-OK outcome. MIZU_TIMEOUT consumes nothing: every handle stays valid. </p>
 
 </div>
 </div>
-<a id="a28bd76e33da2fb102e3ef40147112976" name="a28bd76e33da2fb102e3ef40147112976"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a28bd76e33da2fb102e3ef40147112976">&#9670;&#160;</a></span>mizu_pool_collect_all_fn()</h2>
+<a id="aec72af1b5fe09ea567dcb2291af7d3f2" name="aec72af1b5fe09ea567dcb2291af7d3f2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aec72af1b5fe09ea567dcb2291af7d3f2">&#9670;&#160;</a></span>mizu_pool_collect_all_fn()</h2>
 
 <div class="memitem">
 <div class="memproto">
@@ -1926,6 +1926,12 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
           <td></td>
           <td class="paramtype">size_t *&#160;</td>
           <td class="paramname"><em>err_index_out</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t *&#160;</td>
+          <td class="paramname"><em>consumed_out</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>

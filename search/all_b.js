@@ -219,7 +219,7 @@ var searchData=
   ['mizu_5fpool_5fattach_216',['mizu_pool_attach',['../mizu_8h.html#a8c41c0fc3dc31822f0d60bfafbfdda62',1,'mizu.h']]],
   ['mizu_5fpool_5fcancel_217',['mizu_pool_cancel',['../mizu_8h.html#ad0796b8bbbcfd4c09148041c518512e5',1,'mizu.h']]],
   ['mizu_5fpool_5fcollect_218',['mizu_pool_collect',['../mizu_8h.html#a3aaf132c62ba6466cce245b0b84b4b42',1,'mizu.h']]],
-  ['mizu_5fpool_5fcollect_5fall_5ffn_219',['mizu_pool_collect_all_fn',['../mizu_8h.html#a28bd76e33da2fb102e3ef40147112976',1,'mizu.h']]],
+  ['mizu_5fpool_5fcollect_5fall_5ffn_219',['mizu_pool_collect_all_fn',['../mizu_8h.html#aec72af1b5fe09ea567dcb2291af7d3f2',1,'mizu.h']]],
   ['mizu_5fpool_5fcreate_220',['mizu_pool_create',['../mizu_8h.html#a3b1cc0d49525df9a139b934a82426b23',1,'mizu.h']]],
   ['mizu_5fpool_5fdump_5fs_221',['mizu_pool_dump_s',['../structmizu__pool__dump__s.html',1,'']]],
   ['mizu_5fpool_5ferror_222',['mizu_pool_error',['../mizu_8h.html#a0d7f8701c606c5b8f23129ce9c874ce2',1,'mizu.h']]],
