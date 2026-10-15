@@ -111,6 +111,10 @@ typedef struct mizu_live_fd_s {
 
 static pthread_mutex_t mizu_live_mu = PTHREAD_MUTEX_INITIALIZER;
 static mizu_live_fd *mizu_live_fds;
+/* Child-side copies parked by the atfork child handler: never freed
+   (malloc may be mid-mutation in another thread at fork), but kept
+   reachable so leak checkers don't report them lost. */
+static mizu_live_fd *mizu_live_orphaned;
 
 static void mizu_live_atfork_prepare(void) {
   pthread_mutex_lock(&mizu_live_mu);
@@ -121,11 +125,15 @@ static void mizu_live_atfork_parent(void) {
 }
 
 static void mizu_live_atfork_child(void) {
-  for (mizu_live_fd *n = mizu_live_fds; n != NULL; n = n->next)
+  while (mizu_live_fds != NULL) {
+    mizu_live_fd *n = mizu_live_fds;
+    mizu_live_fds = n->next;
     close((int) n->fd);
-  /* the nodes leak in the child (no free: the heap may be mid-mutation
-     from another thread at fork); its handles are dead by contract */
-  mizu_live_fds = NULL;
+    /* the nodes leak in the child (no free: the heap may be mid-mutation
+       from another thread at fork); its handles are dead by contract */
+    n->next = mizu_live_orphaned;
+    mizu_live_orphaned = n;
+  }
   pthread_mutex_unlock(&mizu_live_mu);
 }
 
