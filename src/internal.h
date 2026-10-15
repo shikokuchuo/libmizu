@@ -333,7 +333,7 @@ typedef struct mizu_keeper_s {
 void mizu_keeper_commit(mizu_handle *h, mizu_keeper *tab, uint32_t at);
 void mizu_keeper_release(mizu_handle *h, mizu_keeper *tab, uint32_t at);
 void mizu_keeper_discard(mizu_handle *h);
-void mizu_stage_rollback(mizu_handle *h);
+/* mizu_stage_rollback is the ext tier's (mizu_ext.h) */
 void mizu_keepers_teardown(mizu_handle *h, mizu_keeper *tab, uint32_t n);
 void mizu_spill_fl_teardown(mizu_spill_fl *fl);
 

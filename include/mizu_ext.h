@@ -354,7 +354,12 @@ MIZU_API uint64_t mizu_pool_worker_ident(const mizu_pool *);
      drop hook at the entry's release (a binding pins the staged object,
      whose serialized stream may carry hook-emitted identifiers).
    - reap: the channel's pre-spill consumer-done reap, so a checkout
-     sees the freshest surrenders. A no-op on pool handles. */
+     sees the freshest surrenders. A no-op on pool handles.
+   - rollback: discard the uncommitted checkout (the region rejoins the
+     free list, a pin drops through the binding's hook) — for a binding
+     that abandons a stage after a retain and re-stages within the same
+     stage_fn call; a fresh spill_get would otherwise orphan the
+     abandoned region by overwriting the checkout. */
 MIZU_API void *mizu_stage_arena_alloc(mizu_handle *, size_t n, uint64_t *off);
 MIZU_API mizu_status mizu_stage_spill_get(mizu_handle *, size_t n,
                                        mizu_shm **out);
@@ -362,6 +367,7 @@ MIZU_API void mizu_stage_retain(mizu_handle *, mizu_shm *region);
 MIZU_API void mizu_stage_retain_zc(mizu_handle *, mizu_shm *region);
 MIZU_API void mizu_stage_pin(mizu_handle *, void *pin);
 MIZU_API void mizu_stage_reap(mizu_handle *);
+MIZU_API void mizu_stage_rollback(mizu_handle *);
 
 /** Raw-tier reservation (stage_raw.c), valid only during stage_fn: choose
    the tier for n bare bytes of wire_type and return the destination with

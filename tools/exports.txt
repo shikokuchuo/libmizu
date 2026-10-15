@@ -172,6 +172,7 @@ mizu_stage_raw_spill
 mizu_stage_reap
 mizu_stage_retain
 mizu_stage_retain_zc
+mizu_stage_rollback
 mizu_stage_spill_get
 mizu_store_na_real
 mizu_timeout_ms
