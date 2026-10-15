@@ -120,7 +120,7 @@ Data Structures</h2></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Result slot header; the payload framing header sits at offset 24 and payload bytes at 40.  <a href="structmizu__rs__hdr__s.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__entry__hdr__s.html">mizu_entry_hdr_s</a></td></tr>
-<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection ring / deque entry header; payload framing at offset 16, payload bytes at 32.  <a href="structmizu__entry__hdr__s.html#details">More...</a><br /></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection ring / deque entry header; payload framing at offset 24, payload bytes at 40.  <a href="structmizu__entry__hdr__s.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__channel__opts__s.html">mizu_channel_opts_s</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">size-stamped options; mizu_channel_opts_init zeroes + stamps.  <a href="structmizu__channel__opts__s.html#details">More...</a><br /></td></tr>
@@ -161,16 +161,16 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_VERSION_MAJOR</b>&#160;&#160;&#160;0</td></tr>
 <tr class="separator:a4b22e3c60818962520b664bf75dbe2ce"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a94e37f0953443c0c41781a79ee1cec39" id="r_a94e37f0953443c0c41781a79ee1cec39"><td class="memItemLeft" align="right" valign="top"><a id="a94e37f0953443c0c41781a79ee1cec39" name="a94e37f0953443c0c41781a79ee1cec39"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_VERSION_MINOR</b>&#160;&#160;&#160;0</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_VERSION_MINOR</b>&#160;&#160;&#160;1</td></tr>
 <tr class="separator:a94e37f0953443c0c41781a79ee1cec39"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1a823659c83f6cf7aaa1fb0707771c2a" id="r_a1a823659c83f6cf7aaa1fb0707771c2a"><td class="memItemLeft" align="right" valign="top"><a id="a1a823659c83f6cf7aaa1fb0707771c2a" name="a1a823659c83f6cf7aaa1fb0707771c2a"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_VERSION_PATCH</b>&#160;&#160;&#160;1</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_VERSION_PATCH</b>&#160;&#160;&#160;0</td></tr>
 <tr class="separator:a1a823659c83f6cf7aaa1fb0707771c2a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af8a8d9092ff351e1f53e8a34741a4527" id="r_af8a8d9092ff351e1f53e8a34741a4527"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#af8a8d9092ff351e1f53e8a34741a4527">MIZU_MAGIC</a>&#160;&#160;&#160;0x4D495A43u</td></tr>
 <tr class="memdesc:af8a8d9092ff351e1f53e8a34741a4527"><td class="mdescLeft">&#160;</td><td class="mdescRight">First 64-byte line of every channel region.  <br /></td></tr>
 <tr class="separator:af8a8d9092ff351e1f53e8a34741a4527"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a4ff520b33ea48d40f8c5ef180a4f7c22" id="r_a4ff520b33ea48d40f8c5ef180a4f7c22"><td class="memItemLeft" align="right" valign="top"><a id="a4ff520b33ea48d40f8c5ef180a4f7c22" name="a4ff520b33ea48d40f8c5ef180a4f7c22"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ABI_VERSION</b>&#160;&#160;&#160;1u</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ABI_VERSION</b>&#160;&#160;&#160;2u</td></tr>
 <tr class="separator:a4ff520b33ea48d40f8c5ef180a4f7c22"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ab4bf0c43ed5a523bdbf5739cbffb6c0f" id="r_ab4bf0c43ed5a523bdbf5739cbffb6c0f"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#ab4bf0c43ed5a523bdbf5739cbffb6c0f">MIZU_DROP_R</a>&#160;&#160;&#160;0x52u</td></tr>
 <tr class="memdesc:ab4bf0c43ed5a523bdbf5739cbffb6c0f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The drop's first byte is a wire-format tag, so a foreign child can dispatch on it: MIZU_DROP_R — a native serialize stream (the homogeneous format); MIZU_DROP_SOURCE — UTF-8 source text in the peer's language, the cross-language lingua franca.  <br /></td></tr>
@@ -401,7 +401,7 @@ typedef struct <a class="el" href="structmizu__rs__hdr__s.html">mizu_rs_hdr_s</a
 <tr class="memdesc:a76245db92247bfec58b8dd3f52355683"><td class="mdescLeft">&#160;</td><td class="mdescRight">Result slot header; the payload framing header sits at offset 24 and payload bytes at 40. <br /></td></tr>
 <tr class="separator:a76245db92247bfec58b8dd3f52355683"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a08a9987850c90d2bd18a698212e2712a" id="r_a08a9987850c90d2bd18a698212e2712a"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="structmizu__entry__hdr__s.html">mizu_entry_hdr_s</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a08a9987850c90d2bd18a698212e2712a">mizu_entry_hdr</a></td></tr>
-<tr class="memdesc:a08a9987850c90d2bd18a698212e2712a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection ring / deque entry header; payload framing at offset 16, payload bytes at 32.  <br /></td></tr>
+<tr class="memdesc:a08a9987850c90d2bd18a698212e2712a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection ring / deque entry header; payload framing at offset 24, payload bytes at 40.  <br /></td></tr>
 <tr class="separator:a08a9987850c90d2bd18a698212e2712a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af7c4dc76f8c9f5f2dd8fbd9f902270a9" id="r_af7c4dc76f8c9f5f2dd8fbd9f902270a9"><td class="memItemLeft" align="right" valign="top"><a id="af7c4dc76f8c9f5f2dd8fbd9f902270a9" name="af7c4dc76f8c9f5f2dd8fbd9f902270a9"></a>
 typedef enum mizu_wk_status_e&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_wk_status</b></td></tr>
@@ -548,6 +548,7 @@ Enumerations</h2></td></tr>
 , <br />
 &#160;&#160;<b>MIZU_RS_CANCEL</b>
 , <b>MIZU_RS_DIED</b>
+, <b>MIZU_RS_LOST</b>
 <br />
  }</td></tr>
 <tr class="memdesc:abf6c179b93aeeb3231d892bded1c0404"><td class="mdescLeft">&#160;</td><td class="mdescRight">DIED is the reaper's terminal: status-word only, no payload — a reap cannot write payload bytes without racing a live worker's concurrent publish.  <a href="mizu_8h.html#abf6c179b93aeeb3231d892bded1c0404">More...</a><br /></td></tr>
@@ -765,7 +766,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_step</b> (mi
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_submit_batch_fn</b> (mizu_pool *, <a class="el" href="mizu_8h.html#aaa72daa0a627f687e5a26067c9ae49f9">mizu_obj_supply</a>, void *ctx, size_t n, <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *out, size_t *n_out, double timeout_ms)</td></tr>
 <tr class="separator:a3812809ed582767aebbf002550982bcd"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a3aaf132c62ba6466cce245b0b84b4b42" id="r_a3aaf132c62ba6466cce245b0b84b4b42"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a3aaf132c62ba6466cce245b0b84b4b42">mizu_pool_collect</a> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, void **value_out, double timeout_ms)</td></tr>
-<tr class="memdesc:a3aaf132c62ba6466cce245b0b84b4b42"><td class="mdescLeft">&#160;</td><td class="mdescRight">collect waits for the task's terminal state and sets *value_out to the read_fn's product — including for non-OK outcomes, where ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED) lets the read_fn build the binding's error object (a binding re-raises it: the task's own condition, the cancellation, or the worker-death error).  <br /></td></tr>
+<tr class="memdesc:a3aaf132c62ba6466cce245b0b84b4b42"><td class="mdescLeft">&#160;</td><td class="mdescRight">collect waits for the task's terminal state and sets *value_out to the read_fn's product — including for non-OK outcomes, where ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED / MIZU_RS_LOST) lets the read_fn build the binding's error object (a binding re-raises it: the task's own condition, the cancellation, or the worker-death error).  <br /></td></tr>
 <tr class="separator:a3aaf132c62ba6466cce245b0b84b4b42"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2a162462ebe579596eb16a7d5158f701" id="r_a2a162462ebe579596eb16a7d5158f701"><td class="memItemLeft" align="right" valign="top"><a id="a2a162462ebe579596eb16a7d5158f701" name="a2a162462ebe579596eb16a7d5158f701"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_collect_any</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, size_t *index_out, void **value_out, double timeout_ms)</td></tr>
@@ -783,7 +784,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_step</b> (mi
 <tr class="memdesc:ad0796b8bbbcfd4c09148041c518512e5"><td class="mdescLeft">&#160;</td><td class="mdescRight">Advisory and discard-only, never preemptive: a still-queued task is skipped; an executing one runs to completion and its result is dropped.  <br /></td></tr>
 <tr class="separator:ad0796b8bbbcfd4c09148041c518512e5"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a70fbaf4b71af5f3b7f9c09b9d97722d6" id="r_a70fbaf4b71af5f3b7f9c09b9d97722d6"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a70fbaf4b71af5f3b7f9c09b9d97722d6">mizu_pool_task_release</a> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *)</td></tr>
-<tr class="memdesc:a70fbaf4b71af5f3b7f9c09b9d97722d6"><td class="mdescLeft">&#160;</td><td class="mdescRight">The finalizer release for a task handle that was never collected: a still-pending task is cancelled (as mizu_pool_cancel); a completed (OK/ERR/DIED) slot is freed, letting the producing worker's keeper sweep drop what the result retained.  <br /></td></tr>
+<tr class="memdesc:a70fbaf4b71af5f3b7f9c09b9d97722d6"><td class="mdescLeft">&#160;</td><td class="mdescRight">The finalizer release for a task handle that was never collected: a still-pending task is cancelled (as mizu_pool_cancel); a completed (OK/ERR/DIED/LOST) slot is freed, letting the producing worker's keeper sweep drop what the result retained.  <br /></td></tr>
 <tr class="separator:a70fbaf4b71af5f3b7f9c09b9d97722d6"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abebbb012fadaf97925c9dd83ae09e6c8" id="r_abebbb012fadaf97925c9dd83ae09e6c8"><td class="memItemLeft" align="right" valign="top"><a id="abebbb012fadaf97925c9dd83ae09e6c8" name="abebbb012fadaf97925c9dd83ae09e6c8"></a>
 int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_task_state</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *)</td></tr>
@@ -1164,8 +1165,8 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
       </table>
 </div><div class="memdoc">
 
-<p>Injection ring / deque entry header; payload framing at offset 16, payload bytes at 32. </p>
-<p>flags bit 0 is MIZU_ENTRY_RUNNER; bits 1-2 are reserved for a future language tag (homogeneous pools in v1). </p>
+<p>Injection ring / deque entry header; payload framing at offset 24, payload bytes at 40. </p>
+<p>flags bit 0 is MIZU_ENTRY_RUNNER; bits 1-2 are reserved for a future language tag (homogeneous pools in v1). rs_seq binds the entry to its result slot's incarnation (the sequence at submit): a claimed entry whose stamp no longer matches the slot is a zombie left by a dead claimant and never executes. </p>
 
 </div>
 </div>
@@ -1182,7 +1183,7 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><div class="memdoc">
 
 <p>DIED is the reaper's terminal: status-word only, no payload — a reap cannot write payload bytes without racing a live worker's concurrent publish. </p>
-<p>The "worker died" error object is built collect-side, keyed off the status. </p>
+<p>The "worker died" error object is built collect-side, keyed off the status. LOST is the same shape without a death verdict: the task's out-of-line payload vanished before it could run, so the claim performs no force-reclaim of the claimant's lent regions and the collect builds no claimant record. </p>
 
 </div>
 </div>
@@ -1464,7 +1465,7 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><div class="memdoc">
 
 <p>DIED is the reaper's terminal: status-word only, no payload — a reap cannot write payload bytes without racing a live worker's concurrent publish. </p>
-<p>The "worker died" error object is built collect-side, keyed off the status. </p>
+<p>The "worker died" error object is built collect-side, keyed off the status. LOST is the same shape without a death verdict: the task's out-of-line payload vanished before it could run, so the claim performs no force-reclaim of the claimant's lent regions and the collect builds no claimant record. </p>
 
 </div>
 </div>
@@ -1879,7 +1880,7 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
       </table>
 </div><div class="memdoc">
 
-<p>collect waits for the task's terminal state and sets *value_out to the read_fn's product — including for non-OK outcomes, where ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED) lets the read_fn build the binding's error object (a binding re-raises it: the task's own condition, the cancellation, or the worker-death error). </p>
+<p>collect waits for the task's terminal state and sets *value_out to the read_fn's product — including for non-OK outcomes, where ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED / MIZU_RS_LOST) lets the read_fn build the binding's error object (a binding re-raises it: the task's own condition, the cancellation, or the worker-death error). </p>
 <p>MIZU_TIMEOUT consumes nothing. A task is collected exactly once: the slot is released as the value is produced. Valid on worker handles too — a nested collect helps (executes/steals) instead of sleeping, so exec_fn reenters from inside collect; on submitter handles (exec == NULL) the wait simply parks. (A binding's collect may omit the pool argument: its task handle carries the pool reference.) collect_any returns the first terminal handle (*index_out, 0-based; ties among already-terminal handles break to the earliest position); the reported handle is consumed, the rest stay collectible. collect_all fills values_out in input order once every task is terminal. On the first non-OK outcome by position it reports that handle only: *err_index_out is its index, the reported handle is consumed (its error object rides read_fn like any value into values_out[err]), and every other handle — the OK results ahead of it included — stays collectible. *err_index_out == n means all OK. MIZU_TIMEOUT consumes nothing: every handle stays valid. </p>
 
 </div>
@@ -2002,7 +2003,7 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
       </table>
 </div><div class="memdoc">
 
-<p>The finalizer release for a task handle that was never collected: a still-pending task is cancelled (as mizu_pool_cancel); a completed (OK/ERR/DIED) slot is freed, letting the producing worker's keeper sweep drop what the result retained. </p>
+<p>The finalizer release for a task handle that was never collected: a still-pending task is cancelled (as mizu_pool_cancel); a completed (OK/ERR/DIED/LOST) slot is freed, letting the producing worker's keeper sweep drop what the result retained. </p>
 <p>Returns 1 only when this call cancelled a pending task. Total, no error path: a stale handle, a released pool, or a forked child answers 0. </p>
 
 </div>
