@@ -29,17 +29,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
-
-static void sleep_ms(long ms) {
-  struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-  nanosleep(&ts, NULL);
-}
 
 static void test_orphan_region(void) {
   /* Scratch registry dir: the macOS log resolves $TMPDIR per call. */
@@ -165,12 +159,11 @@ static void wait_child(pid_t pid) {
 
 static void await_slot_free(mizu_pool *ctrl) {
   mizu_pool_status ps;
-  for (int k = 0;; k++) {
-    assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
-    if (ps.worker_state[0] == MIZU_WK_FREE) break;
-    assert(k < 1000);
-    sleep_ms(5);
-  }
+  int freed = 0;
+  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &ps) == MIZU_OK &&
+                  ps.worker_state[0] == MIZU_WK_FREE),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, freed);
+  assert(freed);
 }
 
 /* A claimed worker dies while the handle thread probes from collect and

@@ -1134,13 +1134,7 @@ static void test_lost_task(void) {
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
-
-static void sleep_ms(long ms) {
-  struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-  nanosleep(&ts, NULL);
-}
 
 /* A worker dying between the announce and the claim CAS leaves its entry
    queued; the reaper fails the slot DIED and the submitter reuses it.
@@ -1208,23 +1202,20 @@ static void test_zombie_entry(void) {
   assert(waitpid(pid, &wst, 0) == pid);
 
   /* the death-callback reap fails the announced incarnation */
-  int st = 0;
-  for (int i = 0; i < 1000 && st != MIZU_RS_DIED; i++) {
-    st = mizu_pool_task_state(ctrl, &t1);
-    sleep_ms(5);
-  }
-  assert(st == MIZU_RS_DIED);
+  int st = 0, died = 0;
+  MIZU_SPIN_WAIT((st = mizu_pool_task_state(ctrl, &t1)) == MIZU_RS_DIED,
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, died);
+  assert(died && st == MIZU_RS_DIED);
   void *obj = NULL;
   assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
   mizu_pool_status ps;
-  for (int i = 0;; i++) {
-    assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
-    if (ps.worker_state[0] == MIZU_WK_FREE) break;
-    assert(i < 1000);
-    sleep_ms(5);
-  }
+  int freed = 0;
+  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &ps) == MIZU_OK &&
+                  ps.worker_state[0] == MIZU_WK_FREE),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, freed);
+  assert(freed);
 
   /* slot reuse: the zombie entry (incarnation 1) queues ahead of the new
      one (incarnation 2) — the guard drops it without executing */
