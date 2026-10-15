@@ -245,24 +245,28 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
     uint64_t w = bitmap_word(valid, off + i, lanes);
     uint64_t full = lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1;
     if (w == full) {
+      /* copy, then count the genuine sentinels off the written lanes via
+         per-lane memcpy: the inline 'I' form's column bodies are
+         unaligned (a vec header precedes them), so no typed dst scan.
+         The count rides a local — a warn-> store per lane would
+         alias-block vectorization */
+      cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
       if (count_min) {
-        /* copy, then scan the destination (dst is int32-aligned on every
-           tier: the inline payload is 16-byte aligned, arena chunks and
-           region data areas 64). The count rides a local — a warn->
-           store per lane would alias-block vectorization */
-        cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
-        const int32_t *d = (const int32_t *) (dst + i * wo);
         uint64_t cnt = 0;
-        for (size_t j = 0; j < lanes; j++) cnt += d[j] == INT32_MIN;
+        for (size_t j = 0; j < lanes; j++) {
+          int32_t v;
+          memcpy(&v, dst + (i + j) * wo, 4);
+          cnt += v == INT32_MIN;
+        }
         warn->n_intmin += cnt;
       } else if (count_min64) {
-        cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
-        const int64_t *d = (const int64_t *) (dst + i * wo);
         uint64_t cnt = 0;
-        for (size_t j = 0; j < lanes; j++) cnt += d[j] == INT64_MIN;
+        for (size_t j = 0; j < lanes; j++) {
+          int64_t v;
+          memcpy(&v, dst + (i + j) * wo, 8);
+          cnt += v == INT64_MIN;
+        }
         warn->n_int64 += cnt;
-      } else {
-        cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
       }
     } else if (w == 0) {
       cvt_fill_na(dst + i * wo, lanes, row->wire);
@@ -324,7 +328,7 @@ static const mizu_cvt_row CVT_ROW_BOOLBIT = { MIZU_TYPE_LGL, MIZU_CVT_BIT_LGL, 0
 /* Key the table by an Arrow C Data Interface format string (every
    supported row is a single character). */
 const mizu_cvt_row *mizu_cvt_for_arrow(const char *f) {
-  if (f[1] != '\0') return NULL;
+  if (f[0] == '\0' || f[1] != '\0') return NULL;
   switch (f[0]) {
   case 'C': return &CVT_ROW_U8;
   case 'c': return &CVT_ROW_I8;
@@ -730,8 +734,11 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
     pc->kind = MIZU_ARROW_DATE;
     return 0;
   }
-  if (f[0] == 't' && f[1] == 's' && f[3] == ':' &&
-      (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n')) {
+  /* the unit compare precedes the f[3] read: a short format ("ts", "tD")
+     must not be indexed past its NUL */
+  if (f[0] == 't' && f[1] == 's' &&
+      (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n') &&
+      f[3] == ':') {
     pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
       f[2] == 'u' ? 1e-6 : 1e-9;
     pc->unit = f[2];
@@ -750,8 +757,9 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
     pc->kind = MIZU_ARROW_TS;
     return 0;
   }
-  if (f[0] == 't' && f[1] == 'D' && f[3] == '\0' &&
-      (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n')) {
+  if (f[0] == 't' && f[1] == 'D' &&
+      (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n') &&
+      f[3] == '\0') {
     pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
       f[2] == 'u' ? 1e-6 : 1e-9;
     pc->unit = f[2];
@@ -780,9 +788,26 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
   return -1;
 }
 
+/* A dictionary array's buffer shape: the levels vet, applied to every
+   batch's dictionary ahead of the level match's reads. */
+static int arrow_dict_shape_ok(const ArrowArray *dict) {
+  return dict != NULL && dict->n_buffers >= 3 && dict->buffers != NULL &&
+    (dict->length <= 0 ||
+     (dict->buffers[1] != NULL && dict->buffers[2] != NULL));
+}
+
 /* One batch's shape checks. 0 vetted, -1 with the decline in the
    thread-local slot. */
 static int arrow_check_batch(mizu_arrow *a, const ArrowArray *b) {
+  /* the struct's own validity and offset are never read: a batch
+     carrying either would stage the children's slot values as rows */
+  if (b->offset != 0 ||
+      (b->null_count != 0 && b->buffers != NULL && b->buffers[0] != NULL)) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                        "an Arrow batch with null struct rows or a struct "
+                        "offset has no portable home");
+    return -1;
+  }
   for (int i = 0; i < a->ncols; i++) {
     const ArrowArray *c = b->children[i];
     arrow_pcol *pc = &a->cols[i];
@@ -808,7 +833,7 @@ static int arrow_check_batch(mizu_arrow *a, const ArrowArray *b) {
                           "an invalid Arrow C Data Interface batch");
       return -1;
     }
-    if (pc->kind == MIZU_ARROW_DICT && c->dictionary == NULL) {
+    if (pc->kind == MIZU_ARROW_DICT && !arrow_dict_shape_ok(c->dictionary)) {
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "an invalid Arrow C Data Interface batch");
       return -1;
@@ -841,9 +866,7 @@ static int arrow_levels_check(mizu_arrow *a, int col) {
     return 0;
   }
   const ArrowArray *dict = a->batches[0]->children[col]->dictionary;
-  if (dict == NULL || dict->n_buffers < 3 || dict->buffers == NULL ||
-      (dict->length > 0 &&
-       (dict->buffers[1] == NULL || dict->buffers[2] == NULL))) {
+  if (!arrow_dict_shape_ok(dict)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                         "column '%s': an invalid Arrow dictionary export", nm);
     return -1;
@@ -904,6 +927,15 @@ static int arrow_validate_dicts(mizu_arrow *a) {
     const char *nm = a->schema->children[i]->name;
     if (arrow_levels_check(a, i) < 0)
       return -1;
+    /* the blob rides the directory entry's int32 attrs_size: each level
+       costs framing bytes on top of the (already bounded) packed bytes,
+       so a level count past ~2^29 would wrap the cast at write */
+    if (arrow_blob_factor(NULL, a, i) > (size_t) INT32_MAX) {
+      mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                          "column '%s': dictionary levels past the int32 "
+                          "attrs range", nm);
+      return -1;
+    }
     for (size_t b = 0; b < a->nb; b++) {
       const ArrowArray *ba = a->batches[b]->children[i];
       if (b != 0 && !arrow_levels_match(a, i, ba->dictionary)) {
@@ -957,16 +989,30 @@ static int arrow_size_str(mizu_arrow *a, int col) {
     const ArrowArray *ba = a->batches[b]->children[col];
     if (ba->length == 0) continue;
     if (pc->str_form != 3 && arrow_batch_nulls(ba) == 0) {
+      /* the null-free span: the endpoints alone don't prove the
+         intermediate offsets — the writer rebases per element, so a
+         non-monotonic interior (or an i64 span past the int32 element
+         bound) would size one way and gather another; walk them */
       if (pc->str_form == 1) {
         const int32_t *offs = (const int32_t *) ba->buffers[1];
-        int32_t o0 = offs[ba->offset], o1 = offs[ba->offset + ba->length];
-        if (o0 < 0 || o1 < o0) goto malformed;
-        bytes += o1 - o0;
+        int32_t prev = offs[ba->offset];
+        if (prev < 0) goto malformed;
+        for (int64_t k = 0; k < ba->length; k++) {
+          const int32_t o = offs[ba->offset + k + 1];
+          if (o < prev) goto malformed;
+          prev = o;
+        }
+        bytes += prev - offs[ba->offset];
       } else {
         const int64_t *offs = (const int64_t *) ba->buffers[1];
-        int64_t o0 = offs[ba->offset], o1 = offs[ba->offset + ba->length];
-        if (o0 < 0 || o1 < o0) goto malformed;
-        bytes += o1 - o0;
+        int64_t prev = offs[ba->offset];
+        if (prev < 0) goto malformed;
+        for (int64_t k = 0; k < ba->length; k++) {
+          const int64_t o = offs[ba->offset + k + 1];
+          if (o < prev || o - prev > INT32_MAX) goto malformed;
+          prev = o;
+        }
+        bytes += prev - offs[ba->offset];
       }
       continue;
     }
@@ -1687,6 +1733,10 @@ int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,
     return -1;
   mizu_mizl_entry re;
   if (mizu_mizl_elem(ref_base, ref_size, ref_leaf, &re) != 0) return -1;
+  /* a length mismatch would write a tag-33 entry whose claim fails the
+     reader's resolve — decline the override instead, the column stays
+     local (the torn-tree precedent) */
+  if (re.length != a->rows) return -1;
   const int32_t rtag = re.sexptype & ~(int32_t) MIZU_MIZL_S4;
   arrow_remote *r = &a->remotes[col];
   memcpy(r->span, ident, ident_len);

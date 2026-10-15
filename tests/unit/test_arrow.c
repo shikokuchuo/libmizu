@@ -311,6 +311,58 @@ static void test_intmin(void) {
   mizu_arrow_close(a);
 }
 
+static void test_masked_unaligned(void) {
+  /* the masked convert's full-word branch scans the written lanes by
+     memcpy: the inline 'I' column body lands at an unaligned stream
+     offset (C-15) — 70 rows with the one null at row 66, so lanes
+     0..63 are an all-valid word */
+  ArrowSchema ci, root;
+  ArrowSchema *kids[1] = { &ci };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  uint8_t bm[9];
+  memset(bm, 0xFF, sizeof bm);
+  bm[66 >> 3] &= (uint8_t) ~(1u << (66 & 7));
+  int32_t x[70];
+  for (int i = 0; i < 70; i++) x[i] = i == 5 ? INT32_MIN : i;
+  const void *xb[2] = { bm, x };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 70, 1, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 70, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+  size_t n = mizu_arrow_write_ix(a, NULL, &warn);
+  uint8_t *buf = malloc(n);
+  assert(buf != NULL);
+  mizu_arrow_write_ix(a, buf, &warn);
+  assert(warn.n_intmin == 1);
+  blob_check(buf, n);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* int64: the same on the i64 lanes */
+  mk_schema(&ci, "l", "x", NULL, 0, NULL, 0);
+  int64_t y[70];
+  for (int i = 0; i < 70; i++) y[i] = i == 5 ? INT64_MIN : i;
+  const void *yb[2] = { bm, y };
+  mk_array(&ax, 70, 1, 0, 2, yb, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+  memset(&warn, 0, sizeof warn);
+  n = mizu_arrow_write_ix(a, NULL, &warn);
+  buf = malloc(n);
+  assert(buf != NULL);
+  mizu_arrow_write_ix(a, buf, &warn);
+  assert(warn.n_int64 == 1);
+  blob_check(buf, n);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 static void test_zero_rows(void) {
   ArrowSchema ci, cs, root;
   ArrowSchema *kids[2] = { &ci, &cs };
@@ -614,6 +666,78 @@ static void test_strview_buffer_bound(void) {
   mizu_arrow_close(a);
 }
 
+static void test_str_offsets_malformed(void) {
+  /* the null-free span vets every intermediate offset, not just the
+     endpoints (C-13): a non-monotonic interior would size one way and
+     gather another */
+  ArrowSchema cs, root;
+  ArrowSchema *kids[1] = { &cs };
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const char sb[8] = "abcdefg";
+  const int32_t so[4] = { 0, 5, 2, 7 };   /* endpoints pass, the interior not */
+  const void *sbv[3] = { NULL, so, sb };
+  ArrowArray as, batch;
+  ArrowArray *bk[1] = { &as };
+  mk_array(&as, 3, 0, 0, 3, sbv, NULL, NULL);
+  mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow string") != NULL);
+
+  /* large_utf8: a per-element span past the int32 element bound */
+  const int64_t lo[4] = { 0, (int64_t) INT32_MAX + 2,
+                          (int64_t) INT32_MAX + 2, (int64_t) INT32_MAX + 2 };
+  const void *lbv[3] = { NULL, lo, sb };
+  mk_array(&as, 3, 0, 0, 3, lbv, NULL, NULL);
+  mk_schema(&cs, "U", "s", NULL, 0, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow string") != NULL);
+
+  /* a second batch carrying a null flips the write to the gather: batch
+     0's malformed fast-path record declines all the same */
+  static char data0[8000];
+  memset(data0, 'q', sizeof data0);
+  const int32_t off0[4] = { 0, 4000, 2, 8000 };
+  const void *b0v[3] = { NULL, off0, data0 };
+  const uint8_t bm1 = 0x00;
+  const int32_t off1[2] = { 0, 0 };
+  const char data1[1] = { 0 };
+  const void *b1v[3] = { &bm1, off1, data1 };
+  ArrowArray a0, a1, bt0, bt1;
+  ArrowArray *k0[1] = { &a0 };
+  ArrowArray *k1[1] = { &a1 };
+  mk_array(&a0, 3, 0, 0, 3, b0v, NULL, NULL);
+  mk_array(&a1, 1, 1, 0, 3, b1v, NULL, NULL);
+  mk_array(&bt0, 3, 0, 0, 1, NULL, k0, NULL);
+  bt0.n_children = 1;
+  mk_array(&bt1, 1, 0, 0, 1, NULL, k1, NULL);
+  bt1.n_children = 1;
+  const ArrowArray *two[2] = { &bt0, &bt1 };
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, two, 2, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow string") != NULL);
+
+  /* the same shape, offsets monotonic: the fast path sizes and the
+     rebase writes exactly the packed span */
+  const int32_t ok[4] = { 0, 2, 5, 7 };
+  const void *okv[3] = { NULL, ok, sb };
+  mk_array(&as, 3, 0, 0, 3, okv, NULL, NULL);
+  size_t total;
+  mizu_arrow_warn warn;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  mizu_mizs_geom g = mizu_mizs_geometry(3);
+  const int64_t *offs = (const int64_t *) (buf + e.data_offset + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 2 && offs[2] == 5 && offs[3] == 7);
+  assert(memcmp(buf + e.data_offset + g.data, "abcdefg", 7) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 // Dictionaries ------------------------------------------------------------------------
 
 /* A dictionary column "d": levels {"low", "high"}, codes {0, 1, 0, NA} as
@@ -731,6 +855,72 @@ static void test_dict_declines(void) {
   mk_schema(&lv, "i", NULL, NULL, 0, NULL, 0);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "non-string") != NULL);
+}
+
+static void test_dict_batch_shape(void) {
+  /* every batch's dictionary gets the buffer-shape vet (C-14): a later
+     batch's malformed dictionary would otherwise be read unvetted by
+     the level match */
+  ArrowSchema lv, cd, root;
+  ArrowSchema *kids[1] = { &cd };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const char levbytes[2] = { 'a', 'b' };
+  const int32_t levoffs[3] = { 0, 1, 2 };
+  const void *db[3] = { NULL, levoffs, levbytes };
+  const int8_t codes[2] = { 0, 1 };
+  const void *cb[2] = { NULL, codes };
+  ArrowArray dict0, dict1, a0, a1, b0, b1;
+  ArrowArray *k0[1] = { &a0 };
+  ArrowArray *k1[1] = { &a1 };
+  mk_array(&dict0, 2, 0, 0, 3, db, NULL, NULL);
+  mk_array(&a0, 2, 0, 0, 2, cb, NULL, &dict0);
+  mk_array(&a1, 2, 0, 0, 2, cb, NULL, &dict1);
+  mk_array(&b0, 2, 0, 0, 1, NULL, k0, NULL);
+  b0.n_children = 1;
+  mk_array(&b1, 2, 0, 0, 1, NULL, k1, NULL);
+  b1.n_children = 1;
+  const ArrowArray *batches[2] = { &b0, &b1 };
+  mizu_arrow *a = NULL;
+
+  /* NULL buffers */
+  mk_array(&dict1, 2, 0, 0, 3, NULL, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, batches, 2, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow C Data Interface") != NULL);
+
+  /* a short buffer count */
+  mk_array(&dict1, 2, 0, 0, 2, db, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, batches, 2, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow C Data Interface") != NULL);
+
+  /* a NULL offsets span with levels present */
+  const void *dbn[3] = { NULL, NULL, levbytes };
+  mk_array(&dict1, 2, 0, 0, 3, dbn, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, batches, 2, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow C Data Interface") != NULL);
+
+  /* no dictionary at all */
+  mk_array(&a1, 2, 0, 0, 2, cb, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, batches, 2, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow C Data Interface") != NULL);
+
+  /* the same dictionary on both batches: opens, the codes gather */
+  mk_array(&a1, 2, 0, 0, 2, cb, NULL, &dict1);
+  mk_array(&dict1, 2, 0, 0, 3, db, NULL, NULL);
+  size_t total;
+  mizu_arrow_warn warn;
+  uint8_t *buf = frame_write(&root, batches, 2, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int32_t *got = (const int32_t *) (buf + e.data_offset);
+  assert(got[0] == 1 && got[1] == 2 && got[2] == 1 && got[3] == 2);
+  free(buf);
+  mizu_arrow_close(a);
 }
 
 // Temporal columns -----------------------------------------------------------------
@@ -1033,21 +1223,92 @@ static void test_declines(void) {
   assert(strstr(mizu_last_error_message(), "differ in length") != NULL);
 }
 
+static void test_short_formats(void) {
+  /* short format strings decline without a read past the NUL (C-16);
+     the well-formed temporal forms are test_temporal's */
+  ArrowSchema cx, root;
+  ArrowSchema *kids[1] = { &cx };
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int64_t v[1] = { 0 };
+  const void *xb[2] = { NULL, v };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 1, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 1, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+  static const char *const fmts[] = { "", "t", "ts", "tD", "tds",
+                                      "tsx", "tsu" };
+  for (size_t i = 0; i < sizeof fmts / sizeof fmts[0]; i++) {
+    mk_schema(&cx, fmts[i], "x", NULL, 0, NULL, 0);
+    assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "no portable home") != NULL);
+  }
+}
+
+static void test_struct_batch_shape(void) {
+  /* a batch's own offset or struct-null bitmap declines (C-19): the
+     writer stages the children's slot values as rows, so a batch
+     carrying either would mis-frame */
+  ArrowSchema cx, root;
+  ArrowSchema *kids[1] = { &cx };
+  mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int32_t x[3] = { 7, 8, 9 };
+  const void *xb[2] = { NULL, x };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 3, 0, 0, 2, xb, NULL, NULL);
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+
+  /* a struct offset */
+  mk_array(&batch, 3, 0, 1, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "struct offset") != NULL);
+
+  /* struct nulls with a bitmap */
+  const uint8_t sbm = 0x05;
+  const void *sbufs[1] = { &sbm };
+  mk_array(&batch, 3, 1, 0, 1, sbufs, bk, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "null struct rows") != NULL);
+
+  /* null_count -1 with no bitmap: the slot values are the rows */
+  mk_array(&batch, 3, -1, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  size_t total;
+  mizu_arrow_warn warn;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int32_t *v = (const int32_t *) (buf + e.data_offset);
+  assert(v[0] == 7 && v[1] == 8 && v[2] == 9);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 // The remote leaf --------------------------------------------------------------------
 
-/* A referenced one-column int32 frame; nulls per the argument. */
-static uint8_t *ref_region(int with_nulls, size_t *total_out) {
+/* A referenced one-column int32 frame of the given length; nulls per the
+   argument. */
+static uint8_t *ref_region(int with_nulls, int64_t rows, size_t *total_out) {
   ArrowSchema cx, root;
   ArrowSchema *kids[1] = { &cx };
   mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
   mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
   const uint8_t bm = 0x05;
-  const int32_t x[3] = { 7, 8, 9 };
+  int32_t x[128];
+  assert(rows <= 128);
+  for (int64_t i = 0; i < rows; i++) x[i] = 7 + (int32_t) i;
   const void *xb[2] = { with_nulls ? &bm : NULL, x };
   ArrowArray ax, batch;
   ArrowArray *bk[1] = { &ax };
-  mk_array(&ax, 3, with_nulls, 0, 2, xb, NULL, NULL);
-  mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+  mk_array(&ax, rows, with_nulls, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, rows, 0, 0, 1, NULL, bk, NULL);
   batch.n_children = 1;
   const ArrowArray *batches[1] = { &batch };
   mizu_arrow_warn warn;
@@ -1060,7 +1321,7 @@ static uint8_t *ref_region(int with_nulls, size_t *total_out) {
 static void test_remote(void) {
   /* the outgoing frame: col 0 the remote leaf, col 1 a local int32 */
   size_t reftotal;
-  uint8_t *ref = ref_region(0, &reftotal);
+  uint8_t *ref = ref_region(0, 3, &reftotal);
   ArrowSchema cx, cy, root;
   ArrowSchema *kids[2] = { &cx, &cy };
   mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
@@ -1135,7 +1396,7 @@ static void test_remote(void) {
   /* a remote claim short of known-NA-free: the table rides with the
      claim alone, the header total 0 */
   size_t ref2total;
-  uint8_t *ref2 = ref_region(1, &ref2total);
+  uint8_t *ref2 = ref_region(1, 3, &ref2total);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
   assert(mizu_arrow_remote(a, 0, ident, strlen(ident), ref2, ref2total,
                            0) == 0);
@@ -1149,6 +1410,31 @@ static void test_remote(void) {
   assert(mizu_mizl_elem(b3, t3, 0, &e) == 0);
   assert(e.valid[0] == 0 && e.valid[1] == 0);
   free(b3);
+  mizu_arrow_close(a);
+
+  /* a referenced leaf of another length: the override declines, the
+     column stays local (C-20) */
+  ArrowSchema cz, root2;
+  ArrowSchema *kids2[1] = { &cz };
+  mk_schema(&cz, "i", "z", NULL, 0, NULL, 0);
+  mk_schema(&root2, "+s", NULL, kids2, 1, NULL, 0);
+  const int32_t z[4] = { 1, 2, 3, 4 };
+  const void *zb[2] = { NULL, z };
+  ArrowArray az, bz;
+  ArrowArray *kz[1] = { &az };
+  mk_array(&az, 4, 0, 0, 2, zb, NULL, NULL);
+  mk_array(&bz, 4, 0, 0, 1, NULL, kz, NULL);
+  bz.n_children = 1;
+  const ArrowArray *bb[1] = { &bz };
+  assert(mizu_arrow_open(&a, &root2, bb, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_remote(a, 0, ident, strlen(ident), ref, reftotal,
+                           0) == -1);
+  size_t t4 = mizu_arrow_size(a);
+  uint8_t *b4 = calloc(1, t4);
+  mizu_arrow_write(a, b4, &warn);
+  assert(mizu_mizl_elem(b4, t4, 0, &e) == 0);
+  assert(e.sexptype == MIZU_TYPE_INT && e.length == 4);   /* stayed local */
+  free(b4);
   mizu_arrow_close(a);
   free(ref2);
   free(ref);
@@ -1316,7 +1602,7 @@ static void test_override_after_size(void) {
 
   /* remote: the local int32 leaf collapses to the identifier span */
   size_t reftotal;
-  uint8_t *ref = ref_region(0, &reftotal);
+  uint8_t *ref = ref_region(0, N, &reftotal);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
   before = mizu_arrow_size(a);
   const char *ident = "/mizu_testref";
@@ -1867,6 +2153,7 @@ int main(void) {
   test_frame_a();
   test_cvt_types();
   test_intmin();
+  test_masked_unaligned();
   test_zero_rows();
   test_chunked_and_offsets();
   test_null_span_collapse();
@@ -1874,12 +2161,16 @@ int main(void) {
   test_nan_vs_na();
   test_string_forms();
   test_strview_buffer_bound();
+  test_str_offsets_malformed();
   test_dicts();
   test_dict_declines();
+  test_dict_batch_shape();
   test_temporal();
   test_temporal_ns();
   test_uint64_verbatim();
   test_declines();
+  test_short_formats();
+  test_struct_batch_shape();
   test_remote();
   test_root_blob_override();
   test_tz_override();

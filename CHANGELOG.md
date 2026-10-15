@@ -474,3 +474,34 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   `mizu_shm_open_view_flags` before any concatenation into `/dev/shm%s`:
   a `/../` name from a corrupt or hostile peer no longer opens an
   arbitrary same-user file.
+- The Arrow writer's null-free string span (`arrow_size_str`'s utf8 /
+  large_utf8 fast path) now walks every intermediate offset — only the
+  endpoint pair was checked, so a non-monotonic interior (or an i64
+  element span past the int32 element bound) sized one way while the
+  writer's per-element rebase gathered another: a corrupt MIZS leaf on
+  a single batch, a heap overflow once a later batch's null flipped
+  the column to the gather.
+- Every batch's dictionary now gets the buffer-shape vet at open, not
+  just batch 0's: a later batch's malformed dictionary (NULL buffers,
+  a short count) was read unvetted by the cross-batch level match.
+- `convert_masked`'s full-word branch counts the genuine sentinels off
+  the written lanes by per-lane `memcpy` instead of a typed dst scan:
+  the inline 'I' form's column bodies are unaligned (a vec header
+  precedes them), so the scan was undefined on exactly the tier that
+  runs it.
+- Short Arrow format strings no longer read past their NUL:
+  `arrow_classify` compares the unit byte before indexing `f[3]`
+  ("ts", "tD"), and `mizu_cvt_for_arrow` guards `f[0]` before `f[1]`
+  ("").
+- An Arrow batch carrying a struct offset or null struct rows (a
+  non-NULL validity bitmap with `null_count != 0`) declines at open:
+  the writer stages the children's slot values as rows and never reads
+  the struct's own validity or offset.
+- `mizu_arrow_remote` declines the override when the referenced leaf's
+  length differs from the frame's row count — the tag-33 entry it
+  would have written fails the reader's resolve as corrupt, instead
+  of the column staying local (the torn-tree precedent).
+- A dictionary column whose factor blob would exceed the int32
+  `attrs_size` range declines at open (each level costs framing bytes
+  beyond the already-bounded packed bytes, so a level count past
+  ~2^29 wrapped the cast at write).

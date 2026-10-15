@@ -16,11 +16,12 @@
 #include "internal.h"
 
 /* The format table: every classified kind, plus unmapped and malformed
-   entries for the declines. */
+   entries for the declines (the short ones reach the NUL-length guards
+   in arrow_classify / mizu_cvt_for_arrow). */
 static const char *const FMTS[] = {
   "b", "c", "s", "S", "C", "i", "I", "l", "L", "e", "f", "g",
   "u", "U", "vu", "tdD", "tsu:", "tsm:Europe/Paris", "tDs", "tDm",
-  "w", "+l", "Z", "x:2"
+  "w", "+l", "Z", "x:2", "t", "ts", "tD", "", "tsx"
 };
 #define NFMTS (sizeof(FMTS) / sizeof(FMTS[0]))
 
@@ -129,14 +130,25 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       int form = strcmp(fmt[i], "u") == 0 ? 1 :
         strcmp(fmt[i], "U") == 0 ? 2 : strcmp(fmt[i], "vu") == 0 ? 3 : 0;
       if (form == 1 || form == 2) {
-        /* crafted monotonic offsets, spans 0-3 bytes */
-        int32_t run = 0;
         int32_t *so = (int32_t *) (slot + 128);
         int64_t *lo = (int64_t *) (slot + 128);
-        for (int64_t k = 0; k <= off + n; k++) {
-          run += pick[43 + i * 4 + (int) (k & 1)] & 3;
-          if (form == 1) so[k] = run;
-          else lo[k] = run;
+        if (pick[43 + i * 4] & 4) {
+          /* raw fuzz-valued offsets, bounded to the 64-byte data span:
+             non-monotonic interiors reach the open vet's offset walk */
+          for (int64_t k = 0; k <= off + n; k++) {
+            if (form == 1)
+              so[k] = (int32_t) (pick[43 + i * 4 + (int) (k & 1)] & 63);
+            else
+              lo[k] = (int64_t) (pick[43 + i * 4 + (int) (k & 1)] & 63);
+          }
+        } else {
+          /* crafted monotonic offsets, spans 0-3 bytes */
+          int32_t run = 0;
+          for (int64_t k = 0; k <= off + n; k++) {
+            run += pick[43 + i * 4 + (int) (k & 1)] & 3;
+            if (form == 1) so[k] = run;
+            else lo[k] = run;
+          }
         }
         bufs[i][1] = slot + 128;
         bufs[i][2] = col_data;
@@ -176,12 +188,56 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     bkids[i] = &cols_a[i];
   }
-  mk_array(&batch, len, 0, 0, 1, NULL, bkids, NULL);
+  /* the struct batch's own shape (offset, null count, an optional
+     bitmap): the vet declines a struct offset or a null bitmap */
+  uint8_t sbm = 0xFF;
+  const void *sbufs[1] = { &sbm };
+  const int64_t snc = (int64_t) (pick[124] & 3);
+  mk_array(&batch, len, snc == 3 ? -1 : snc,
+           (int64_t) ((pick[124] >> 2) & 1), 1,
+           (pick[124] & 8) != 0 ? sbufs : NULL, bkids, NULL);
   batch.n_children = (flags & 0x10) != 0 ? ncols - 1 : ncols;
-  const ArrowArray *batches[1] = { &batch };
+
+  /* an optional second batch: the same crafted buffers, each
+     dictionary re-shaped per the fuzz bytes (NULL buffers, a short
+     count, a levels mismatch, no dictionary — the later-batch
+     dictionary vet) */
+  ArrowArray cols_a2[4], dict_a2[4], batch2;
+  ArrowArray *bkids2[4];
+  const void *dbufs2[4][3];
+  const ArrowArray *batches[2];
+  int nb = 1;
+  batches[0] = &batch;
+  if (flags & 0x20) {
+    for (int i = 0; i < ncols; i++) {
+      cols_a2[i] = cols_a[i];
+      bkids2[i] = &cols_a2[i];
+      if (dict[i]) {
+        dict_a2[i] = dict_a[i];
+        cols_a2[i].dictionary = &dict_a2[i];
+        switch (pick[125 + i] % 5) {
+        case 1: dict_a2[i].buffers = NULL; break;
+        case 2: dict_a2[i].n_buffers = 2; break;
+        case 3:   /* the same shape, other level bytes (a mismatch) */
+          dbufs2[i][0] = NULL;
+          dbufs2[i][1] = dict_a[i].buffers[1];
+          dbufs2[i][2] = arena + (size_t) i * SLOT + 384;
+          dict_a2[i].buffers = dbufs2[i];
+          break;
+        case 4: cols_a2[i].dictionary = NULL; break;
+        default: break;   /* identical levels */
+        }
+      }
+    }
+    mk_array(&batch2, len, 0, 0, 1, NULL, bkids2, NULL);
+    batch2.n_children = ncols;
+    batches[1] = &batch2;
+    nb = 2;
+  }
 
   mizu_arrow *a = NULL;
-  if (mizu_arrow_open(&a, &root, batches, 1, 0) != MIZU_OK) return 0;
+  if (mizu_arrow_open(&a, &root, batches, (size_t) nb, 0) != MIZU_OK)
+    return 0;
   size_t total = mizu_arrow_size(a);
   if (total < (size_t) 1 << 20) {
     uint8_t *buf = malloc(total);
