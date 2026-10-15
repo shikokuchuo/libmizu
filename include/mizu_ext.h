@@ -421,14 +421,18 @@ MIZU_API mizu_shm *mizu_read_region(mizu_read_ctx *, const uint8_t *name,
    stage (the tiny-slot fallback). The ERR envelope is INLINE-framed by
    construction wherever a classed condition fits the slot, so the
    publish cannot fail: a task error fails the task, never the worker.
-   publish_died is the status-only terminal for a task whose out-of-line
-   payload vanished with its dead enqueuer. The publish pair return 1 when
+   publish_lost is the status-only terminal (MIZU_RS_LOST) for a task
+   whose out-of-line payload vanished with its enqueuer: it carries no
+   death verdict on the claiming worker, so the collect side neither
+   force-reclaims the claimant's lent regions nor builds a claimant
+   record — the task simply never runs anywhere, and the drain continues
+   in this thief. The publish pair return 1 when
    the publish CAS won, 0 when a cancel beat it, and -1 on infrastructure
    failure (recorded on the handle — the worker cannot continue). */
 MIZU_API int mizu_result_publish(mizu_result_sink *, void *value);
 MIZU_API int mizu_result_publish_err(mizu_result_sink *, void *flattened,
                                    uint32_t inline_n);
-MIZU_API void mizu_result_publish_died(mizu_result_sink *);
+MIZU_API void mizu_result_publish_lost(mizu_result_sink *);
 
 // The built-in bytes binding -----------------------------------------------------
 

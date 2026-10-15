@@ -214,7 +214,7 @@ static int chan_probe_dead(mizu_channel *c) {
   chan_survivor_unlink(c);
   /* the dead peer's view finalizers never ran: force-reclaim the lent
      regions (REFHELD ones leak + unlink — the holder set is wider) */
-  mizu_ledger_force(&c->h.fl, -1);
+  mizu_ledger_force(&c->h.fl, -1, -1);
   return 1;
 }
 

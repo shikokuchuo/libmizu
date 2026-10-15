@@ -479,7 +479,8 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
    while the dead peer is the sole possible view-holder. REFHELD entries
    have a wider holder set: leak the count and kill the name (live views
    keep their own mappings), never force-reclaim. */
-void mizu_ledger_force(mizu_spill_fl *fl, int32_t key) {
+void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot) {
+  int32_t key = kind < 0 ? -1 : MIZU_LED_KEY(kind, slot);
   uint32_t i = 0;
   while (i < fl->led_n) {
     if (key >= 0 && fl->led_key[i] != key) {

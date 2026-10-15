@@ -308,6 +308,21 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
+- **Wire format, `MIZU_ABI_VERSION` 2 (pool):** the injection/deque
+  entry header carries the result slot's incarnation sequence
+  (`rs_seq`) — `mizu_entry_hdr` grows to 40 bytes with the payload at
+  offset 40 — and the result states gain `MIZU_RS_LOST`
+  (`mizu_pool_status.tasks_by_state` grows to 7 entries). Peers at ABI 1
+  are rejected at attach/join; both bindings re-vendor.
+- Ext tier: `mizu_result_publish_died` is renamed
+  `mizu_result_publish_lost` and publishes `MIZU_RS_LOST` — the
+  payload-vanished terminal no longer carries a worker-death verdict
+  (the claimant is alive; it is publishing), so the collect claim
+  performs no force-reclaim of the claimant's lent regions and builds
+  no claimant record (`died_slot` -1, `died_pid` 0). `MIZU_RS_DIED` is
+  once more the lock-verified reaper's terminal alone.
+- Version macros 0.1.0 (the ext tier's pin for the rename).
+
 - `mizu_arrow_open`'s duplicate-name check is O(ncols) — an
   open-addressed table over the name hashes, `strcmp` on a hash hit
   only — replacing the quadratic pair scan a wide frame paid per send.
@@ -336,6 +351,37 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   ctx in place of the bare binding ctx.
 
 ### Fixed
+
+- A worker dying between its claim announce and the claim CAS no longer
+  lets the still-queued entry execute against the slot's next
+  incarnation: the announce (and the sink) now carry the entry's own
+  incarnation stamp, and `pool_execute` drops a claimed entry whose
+  stamp no longer matches the slot (or whose status is already terminal)
+  without executing, consuming, or stamping `worker_slot`. Previously
+  the reaper failed the announced slot DIED, the submitter recommitted
+  it, and the zombie's publish won the new incarnation's slot — the
+  collector read the dead task's value for the new task.
+- The lent-region ledger keys a worker handle's two consumer namespaces
+  in one tagged space (`MIZU_LED_SUB` / `MIZU_LED_WK` in the key's high
+  half): a worker-death force-reclaim of slot k no longer reclaims
+  result regions lent to *submitter* k (still held by live views),
+  which the next spill stage would have overwritten.
+- `mizu_result_publish_lost` (née `_died`): a transient/torn payload
+  open on a live thief no longer produces a `DIED` claim whose
+  force-reclaim treated the live claimant's lent regions as leaked and
+  whose error named a live worker as dead.
+- The controller's kept-fd death probe and its off-thread death-callback
+  reap are serialized by a per-slot reap-owner word: two reapers can no
+  longer enter on the same open file description (flock re-acquire on
+  one OFD always "succeeds", and the first finisher's unlock dropped
+  the grant under the other — a respawn could then join mid-reap and
+  have its fresh PENDING failed DIED by the straggler). The protocol is
+  pure userspace CAS, so Windows same-handle `LockFileEx` semantics are
+  irrelevant.
+- The ring-claim backpressure wake now fences `memory_order_seq_cst`
+  before the `full_waiters` load, like the other two pusher sites — a
+  relaxed load after the head CAS had no Dekker guarantee on ARMv8 (a
+  missed bit cost the submitter a bounded 2 s sleep).
 
 - The string_view element accessor's buffer bound
   (`mizu_arrow_str_at`'s view form, the ext tier's dual-form impl): a

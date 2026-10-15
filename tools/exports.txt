@@ -151,8 +151,8 @@ mizu_preamble_validate
 mizu_preamble_write
 mizu_read_region
 mizu_result_publish
-mizu_result_publish_died
 mizu_result_publish_err
+mizu_result_publish_lost
 mizu_rng_jump
 mizu_self_pid
 mizu_shm_addr

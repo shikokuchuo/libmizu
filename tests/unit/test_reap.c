@@ -1,9 +1,13 @@
-/* Orphan reaping (shm.c): a child creates a region and exits without
+/* Reaping: orphan regions (shm.c), and the worker-reap serialization
+   (pool.c). The orphan test: a child creates a region and exits without
    teardown, leaving the region — and on macOS its registry log — behind.
    The parent's mizu_shm_reap must report the name, unlink the region,
-   and drop the dead process's log. Exercises the Linux /dev/shm scan
-   and the macOS log scan; other platforms have no enumerable namespace.
-   Run via `make test`. */
+   and drop the dead process's log. The race test: the controller's
+   kept-fd probe and its off-thread death-callback reap must never run
+   concurrently on one slot. Exercises the Linux /dev/shm scan and the
+   macOS log scan; other platforms have no enumerable namespace. Worker
+   children exec this binary (argv mode "child") so a threaded parent
+   never forks. Run via `make test`. */
 
 /* _GNU_SOURCE: glibc hides O_CLOEXEC, MAP_POPULATE, pidfd_open, ...
    under strict -std=c11; define before any system header. */
@@ -31,7 +35,7 @@
 #define PATH_MAX 1024
 #endif
 
-int main(void) {
+static void test_orphan_region(void) {
   /* Scratch registry dir: the macOS log resolves $TMPDIR per call. */
   char scratch[PATH_MAX];
   int sn = snprintf(scratch, sizeof(scratch), "/tmp/mizu_test_reap_%ld",
@@ -100,6 +104,134 @@ int main(void) {
 #endif
 
   assert(rmdir(scratch) == 0);
+  puts("ok orphan_region");
+}
+
+// The probe/callback race ------------------------------------------------------------
+
+static int cb_strand;
+
+static int cb_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                   size_t limit, mizu_result_sink *sink, int catching,
+                   mizu_read_ctx *ctx) {
+  (void) limit;
+  (void) catching;
+  (void) ctx;
+  if (cb_strand) return 0;             /* claim, never publish */
+  assert(hdr->kind == MIZU_KIND_INLINE);
+  mizu_bytes b = { (void *) payload, hdr->len };
+  assert(mizu_result_publish(sink, &b) == 1);
+  return 0;
+}
+
+/* The worker child (exec'd: joins, claims one task, exits without
+   leave — the slot reads LIVE with the lock released, exactly a crash). */
+static int reap_race_child(const char *token, int strand) {
+  cb_strand = strand;
+  mizu_binding wb;
+  mizu_binding_bytes(&wb);
+  wb.exec = cb_exec;
+  mizu_pool *cwk;
+  if (mizu_pool_worker_join(&cwk, token, 0, &wb) != MIZU_OK) return 2;
+  (void) mizu_pool_step(cwk, 5000);
+  return 0;
+}
+
+static pid_t spawn_child(const char *self, const char *token, int strand) {
+  char st[16];
+  snprintf(st, sizeof(st), "%d", strand);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    execl(self, self, "child", token, st, (char *) NULL);
+    _exit(9);
+  }
+  return pid;
+}
+
+static void wait_child(pid_t pid) {
+  int wst;
+  assert(waitpid(pid, &wst, 0) == pid);
+  assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+}
+
+static void await_slot_free(mizu_pool *ctrl) {
+  mizu_pool_status ps;
+  for (int k = 0;; k++) {
+    assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+    if (ps.worker_state[0] == MIZU_WK_FREE) break;
+    assert(k < 1000);
+    usleep(5000);
+  }
+}
+
+/* A claimed worker dies while the handle thread probes from collect and
+   the death callback reaps off-thread — one reaper per slot (the
+   reap-owner word). The respawned worker's fresh task must survive: a
+   double reaper could stamp its PENDING to DIED mid-sweep or fail the
+   join "stale spawn". */
+static void test_reap_probe_cb_race(const char *self) {
+  mizu_pool_opts o;
+  mizu_pool_opts_init(&o);
+  o.max_workers = 1;
+  o.max_submitters = 1;
+  o.injection_cap = 64;
+  o.per_worker_cap = 64;
+  o.result_slots = 512;      /* a long reap sweep widens any overlap */
+  o.slot_size = 256;
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *ctrl;
+  assert(mizu_pool_create(&ctrl, &o, &b) == MIZU_OK);
+  char token[64];
+  assert(mizu_pool_token(ctrl, token, sizeof token) == MIZU_OK);
+
+  for (int i = 0; i < 8; i++) {
+    pid_t pid = spawn_child(self, token, 1);
+    uint32_t s0 = 0;
+    assert(mizu_pool_ready_wait(ctrl, &s0, 1, 5000) == MIZU_OK);
+    char payload[16];
+    int pn = snprintf(payload, sizeof(payload), "t%d", i);
+    assert(pn > 0);
+    mizu_bytes t1 = { payload, (size_t) pn };
+    mizu_task t;
+    assert(mizu_pool_submit(ctrl, &t1, &t, 5000) == MIZU_OK);
+    wait_child(pid);
+
+    /* the race window: the callback reaps while collect's backstop
+       probes — the verdict must converge, exactly once */
+    void *obj = NULL;
+    mizu_status rc = MIZU_OK;
+    for (int k = 0; k < 100 && rc != MIZU_ERR; k++)
+      rc = mizu_pool_collect(ctrl, &t, &obj, 50);
+    assert(rc == MIZU_ERR);
+    assert(strcmp(mizu_pool_error(ctrl),
+                  "worker died while executing this task") == 0);
+    await_slot_free(ctrl);
+
+    /* respawn: the fresh incarnation's work survives any straggler */
+    pid = spawn_child(self, token, 0);
+    assert(mizu_pool_ready_wait(ctrl, &s0, 1, 5000) == MIZU_OK);
+    assert(mizu_pool_submit(ctrl, &t1, &t, 5000) == MIZU_OK);
+    obj = NULL;
+    assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+    mizu_bytes *r = obj;
+    assert(r->len == t1.len && memcmp(r->data, t1.data, r->len) == 0);
+    mizu_bytes_free(r);
+    wait_child(pid);
+    await_slot_free(ctrl);
+  }
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  mizu_pool_destroy(ctrl);
+  puts("ok reap_probe_cb_race");
+}
+
+int main(int argc, char **argv) {
+  if (argc == 4 && strcmp(argv[1], "child") == 0)
+    return reap_race_child(argv[2], atoi(argv[3]));
+  test_reap_probe_cb_race(argv[0]);   /* before the orphan test clutters
+                                         and deletes its scratch TMPDIR */
+  test_orphan_region();
   puts("test_reap: ok");
   return 0;
 }

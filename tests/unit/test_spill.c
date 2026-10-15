@@ -137,22 +137,25 @@ int main(void) {
   mizu_keeper_release(&h, tab, 1);
   assert(h.fl.led_n == 2);
   uint32_t before = h.fl.n;
-  mizu_ledger_force(&h.fl, -1);
+  mizu_ledger_force(&h.fl, -1, -1);
   assert(h.fl.led_n == 0);
   assert(h.fl.n == before + 1);        /* z3 rejoined; z4 leaked + unlinked
                                           (destroyed — not observable) */
 
-  /* keyed force touches only that consumer's entries */
+  /* keyed force touches only that consumer's entries — kind-tagged, so
+     a same-numbered slot of the other namespace never matches */
   mizu_shm *z5 = mizu_spill_region_get(&h.fl, 100);
   mizu_stage_retain_zc(&h, z5);
   mizu_keeper_commit(&h, tab, 2);
   mizu_zc_ref(z5);
-  tab[2].key = 7;                      /* the pool's release-point keying */
+  tab[2].key = MIZU_LED_KEY(MIZU_LED_WK, 7);   /* the pool's keying */
   mizu_keeper_release(&h, tab, 2);
   assert(h.fl.led_n == 1);
-  mizu_ledger_force(&h.fl, 3);          /* a different consumer: untouched */
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 3);    /* a different worker */
   assert(h.fl.led_n == 1);
-  mizu_ledger_force(&h.fl, 7);
+  mizu_ledger_force(&h.fl, MIZU_LED_SUB, 7);   /* submitter namespace */
+  assert(h.fl.led_n == 1);
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7);
   assert(h.fl.led_n == 0);
 
   /* free-list caps: a region past the byte cap is destroyed, not listed */

@@ -348,10 +348,19 @@ void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key);
 /* Move zero-count ledger entries to the free list, up to quota
    (MIZU_LEDGER_MAX = full sweep). */
 void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota);
-/* Force-reclaim ledger entries after a confirmed consumer death: key >= 0
-   matches that consumer only, key < 0 all entries (the channel's single
-   peer). REFHELD entries leak + unlink; the rest rejoin the free list. */
-void mizu_ledger_force(mizu_spill_fl *fl, int32_t key);
+/* Lent-region ledger keys carry the consumer's kind in the high half:
+   a worker handle's ledger holds both result regions (consumed by a
+   submitter slot) and task-arg regions (consumed by a worker slot), and
+   a death force-reclaim must match exactly one namespace. */
+#define MIZU_LED_SUB 1          /* the consumer is a submitter slot */
+#define MIZU_LED_WK  2          /* the consumer is a worker slot */
+#define MIZU_LED_KEY(kind, slot) \
+  ((int32_t) (((kind) << 16) | ((slot) & 0xffff)))
+/* Force-reclaim ledger entries after a confirmed consumer death:
+   (kind, slot) encodes the one consumer to match, kind < 0 all entries
+   (the channel's single peer). REFHELD entries leak + unlink; the rest
+   rejoin the free list. */
+void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot);
 
 /* Consumer-side SHM_RAW mapping cache: a name -> mapping table that
    skips the open/fstat/mmap per payload once producers repeat region

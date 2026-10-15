@@ -916,6 +916,328 @@ static void test_map_support(void) {
   puts("ok map_support");
 }
 
+// The zc binding: bytes plus a spill-region zc loan past the inline budget ---
+
+static mizu_shm *zc_last;      /* the region the last zc stage retained */
+static int zc_mode = 0;        /* 0 echo, 1 strand (no publish), 2 lost */
+
+static int zc_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                    uint32_t inline_max, mizu_handle *h, void *ctx) {
+  (void) ctx;
+  mizu_bytes *b = obj;
+  if (b->len <= inline_max) {
+    hdr->kind = MIZU_KIND_INLINE;
+    hdr->len = (uint32_t) b->len;
+    hdr->aux = 0;
+    memcpy(payload, b->data, b->len);
+    return 0;
+  }
+  mizu_shm *shm;
+  if (mizu_stage_spill_get(h, 64 + b->len, &shm) != MIZU_OK) return 1;
+  memcpy((unsigned char *) shm->addr + 64, b->data, b->len);
+  mizu_stage_retain_zc(h, shm);          /* an SHM_VEC-style zc loan */
+  hdr->kind = MIZU_KIND_SHM_RAW;
+  hdr->len = shm->name_len;
+  hdr->aux = b->len;
+  memcpy(payload, shm->name, shm->name_len);
+  zc_last = shm;
+  return 0;
+}
+
+static void *zc_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                     size_t limit, mizu_read_ctx *ctx) {
+  (void) limit;
+  if (ctx->outcome != MIZU_RS_OK) return NULL;
+  mizu_bytes *b = malloc(sizeof *b);
+  if (hdr->kind == MIZU_KIND_INLINE) {
+    b->data = malloc(hdr->len);
+    b->len = hdr->len;
+    memcpy(b->data, payload, hdr->len);
+    return b;
+  }
+  mizu_shm *shm = mizu_read_region(ctx, payload, hdr->len);
+  assert(shm != NULL);
+  b->data = malloc(hdr->aux);
+  b->len = hdr->aux;
+  memcpy(b->data, (unsigned char *) shm->addr + 64, hdr->aux);
+  return b;
+}
+
+static int zc_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                   size_t limit, mizu_result_sink *sink, int catching,
+                   mizu_read_ctx *ctx) {
+  (void) limit;
+  (void) catching;
+  if (zc_mode == 1) return 0;              /* claim, never publish */
+  if (zc_mode == 2) {                      /* the payload-vanished terminal */
+    mizu_result_publish_lost(sink);
+    return 0;
+  }
+  if (hdr->kind == MIZU_KIND_SHM_RAW) {    /* a big zc task arg: ack it */
+    mizu_shm *shm = mizu_read_region(ctx, payload, hdr->len);
+    assert(shm != NULL);
+    mizu_bytes b = { (void *) "ack", 3 };
+    assert(mizu_result_publish(sink, &b) == 1);
+    return 0;
+  }
+  assert(hdr->kind == MIZU_KIND_INLINE);
+  if (hdr->len == 3 && memcmp(payload, "big", 3) == 0) {
+    static unsigned char big[1000];
+    memset(big, 0xAB, sizeof big);
+    mizu_bytes b = { big, sizeof big };
+    assert(mizu_result_publish(sink, &b) == 1);
+    return 0;
+  }
+  mizu_bytes b = { (void *) payload, hdr->len };
+  assert(mizu_result_publish(sink, &b) == 1);
+  return 0;
+}
+
+static void make_zc_binding(mizu_binding *b, int worker) {
+  mizu_binding_init(b);
+  b->stage = zc_stage;
+  b->read = zc_read;
+  b->ident = MIZU_IDENT(MIZU_LANG_BYTES, 0);
+  if (worker) b->exec = zc_exec;
+}
+
+static void zc_pool_pair(uint32_t workers, uint32_t joined, uint32_t max_sub,
+                         uint32_t inj, uint32_t dq, uint32_t rs,
+                         uint32_t slot) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = workers;
+  opts.max_submitters = max_sub;
+  opts.injection_cap = inj;
+  opts.per_worker_cap = dq;
+  opts.result_slots = rs;
+  opts.slot_size = slot;
+  mizu_binding b, wbv;
+  make_zc_binding(&b, 0);
+  make_zc_binding(&wbv, 1);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wbv) == MIZU_OK);
+  wk2 = NULL;
+  if (joined > 1)
+    assert(mizu_pool_worker_join(&wk2, token, 1, &wbv) == MIZU_OK);
+  sub = NULL;
+}
+
+static void spill_info(mizu_pool *p, uint32_t *fl, uint32_t *led) {
+  mizu_handle_spill_info((const mizu_handle *) p, fl, led);
+}
+
+/* The lent-region ledger keys a worker handle's result regions by
+   consumer kind (submitter slot) and its task-arg regions by kind
+   (worker slot): a worker-death force-reclaim of slot k must not
+   reclaim a result region lent to submitter k. */
+static void test_ledger_key_kinds(void) {
+  zc_pool_pair(2, 2, 3, 64, 64, 6, 256);
+  mizu_binding sb;
+  make_zc_binding(&sb, 0);
+  assert(mizu_pool_attach(&sub, token, &sb) == MIZU_OK);   /* submitter 1 */
+
+  /* submitter 1 gets a zc result from worker 0 and still "holds a view" */
+  mizu_bytes req = { (void *) "big", 3 };
+  mizu_task t;
+  assert(mizu_pool_submit(sub, &req, &t, 1000) == MIZU_OK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  mizu_shm *region = zc_last;
+  mizu_zc_ref(region);                    /* S's view wrap: rc 1 -> 2 */
+  void *obj = NULL;
+  assert(mizu_pool_collect(sub, &t, &obj, 1000) == MIZU_OK);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);   /* the keeper reap */
+  uint32_t fl, led;
+  spill_info(wk, &fl, &led);
+  assert(fl == 0 && led == 1);     /* lent to submitter 1: keyed (SUB, 1) */
+
+  /* worker slot 1 claims a nested task of wk and dies */
+  zc_mode = 1;
+  mizu_bytes n = { (void *) "n", 1 };
+  mizu_task tn;
+  assert(mizu_pool_submit(wk, &n, &tn, 0) == MIZU_OK);
+  assert(mizu_pool_step(wk2, 0) == MIZU_STEP_TASK);   /* stolen, stranded */
+  zc_mode = 0;
+  mizu_pool_destroy(wk2);                             /* crash */
+  wk2 = NULL;
+
+  /* wk's nested collect reaps worker 1 (backstop probe) and claims DIED */
+  obj = NULL;
+  assert(mizu_pool_collect(wk, &tn, &obj, 1500) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(wk),
+                "worker died while executing this task") == 0);
+  spill_info(wk, &fl, &led);
+  assert(led == 1 && fl == 0);   /* the (SUB, 1) entry: a different
+                                    namespace, untouched by the force */
+
+  /* the held region never recycled: a later big stage gets a fresh one */
+  mizu_task t3;
+  assert(mizu_pool_submit(sub, &req, &t3, 1000) == MIZU_OK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(zc_last != region);
+  obj = NULL;
+  assert(mizu_pool_collect(sub, &t3, &obj, 1000) == MIZU_OK);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+
+  mizu_zc_unref(region);   /* the simulated view releases; t3's region
+                              keeps only its producer loan (released at
+                              wk's leave) */
+  pool_end();
+  puts("ok ledger_key_kinds");
+}
+
+/* A payload-vanished publish is LOST, not DIED: the claim frees the slot
+   with the lost message and no claimant record, and performs no
+   force-reclaim of the (live) claimant's lent regions. */
+static void test_lost_task(void) {
+  zc_pool_pair(1, 1, 1, 64, 64, 8, 512);
+
+  /* a big zc task arg the worker "still views" sits in ctrl's ledger,
+     keyed to its consumer worker 0 */
+  static unsigned char big[1000];
+  memset(big, 0x5A, sizeof big);
+  mizu_bytes arg = { big, sizeof big };
+  mizu_task t1;
+  assert(mizu_pool_submit(ctrl, &arg, &t1, 1000) == MIZU_OK);
+  mizu_shm *region = zc_last;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  mizu_zc_ref(region);                    /* the worker's live view wrap */
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_OK);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+  uint32_t fl, led;
+  spill_info(ctrl, &fl, &led);
+  assert(led == 1);
+
+  /* the worker's payload-vanished publish claims LOST: no force */
+  zc_mode = 2;
+  mizu_task t2 = submit_bytes(ctrl, "x", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t2, &obj, 500) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "task lost: payload region vanished") == 0);
+  assert(mizu_pool_task_state(ctrl, &t2) == MIZU_RS_FREE);
+  spill_info(ctrl, &fl, &led);
+  assert(led == 1);   /* the live claimant's entry stays GC-gated */
+  zc_mode = 0;
+
+  mizu_zc_unref(region);
+  pool_end();
+  puts("ok lost_task");
+}
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#include <unistd.h>
+
+/* A worker dying between the announce and the claim CAS leaves its entry
+   queued; the reaper fails the slot DIED and the submitter reuses it.
+   The zombie guard (the entry's incarnation stamp): the still-queued
+   entry never executes against the slot's new incarnation. */
+static void test_zombie_entry(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 1;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 1;
+  opts.slot_size = 512;
+  mizu_binding b, wb;
+  make_binding(&b, 0);
+  make_binding(&wb, 1);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+
+  /* the worker child: joins slot 0, then "dies" on signal — the slot is
+     left LIVE with the lock released, exactly a crash */
+  int go[2];
+  assert(pipe(go) == 0);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(go[1]);
+    mizu_pool *cwk;
+    if (mizu_pool_worker_join(&cwk, token, 0, &wb) != MIZU_OK) _exit(2);
+    char c;
+    if (read(go[0], &c, 1) != 1) _exit(3);
+    _exit(0);
+  }
+  close(go[0]);
+  uint32_t s0 = 0;
+  assert(mizu_pool_ready_wait(ctrl, &s0, 1, 5000) == MIZU_OK);  /* arms the
+                                                                   watch */
+
+  mizu_task t1 = submit_bytes(ctrl, "first", 5);   /* queued, never claimed */
+
+  /* the announce (pool_announce) without the claim CAS, written through a
+     fresh mapping: the fields are plain shared memory */
+  char name[64];
+  int nl = snprintf(name, sizeof(name), "%s%s", MIZU_PREFIX_LITERAL, token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = mizu_shm_open_rw_heap(name, 0);
+  assert(shm != NULL);
+  unsigned char *base = shm->addr;
+  mizu_pool_hdr h;
+  memcpy(&h, base, sizeof(h));
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
+  size_t results_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+    (size_t) h.max_submitters *
+      (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
+    (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot);
+  mizu_rs_hdr *rs0 = (mizu_rs_hdr *) (base + results_off);
+  atomic_store(&w0->in_flight_seq, atomic_load(&rs0->sequence));
+  atomic_store(&w0->in_flight_rs, 0);
+
+  assert(write(go[1], "g", 1) == 1);
+  close(go[1]);
+  int wst;
+  assert(waitpid(pid, &wst, 0) == pid);
+
+  /* the death-callback reap fails the announced incarnation */
+  int st = 0;
+  for (int i = 0; i < 1000 && st != MIZU_RS_DIED; i++) {
+    st = mizu_pool_task_state(ctrl, &t1);
+    usleep(5000);
+  }
+  assert(st == MIZU_RS_DIED);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  mizu_pool_status ps;
+  for (int i = 0;; i++) {
+    assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+    if (ps.worker_state[0] == MIZU_WK_FREE) break;
+    assert(i < 1000);
+    usleep(5000);
+  }
+
+  /* slot reuse: the zombie entry (incarnation 1) queues ahead of the new
+     one (incarnation 2) — the guard drops it without executing */
+  mizu_task t2 = submit_bytes(ctrl, "second", 6);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+  exec_calls = 0;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* the zombie */
+  assert(exec_calls == 0);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* the real entry */
+  assert(exec_calls == 1);
+  collect_bytes(ctrl, &t2, "second", 6);
+
+  mizu_shm_close_stack(shm, 0);
+  free(shm);
+  pool_end();
+  puts("ok zombie_entry");
+}
+#endif
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
@@ -945,6 +1267,11 @@ int main(void) {
   test_collect_all();
   test_introspection();
   test_map_support();
+  test_ledger_key_kinds();
+  test_lost_task();
+#if !defined(_WIN32)
+  test_zombie_entry();
+#endif
 
   puts("test_pool: all passed");
   return 0;

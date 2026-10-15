@@ -632,6 +632,7 @@ Idle paths and free-list misses sweep it in full.
 
 If the consumer dies, its counts leak.
 The death verdict on the producer then force-reclaims its lent regions.
+Ledger keys carry the consumer's kind (worker or submitter slot) in the high half, so a pool verdict reclaims exactly one namespace — a worker handle lends result regions to submitters and task-arg regions to workers under colliding slot numbers.
 REFHELD-flagged regions (their identifiers escaped by reference) leak and unlink instead.
 On a ledger overflow, the entry closes the mapping but keeps the name, so a REF in flight can still resolve.
 The unlink lands at handle teardown.
@@ -653,7 +654,9 @@ The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 
 Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge a queue.
 A worker announces its claim (`in_flight_rs`) before it CASes.
-A reaper, serialized by the liveness lock, then fails exactly the tasks that the dead worker claimed.
+The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current.
+An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
+On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper — the flock re-acquire on one OFD is not a mutual exclusion.
 
 ## Pool mechanics
 

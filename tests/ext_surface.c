@@ -46,7 +46,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_read_region);
   refs += sink((mizu_any_fn) &mizu_result_publish);
   refs += sink((mizu_any_fn) &mizu_result_publish_err);
-  refs += sink((mizu_any_fn) &mizu_result_publish_died);
+  refs += sink((mizu_any_fn) &mizu_result_publish_lost);
   refs += sink((mizu_any_fn) &mizu_binding_bytes);
   refs += sink((mizu_any_fn) &mizu_bytes_free);
 
