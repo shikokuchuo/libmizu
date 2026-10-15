@@ -3738,7 +3738,7 @@ newer format", never a bare corrupt-stream error). </p>
 </div><div class="memdoc">
 
 <p>The string forms' per-batch element access: utf8 (i32 offsets), large_utf8 (i64), string_view (16-byte views). </p>
-<p>0 on a null (ptr/len unset), -1 on a malformed record. The Arrow C Data Interface carries no buffer lengths, so the byte extent stays the producer's word; what is checked here are the catastrophic cases — a view's buffer index past the pointer array, negative lengths or offsets, and non-monotonic offset spans (which would size one way and gather another). </p>
+<p>0 on a null (ptr/len unset), -1 on a malformed record. The Arrow C Data Interface carries no buffer lengths, so beyond the view form the byte extent stays the producer's word; what is checked here are the catastrophic cases — a view's buffer index past the variadic data buffers (the trailing slot is the producers' sizes array, not a data buffer) or a view span past its declared size, negative lengths or offsets, and non-monotonic offset spans (which would size one way and gather another). </p>
 
 </div>
 </div>

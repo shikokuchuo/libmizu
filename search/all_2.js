@@ -3,7 +3,7 @@ var searchData=
   ['cap_0',['cap',['../structmizu__preamble__s.html#a528f8549801642155ca9580b7d3e2b1e',1,'mizu_preamble_s']]],
   ['capabilities_20and_20the_20identity_20word_1',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md17',1,'']]],
   ['capacity_2',['capacity',['../structmizu__channel__opts__s.html#a6306e14347cae442c2c729bc071bd031',1,'mizu_channel_opts_s']]],
-  ['changed_3',['Changed',['../md_CHANGELOG.html#autotoc_md35',1,'']]],
+  ['changed_3',['Changed',['../md_CHANGELOG.html#autotoc_md33',1,'']]],
   ['changelog_4',['Changelog',['../md_CHANGELOG.html',1,'']]],
   ['check_5',['check',['../structmizu__binding__s.html#a3b9153787a57840937cac672ec059b71',1,'mizu_binding_s']]],
   ['claim_6',['The keeperless claim',['../md_DESIGN.html#autotoc_md15',1,'']]],
