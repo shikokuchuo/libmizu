@@ -596,6 +596,9 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_stage_pin</b> (<
 <tr class="memitem:a4e274410756c6892d262b3c9fd57251d" id="r_a4e274410756c6892d262b3c9fd57251d"><td class="memItemLeft" align="right" valign="top"><a id="a4e274410756c6892d262b3c9fd57251d" name="a4e274410756c6892d262b3c9fd57251d"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_stage_reap</b> (<a class="el" href="mizu__ext_8h.html#a7d50086f46e354f1678a0ea265d0883c">mizu_handle</a> *)</td></tr>
 <tr class="separator:a4e274410756c6892d262b3c9fd57251d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac0c8812e7c0b6aee95d9f2c9b2e09ac1" id="r_ac0c8812e7c0b6aee95d9f2c9b2e09ac1"><td class="memItemLeft" align="right" valign="top"><a id="ac0c8812e7c0b6aee95d9f2c9b2e09ac1" name="ac0c8812e7c0b6aee95d9f2c9b2e09ac1"></a>
+void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_stage_rollback</b> (<a class="el" href="mizu__ext_8h.html#a7d50086f46e354f1678a0ea265d0883c">mizu_handle</a> *)</td></tr>
+<tr class="separator:ac0c8812e7c0b6aee95d9f2c9b2e09ac1"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aac8828a06782f340d0755d3b2c22066c" id="r_aac8828a06782f340d0755d3b2c22066c"><td class="memItemLeft" align="right" valign="top">void *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#aac8828a06782f340d0755d3b2c22066c">mizu_stage_raw_spill</a> (<a class="el" href="mizu__ext_8h.html#a7d50086f46e354f1678a0ea265d0883c">mizu_handle</a> *, uint64_t n, int wire_type, <a class="el" href="structmizu__slot__hdr__s.html">mizu_slot_hdr</a> *, uint8_t *payload, uint32_t inline_max)</td></tr>
 <tr class="memdesc:aac8828a06782f340d0755d3b2c22066c"><td class="mdescLeft">&#160;</td><td class="mdescRight">Raw-tier reservation (stage_raw.c), valid only during stage_fn: choose the tier for n bare bytes of wire_type and return the destination with hdr stamped — the caller memcpys n bytes into it.  <br /></td></tr>
 <tr class="separator:aac8828a06782f340d0755d3b2c22066c"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -1824,7 +1827,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 <li>spill_get: check out a region of at least n bytes — recycled from the free list or created fresh. Uncommitted until retained (below) and the frame publishes: rolls back to the free list at the next verb entry or at destroy, so a mid-stage abandon never leaks.</li>
 <li>retain / retain_zc: commit the checkout's kind — SPILL surrenders to the free list at the consumer-done release point; ZC runs the zero-copy refcount protocol (the producer-loan store happens here) and lends to the ledger while views are outstanding. <code>region</code> must be the current checkout.</li>
 <li>pin: attach an opaque token to the staging entry, handed to the drop hook at the entry's release (a binding pins the staged object, whose serialized stream may carry hook-emitted identifiers).</li>
-<li>reap: the channel's pre-spill consumer-done reap, so a checkout sees the freshest surrenders. A no-op on pool handles. </li>
+<li>reap: the channel's pre-spill consumer-done reap, so a checkout sees the freshest surrenders. A no-op on pool handles.</li>
+<li>rollback: discard the uncommitted checkout (the region rejoins the free list, a pin drops through the binding's hook) — for a binding that abandons a stage after a retain and re-stages within the same stage_fn call; a fresh spill_get would otherwise orphan the abandoned region by overwriting the checkout. </li>
 </ul>
 
 </div>
