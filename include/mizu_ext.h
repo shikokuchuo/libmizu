@@ -2064,7 +2064,15 @@ MIZU_EXT_INLINE int mizu_ext_arrow_str_at_impl(const ArrowArray *arr,
       int32_t bi, off;
       memcpy(&bi, vw + 8, 4);
       memcpy(&off, vw + 12, 4);
-      if (bi < 0 || 2 + (int64_t) bi >= arr->n_buffers || off < 0) return -1;
+      /* the variadic data buffers are slots [2, n_buffers - 1): the last
+         slot is the sizes array the re-viewing producers append, never a
+         data buffer. A span is bounded by the declared size where that
+         array is present. */
+      if (bi < 0 || 2 + (int64_t) bi >= arr->n_buffers - 1 || off < 0)
+        return -1;
+      const int64_t *sizes =
+        (const int64_t *) arr->buffers[arr->n_buffers - 1];
+      if (sizes != NULL && (int64_t) off + l > sizes[bi]) return -1;
       *ptr = (const uint8_t *) arr->buffers[2 + bi] + off;
     }
     *len = l;
@@ -2084,9 +2092,11 @@ MIZU_EXT_INLINE int mizu_arrow_valid(const ArrowArray *arr, int64_t k) {
 /** The string forms' per-batch element access: utf8 (i32 offsets),
    large_utf8 (i64), string_view (16-byte views). 0 on a null (ptr/len
    unset), -1 on a malformed record. The Arrow C Data Interface carries no
-   buffer lengths, so the byte extent stays the producer's word; what is
-   checked here are the catastrophic cases — a view's buffer index past
-   the pointer array, negative lengths or offsets, and non-monotonic
+   buffer lengths, so beyond the view form the byte extent stays the
+   producer's word; what is checked here are the catastrophic cases — a
+   view's buffer index past the variadic data buffers (the trailing slot
+   is the producers' sizes array, not a data buffer) or a view span past
+   its declared size, negative lengths or offsets, and non-monotonic
    offset spans (which would size one way and gather another). */
 MIZU_EXT_INLINE int mizu_arrow_str_at(const ArrowArray *arr, int64_t k,
                                       int form, const uint8_t **ptr,

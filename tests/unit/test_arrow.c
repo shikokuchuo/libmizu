@@ -525,12 +525,13 @@ static void test_string_forms(void) {
   int32_t bi = 0, bo = 0;
   memcpy(views + 16 + 8, &bi, 4);
   memcpy(views + 16 + 12, &bo, 4);
+  const int64_t vsizes[1] = { (int64_t) sizeof longs };
   const void *ubufs[3] = { &bm, uo, ub };
-  const void *vbufs[3] = { &bm, views, longs };
+  const void *vbufs[4] = { &bm, views, longs, vsizes };
   ArrowArray au, av, b1;
   ArrowArray *k1[2] = { &au, &av };
   mk_array(&au, 2, 0, 0, 3, ubufs, NULL, NULL);
-  mk_array(&av, 2, 0, 0, 3, vbufs, NULL, NULL);
+  mk_array(&av, 2, 0, 0, 4, vbufs, NULL, NULL);
   mk_array(&b1, 2, 0, 0, 1, NULL, k1, NULL);
   b1.n_children = 2;
   const ArrowArray *batches[1] = { &b1 };
@@ -551,6 +552,64 @@ static void test_string_forms(void) {
   assert(offs[0] == 0 && offs[1] == 2 && offs[2] == 22);
   assert(memcmp(blk + g.data, "hi", 2) == 0);
   assert(memcmp(blk + g.data + 2, longs, 20) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
+static void test_strview_buffer_bound(void) {
+  /* a view's buffer index into the trailing sizes array (bi == ndata),
+     and a span past the declared size, are malformed; a NULL sizes array
+     is the producer's word */
+  ArrowSchema cv, root;
+  ArrowSchema *kids[1] = { &cv };
+  mk_schema(&cv, "vu", "v", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  uint8_t views[16];
+  memset(views, 0, sizeof views);
+  char data[20];
+  memset(data, 'z', sizeof data);
+  const int64_t sizes[1] = { (int64_t) sizeof data };
+  int32_t l = 20, bi = 0, bo = 0;
+  memcpy(views, &l, 4);
+  memcpy(views + 8, &bi, 4);
+  memcpy(views + 12, &bo, 4);
+  const void *vbufs[4] = { NULL, views, data, sizes };
+  ArrowArray av, batch;
+  ArrowArray *bk[1] = { &av };
+  mk_array(&av, 1, 0, 0, 4, vbufs, NULL, NULL);
+  mk_array(&batch, 1, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+
+  bi = 1;   /* == ndata: the sizes array is not a data buffer */
+  memcpy(views + 8, &bi, 4);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "malformed") != NULL);
+
+  bi = 0;
+  bo = 8;   /* 8 + 20 past the declared 20 */
+  memcpy(views + 8, &bi, 4);
+  memcpy(views + 12, &bo, 4);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "malformed") != NULL);
+
+  bo = 0;   /* in bounds: opens and gathers the span */
+  memcpy(views + 12, &bo, 4);
+  size_t total;
+  mizu_arrow_warn warn;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  mizu_mizs_geom g = mizu_mizs_geometry(1);
+  const int64_t *offs = (const int64_t *) (buf + e.data_offset + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 20);
+  assert(memcmp(buf + e.data_offset + g.data, data, sizeof data) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+
+  vbufs[3] = NULL;   /* no sizes array: the producer's word */
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
   free(buf);
   mizu_arrow_close(a);
 }
@@ -1669,7 +1728,8 @@ static void test_write_ix_kinds(void) {
   const void *tdb[2] = { NULL, tdv };
   const void *ib[2] = { NULL, i64v };
   const void *ub[2] = { NULL, u64v };
-  const void *vb[3] = { NULL, views, longs };
+  const int64_t vsizes[1] = { (int64_t) sizeof longs };
+  const void *vb[4] = { NULL, views, longs, vsizes };
   ArrowArray dict, ad, adt, ats, atd, ai, au, av, batch;
   ArrowArray *bk[7] = { &ad, &adt, &ats, &atd, &ai, &au, &av };
   mk_array(&dict, 2, 0, 0, 3, db, NULL, NULL);
@@ -1679,7 +1739,7 @@ static void test_write_ix_kinds(void) {
   mk_array(&atd, 2, 0, 0, 2, tdb, NULL, NULL);
   mk_array(&ai, 2, 0, 0, 2, ib, NULL, NULL);
   mk_array(&au, 2, 0, 0, 2, ub, NULL, NULL);
-  mk_array(&av, 2, 0, 0, 3, vb, NULL, NULL);
+  mk_array(&av, 2, 0, 0, 4, vb, NULL, NULL);
   mk_array(&batch, 2, 0, 0, 1, NULL, bk, NULL);
   batch.n_children = 7;
   const ArrowArray *batches[1] = { &batch };
@@ -1813,6 +1873,7 @@ int main(void) {
   test_null_count_forms();
   test_nan_vs_na();
   test_string_forms();
+  test_strview_buffer_bound();
   test_dicts();
   test_dict_declines();
   test_temporal();

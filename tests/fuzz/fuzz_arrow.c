@@ -68,7 +68,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   ArrowSchema *kids[4];
   ArrowArray cols_a[4], dict_a[4], batch;
   ArrowArray *bkids[4];
-  const void *bufs[4][3];
+  const void *bufs[4][4];
   const void *dbufs[4][3];
 
   const char *fmt[4];
@@ -98,7 +98,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     const int64_t null_count =
       (nc & 3) == 0 ? -1 : (nc & 3) == 1 ? 0 : (nc & 3) == 2 ? 1 : n + 1;
     /* the slot layout: [0,64) the data buffer, [64,72) the bitmap,
-       [128,192) the offsets array, [256,400) the levels/views */
+       [128,192) the offsets array, [256,400) the levels/views, [384,392)
+       the view sizes entry */
     uint8_t *col_data = slot;
     uint8_t *bm = slot + 64;
     for (size_t k = 0; k < 64; k++)
@@ -140,21 +141,36 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         bufs[i][1] = slot + 128;
         bufs[i][2] = col_data;
       } else if (form == 3) {
-        /* all-inline views (<= 12-byte strings): the reads stay in the
-           views buffer */
+        /* views: inline (<= 12-byte strings) or long with a fuzz-valued
+           buffer index and offset — bi == ndata (the sizes array's slot)
+           and off + len past the declared size exercise the view record's
+           bounds; slot [384,392) is the one sizes entry */
         uint8_t *vw = slot + 256;
+        int64_t *sz = (int64_t *) (slot + 384);
+        sz[0] = 64;
         for (int64_t k = 0; k < off + n; k++) {
-          int32_t l = (int32_t) (pick[44 + i * 4 + (int) (k % 3)] & 7);
-          memcpy(vw + 16 * k, &l, 4);
-          memset(vw + 16 * k + 4, 'a' + (int) (k % 26), (size_t) l);
+          const uint8_t p = pick[44 + i * 4 + (int) (k % 3)];
+          if (p & 8) {
+            const int32_t l = 13 + (int32_t) (p & 7);
+            const int32_t bi = (int32_t) (pick[45 + i * 4 + (int) (k & 1)] & 3);
+            const int32_t bo = (int32_t) (pick[46 + i * 4 + (int) (k & 1)] & 63);
+            memcpy(vw + 16 * k, &l, 4);
+            memcpy(vw + 16 * k + 8, &bi, 4);
+            memcpy(vw + 16 * k + 12, &bo, 4);
+          } else {
+            const int32_t l = (int32_t) (p & 7);
+            memcpy(vw + 16 * k, &l, 4);
+            memset(vw + 16 * k + 4, 'a' + (int) (k % 26), (size_t) l);
+          }
         }
         bufs[i][1] = vw;
-        bufs[i][2] = NULL;
+        bufs[i][2] = col_data;
+        bufs[i][3] = sz;
       } else {
         bufs[i][1] = col_data;
       }
       bufs[i][0] = bm;
-      int64_t need = form == 3 ? 2 : form != 0 ? 3 : 2;
+      int64_t need = form == 3 ? 4 : form != 0 ? 3 : 2;
       if (pick[45 + i * 4] & 1) need--;   /* a short buffer count */
       mk_array(&cols_a[i], n, null_count, off, need, bufs[i], NULL, NULL);
     }

@@ -738,7 +738,15 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
     pc->ts_verbatim = f[2] == 'n' &&
       (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
     const char *tz = f + 4;
-    snprintf(pc->tz, sizeof(pc->tz), "%s", tz[0] != '\0' ? tz : "UTC");
+    if (tz[0] == '\0') tz = "UTC";
+    const size_t tzlen = strlen(tz);
+    if (tzlen >= sizeof(pc->tz)) {
+      mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                          "column '%s': a timezone name past %zu bytes has "
+                          "no portable home", nm, sizeof(pc->tz) - 1);
+      return -1;
+    }
+    memcpy(pc->tz, tz, tzlen + 1);
     pc->kind = MIZU_ARROW_TS;
     return 0;
   }
@@ -1425,6 +1433,16 @@ int64_t mizu_arrow_rows(const mizu_arrow *a) {
 
 // The writer's public surface --------------------------------------------------------------
 
+/* FNV-1a over the name bytes — the duplicate-name check's hash. */
+static uint64_t arrow_name_hash(const char *s) {
+  uint64_t h = 1469598103934665603ULL;
+  for (; *s != '\0'; s++) {
+    h ^= (uint8_t) *s;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
 mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                             const ArrowArray *const *batches,
                             size_t n_batches, uint32_t peer_caps) {
@@ -1463,24 +1481,47 @@ mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
   a->tab = (int64_t *) (blk + ncolsa * (sizeof(*a->cols) +
                                         sizeof(*a->scols) +
                                         sizeof(*a->remotes)));
-  /* the names: every column named, no duplicates */
+  /* the names: every column named, no duplicates — an open-addressed
+     table over the name hashes (strcmp on a hash hit only), not the
+     quadratic pair scan a wide frame would pay per send */
+  size_t ncap = 16;
+  while (ncap < ncolsa * 2) ncap *= 2;
+  int32_t *nslots = calloc(ncap, sizeof(*nslots));
+  uint64_t *nhash = malloc(ncolsa * sizeof(*nhash));
+  if (nslots == NULL || nhash == NULL) {
+    free(nslots);
+    free(nhash);
+    mizu_arrow_close(a);
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
+    return MIZU_ERR;
+  }
   for (int i = 0; i < a->ncols; i++) {
     const char *nm = schema->children[i] != NULL ?
       schema->children[i]->name : NULL;
-    if (nm == NULL)
-      goto fail_names;
-    for (int j = 0; j < i; j++)
-      if (strcmp(schema->children[j]->name, nm) == 0)
-        goto fail_dup;
-    continue;
-  fail_names:
-    mizu_arrow_close(a);
-    return arrow_decline("an unnamed Arrow column has no portable home "
-                         "(an R data.frame needs names)");
-  fail_dup:
-    mizu_arrow_close(a);
-    return arrow_decline("an Arrow frame with duplicate column names");
+    if (nm == NULL) {
+      free(nslots);
+      free(nhash);
+      mizu_arrow_close(a);
+      return arrow_decline("an unnamed Arrow column has no portable home "
+                           "(an R data.frame needs names)");
+    }
+    const uint64_t h = arrow_name_hash(nm);
+    nhash[i] = h;
+    size_t s = (size_t) h & (ncap - 1);
+    while (nslots[s] != 0) {
+      const int j = nslots[s] - 1;
+      if (nhash[j] == h && strcmp(schema->children[j]->name, nm) == 0) {
+        free(nslots);
+        free(nhash);
+        mizu_arrow_close(a);
+        return arrow_decline("an Arrow frame with duplicate column names");
+      }
+      s = (s + 1) & (ncap - 1);
+    }
+    nslots[s] = i + 1;
   }
+  free(nslots);
+  free(nhash);
   for (int i = 0; i < a->ncols; i++)
     if (schema->children[i] == NULL ||
         arrow_classify(a, i, schema->children[i]) < 0)

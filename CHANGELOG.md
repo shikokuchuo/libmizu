@@ -135,18 +135,6 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   difftime units; append-only). No wire change: the golden corpus passes
   unmodified and `MIZU_ABI_VERSION` is untouched.
 
-### Fixed
-
-- `mizu_na_build`'s REAL and CPLX element tests now discriminate the
-  `NA_real_` payload the way R's own `ISNA` does — any NaN whose low
-  word is 1954 (`0x7A2`) — instead of matching only the quiet-bit-set
-  `MIZU_NA_REAL_BITS` exactly, so a writer's quiet-bit-clear `NA_real_`
-  (R's verbatim form, `0x7FF00000000007A2`) reads as NA on the
-  validity-bitmap paths. No ABI or wire change (the helpers are
-  unreleased, Phase 0).
-
-### Added
-
 - The MIZL remote leaf (directory tag 33) is normative in DESIGN.md (the
   follow-ups plan's F2 — a per-column REF): the entry's `data_offset` /
   `data_size` hold the view layer's identifier span (the 0x13 ref leaf's
@@ -320,6 +308,9 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
+- `mizu_arrow_open`'s duplicate-name check is O(ncols) — an
+  open-addressed table over the name hashes, `strcmp` on a hash hit
+  only — replacing the quadratic pair scan a wide frame paid per send.
 - `mizu_morsel_layout` / `mizu_morsel_hdr_check` lose the magic
   parameter: the morsel module stamps and checks the one core-owned
   `MIZU_MORSEL_MAGIC` (0x4D495A4D — mizu's value, so only pymizu's map
@@ -343,3 +334,29 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   verdict without waiting on a reaper. No wire-format change.
 - `mizu_stage_fn` gains the binding ctx; `mizu_exec_fn` receives a read
   ctx in place of the bare binding ctx.
+
+### Fixed
+
+- The string_view element accessor's buffer bound
+  (`mizu_arrow_str_at`'s view form, the ext tier's dual-form impl): a
+  view record's buffer index was admitted up to `n_buffers - 3`, which
+  indexes the trailing variadic sizes array the re-viewing producers
+  append as if it were a data buffer, and a span was never checked
+  against the declared size. The variadic data buffers are slots
+  `[2, n_buffers - 1)`: an index into the sizes slot is now malformed,
+  and where the sizes array is present (non-NULL) a span past `sizes[bi]`
+  declines — pymizu's `pv_col_match_strview` bound, promoted to the one
+  shared definition. A frame carrying such a record declines at the
+  open's size walk ("malformed offset or view record"), ahead of any
+  emit. No wire change.
+- `arrow_classify` declines a timezone name past 63 bytes with an
+  informative error instead of silently truncating it into the POSIXct
+  blob (no silent downgrades; the longest zoneinfo key is 32 bytes, so no
+  legitimate payload meets the bound).
+- `mizu_na_build`'s REAL and CPLX element tests now discriminate the
+  `NA_real_` payload the way R's own `ISNA` does — any NaN whose low
+  word is 1954 (`0x7A2`) — instead of matching only the quiet-bit-set
+  `MIZU_NA_REAL_BITS` exactly, so a writer's quiet-bit-clear `NA_real_`
+  (R's verbatim form, `0x7FF00000000007A2`) reads as NA on the
+  validity-bitmap paths. No ABI or wire change (the helpers are
+  unreleased, Phase 0).
