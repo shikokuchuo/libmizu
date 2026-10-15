@@ -2,6 +2,12 @@
    liveness lock, exercised in-process. Grows into the full unit tier
    (plan step 3). Assert-based; run via `make test`. */
 
+/* _GNU_SOURCE: glibc hides nanosleep and other POSIX declarations under
+   strict -std=c11; define before any system header. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

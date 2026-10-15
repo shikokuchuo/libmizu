@@ -5,6 +5,12 @@
    scenario execs this binary (argv mode "peer") so a threaded parent
    never forks. Assert-based; run via `make test`. */
 
+/* _GNU_SOURCE: glibc hides flock and other POSIX declarations under
+   strict -std=c11; define before any system header. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
