@@ -114,6 +114,7 @@ static void held_lock_peer(const char *token, const char *lock_path,
 #endif
 
 int main(int argc, char **argv) {
+  (void) argc; (void) argv;              /* MinGW warns unused on _WIN32 */
 #ifndef _WIN32
   if (argc == 5 && strcmp(argv[1], "peer") == 0)
     held_lock_peer(argv[2], argv[3], atoi(argv[4]));   /* never returns */

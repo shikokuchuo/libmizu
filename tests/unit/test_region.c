@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -180,7 +181,18 @@ int main(void) {
     assert(waitpid(pid, &st, 0) == pid);             /* holder reaped */
     intptr_t h2;
     assert(mizu_live_open_existing(hpath, &h2) == 0);
-    assert(mizu_live_try(h2) == MIZU_LIVE_ACQUIRED); /* not HELD by the child */
+    /* the grandchild's atfork handler runs in its own context: on a
+       loaded machine it may not have been scheduled yet — poll instead
+       of demanding an immediate verdict */
+    int acquired = 0;
+    for (int i = 0; i < 5000 && !acquired; i++) {
+      acquired = mizu_live_try(h2) == MIZU_LIVE_ACQUIRED;
+      if (!acquired) {
+        struct timespec ts = { 0, 1000000 };
+        nanosleep(&ts, NULL);
+      }
+    }
+    assert(acquired);                                /* not HELD by the child */
     mizu_live_unlock(h2);
     mizu_live_close(h2);
     remove(hpath);
