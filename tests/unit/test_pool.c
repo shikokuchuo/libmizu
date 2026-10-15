@@ -1134,7 +1134,13 @@ static void test_lost_task(void) {
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
+
+static void sleep_ms(long ms) {
+  struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+  nanosleep(&ts, NULL);
+}
 
 /* A worker dying between the announce and the claim CAS leaves its entry
    queued; the reaper fails the slot DIED and the submitter reuses it.
@@ -1205,7 +1211,7 @@ static void test_zombie_entry(void) {
   int st = 0;
   for (int i = 0; i < 1000 && st != MIZU_RS_DIED; i++) {
     st = mizu_pool_task_state(ctrl, &t1);
-    usleep(5000);
+    sleep_ms(5);
   }
   assert(st == MIZU_RS_DIED);
   void *obj = NULL;
@@ -1217,7 +1223,7 @@ static void test_zombie_entry(void) {
     assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
     if (ps.worker_state[0] == MIZU_WK_FREE) break;
     assert(i < 1000);
-    usleep(5000);
+    sleep_ms(5);
   }
 
   /* slot reuse: the zombie entry (incarnation 1) queues ahead of the new

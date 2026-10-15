@@ -29,11 +29,17 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
+
+static void sleep_ms(long ms) {
+  struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+  nanosleep(&ts, NULL);
+}
 
 static void test_orphan_region(void) {
   /* Scratch registry dir: the macOS log resolves $TMPDIR per call. */
@@ -125,16 +131,18 @@ static int cb_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
 }
 
 /* The worker child (exec'd: joins, claims one task, exits without
-   leave — the slot reads LIVE with the lock released, exactly a crash). */
-static int reap_race_child(const char *token, int strand) {
+   leave — the slot reads LIVE with the lock released, exactly a crash).
+   _exit skips the atexit leak report (ASan's LSan would flag the
+   intentionally leaked handle and mask the exit code). */
+static void reap_race_child(const char *token, int strand) {
   cb_strand = strand;
   mizu_binding wb;
   mizu_binding_bytes(&wb);
   wb.exec = cb_exec;
   mizu_pool *cwk;
-  if (mizu_pool_worker_join(&cwk, token, 0, &wb) != MIZU_OK) return 2;
+  if (mizu_pool_worker_join(&cwk, token, 0, &wb) != MIZU_OK) _exit(2);
   (void) mizu_pool_step(cwk, 5000);
-  return 0;
+  _exit(0);
 }
 
 static pid_t spawn_child(const char *self, const char *token, int strand) {
@@ -161,7 +169,7 @@ static void await_slot_free(mizu_pool *ctrl) {
     assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
     if (ps.worker_state[0] == MIZU_WK_FREE) break;
     assert(k < 1000);
-    usleep(5000);
+    sleep_ms(5);
   }
 }
 
@@ -228,7 +236,7 @@ static void test_reap_probe_cb_race(const char *self) {
 
 int main(int argc, char **argv) {
   if (argc == 4 && strcmp(argv[1], "child") == 0)
-    return reap_race_child(argv[2], atoi(argv[3]));
+    reap_race_child(argv[2], atoi(argv[3]));   /* _exit()s, never returns */
   test_reap_probe_cb_race(argv[0]);   /* before the orphan test clutters
                                          and deletes its scratch TMPDIR */
   test_orphan_region();
