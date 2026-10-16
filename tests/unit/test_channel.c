@@ -92,6 +92,20 @@ static int check_intr(void *ctx) {
 }
 
 #ifndef _WIN32
+/* The gone-peer child (exec'd): attach, rendezvous, die. exec'd rather
+   than forked so the attach's death-listener thread starts in a fresh
+   process image (TSan forbids a thread start after a multi-threaded
+   fork, and the test process has long armed its own listener). _exit
+   skips the atexit leak report, as below. */
+static void gone_peer(const char *token) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel *peer = NULL;
+  if (mizu_channel_attach(&peer, token, &b) != MIZU_OK) _exit(2);
+  if (mizu_channel_ready_set(peer) != MIZU_OK) _exit(3);
+  _exit(0);                        /* dies holding no close bit */
+}
+
 /* The held-lock peer child (exec'd): attach, take the lock, then fork a
    squatter grandchild that re-takes the lock on its own plain fd once
    our death releases it (the atfork registry closes its inherited
@@ -122,6 +136,8 @@ static void held_lock_peer(const char *token, const char *lock_path,
 int main(int argc, char **argv) {
   (void) argc; (void) argv;              /* MinGW warns unused on _WIN32 */
 #ifndef _WIN32
+  if (argc == 3 && strcmp(argv[1], "gonepeer") == 0)
+    gone_peer(argv[2]);                  /* never returns */
   if (argc == 5 && strcmp(argv[1], "peer") == 0)
     held_lock_peer(argv[2], argv[3], atoi(argv[4]));   /* never returns */
 #endif
@@ -179,6 +195,7 @@ int main(int argc, char **argv) {
     o2.drop = NULL;                    /* drop_size without its bytes */
     assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
     /* a liveness directory path past the wire budget refuses */
+#ifndef _WIN32
     char longdir[1000];
     memset(longdir, 'd', sizeof(longdir) - 1);
     longdir[sizeof(longdir) - 1] = '\0';
@@ -187,6 +204,7 @@ int main(int argc, char **argv) {
     assert(strstr(mizu_last_error_message(),
                   "liveness directory path too long") != NULL);
     unsetenv("MIZU_LIVENESS_DIR");
+#endif
     assert(bad == NULL);
   }
 
@@ -647,10 +665,8 @@ int main(int argc, char **argv) {
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
-      mizu_channel *cp = NULL;
-      if (mizu_channel_attach(&cp, token, &bytesb) != MIZU_OK) _exit(2);
-      if (mizu_channel_ready_set(cp) != MIZU_OK) _exit(3);
-      _exit(0);   /* dies holding no close bit */
+      execl(argv[0], argv[0], "gonepeer", token, (char *) NULL);
+      _exit(9);
     }
     assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
     int wst;

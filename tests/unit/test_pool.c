@@ -1424,6 +1424,7 @@ static void test_create_validate(void) {
   assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
   o.result_slots = 64;
 
+#ifndef _WIN32
   /* a liveness directory path past the wire budget refuses */
   char longdir[1000];
   memset(longdir, 'd', sizeof(longdir) - 1);
@@ -1433,6 +1434,7 @@ static void test_create_validate(void) {
   assert(strstr(mizu_last_error_message(),
                 "liveness directory path too long") != NULL);
   unsetenv("MIZU_LIVENESS_DIR");
+#endif
   assert(bad == NULL);
 
   /* the token: NULL and released handles, a short buffer */

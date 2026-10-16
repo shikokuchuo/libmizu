@@ -248,6 +248,8 @@ int main(void) {
     assert(mizu_shm_open_view(&v, mizu_shm_name(vreg)) == MIZU_OK);
     assert(mizu_zc_refcount(v) == 1);
     mizu_zc_unref(v);
+    assert(mizu_zc_refcount(v) == 0);
+    mizu_shm_close(v, 0);
     assert(mizu_shm_open_view_flags(&v, mizu_shm_name(vreg),
                                     MIZU_OPEN_VIEW_NOCOUNT) == MIZU_OK);
     assert(mizu_zc_refcount(v) == 0);
