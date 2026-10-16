@@ -700,6 +700,9 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_alive</b>
 <tr class="memitem:ad64e4ff6ea156dea0190c7159a3c17ee" id="r_ad64e4ff6ea156dea0190c7159a3c17ee"><td class="memItemLeft" align="right" valign="top"><a id="ad64e4ff6ea156dea0190c7159a3c17ee" name="ad64e4ff6ea156dea0190c7159a3c17ee"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_destroy</b> (mizu_channel *)</td></tr>
 <tr class="separator:ad64e4ff6ea156dea0190c7159a3c17ee"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1008d1c382e343858fd3b06a9cc7be3a" id="r_a1008d1c382e343858fd3b06a9cc7be3a"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a1008d1c382e343858fd3b06a9cc7be3a">mizu_channel_abandon</a> (mizu_channel *)</td></tr>
+<tr class="memdesc:a1008d1c382e343858fd3b06a9cc7be3a"><td class="mdescLeft">&#160;</td><td class="mdescRight">The forked-child teardown: releases only the process-local half of an inherited handle — the child's copies of the mapping and fds and its heap — writing no cross-process word (no close signal, no unlink, no parker or refcount change), so the creating process's handle and the wire state are untouched.  <br /></td></tr>
+<tr class="separator:a1008d1c382e343858fd3b06a9cc7be3a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afae6e1262aae707f320f96f2d1a4b1dd" id="r_afae6e1262aae707f320f96f2d1a4b1dd"><td class="memItemLeft" align="right" valign="top"><a id="afae6e1262aae707f320f96f2d1a4b1dd" name="afae6e1262aae707f320f96f2d1a4b1dd"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_info_get</b> (const mizu_channel *, <a class="el" href="mizu_8h.html#a34c45aaf61d3c5456c9fb37b73ec71fb">mizu_channel_info</a> *out)</td></tr>
 <tr class="separator:afae6e1262aae707f320f96f2d1a4b1dd"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -733,6 +736,9 @@ static <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_
 <tr class="memitem:a00b0fa53e55c027005e4b91c600d1dd7" id="r_a00b0fa53e55c027005e4b91c600d1dd7"><td class="memItemLeft" align="right" valign="top"><a id="a00b0fa53e55c027005e4b91c600d1dd7" name="a00b0fa53e55c027005e4b91c600d1dd7"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_destroy</b> (mizu_pool *)</td></tr>
 <tr class="separator:a00b0fa53e55c027005e4b91c600d1dd7"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a6aa71f10b01b228d6f0d271f234036c9" id="r_a6aa71f10b01b228d6f0d271f234036c9"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a6aa71f10b01b228d6f0d271f234036c9">mizu_pool_abandon</a> (mizu_pool *)</td></tr>
+<tr class="memdesc:a6aa71f10b01b228d6f0d271f234036c9"><td class="mdescLeft">&#160;</td><td class="mdescRight">The forked-child teardown: as mizu_channel_abandon — the child's copies of the mapping and fds plus its heap, no cross-process word (no shutdown broadcast, no slot release, no parker or refcount change).  <br /></td></tr>
+<tr class="separator:a6aa71f10b01b228d6f0d271f234036c9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8c41c0fc3dc31822f0d60bfafbfdda62" id="r_a8c41c0fc3dc31822f0d60bfafbfdda62"><td class="memItemLeft" align="right" valign="top"><a id="a8c41c0fc3dc31822f0d60bfafbfdda62" name="a8c41c0fc3dc31822f0d60bfafbfdda62"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_attach</b> (mizu_pool **out, const char *token, const <a class="el" href="mizu_8h.html#a45b2d42fa0c3f45254015021ef8f2b0e">mizu_binding</a> *)</td></tr>
 <tr class="memdesc:a8c41c0fc3dc31822f0d60bfafbfdda62"><td class="mdescLeft">&#160;</td><td class="mdescRight">Submitter side: attach joins a live pool from another process, claiming a free submitter slot with its own injection ring and result-slot subrange. <br /></td></tr>
@@ -1737,7 +1743,28 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><div class="memdoc">
 
 <p>close signals this side's close bit, then waits up to timeout_ms for the peer's close bit or its death — the rendezvous that makes it safe to release the sent-payload pins, since the peer sets its bit only after draining. </p>
-<p>MIZU_OK: rendezvoused, resources released, the region unlinked, and the handle dead (destroy is a no-op after). MIZU_TIMEOUT: the handle stays usable and the rendezvous is retried at destroy. Idempotent. close_signal just sets this side's bit (the peer half of the protocol). After either side signals, sends on both sides return MIZU_CLOSED and receives drain before reporting it. alive is the peer-liveness verdict (lock probe, not the listener flag); a peer that closed but still runs reads as alive. destroy is the GC-finalizer target: idempotent, never blocks; on a handle that never rendezvoused it signals close and releases what the (non-blocking) rendezvous check completes — the death verdict and mizu_shm_reap backstop the rest. Handles are process-private and do not survive fork(): verbs on an inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer empty. destroy on an inherited handle is a contract violation — teardown belongs to the creating process. </p>
+<p>MIZU_OK: rendezvoused, resources released, the region unlinked, and the handle dead (destroy is a no-op after). MIZU_TIMEOUT: the handle stays usable and the rendezvous is retried at destroy. Idempotent. close_signal just sets this side's bit (the peer half of the protocol). After either side signals, sends on both sides return MIZU_CLOSED and receives drain before reporting it. alive is the peer-liveness verdict (lock probe, not the listener flag); a peer that closed but still runs reads as alive. destroy is the GC-finalizer target: idempotent, never blocks; on a handle that never rendezvoused it signals close and releases what the (non-blocking) rendezvous check completes — the death verdict and mizu_shm_reap backstop the rest. Handles are process-private and do not survive fork(): verbs on an inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer empty. destroy on an inherited handle is a contract violation — teardown belongs to the creating process; abandon is the inherited handle's verb. </p>
+
+</div>
+</div>
+<a id="a1008d1c382e343858fd3b06a9cc7be3a" name="a1008d1c382e343858fd3b06a9cc7be3a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1008d1c382e343858fd3b06a9cc7be3a">&#9670;&#160;</a></span>mizu_channel_abandon()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_channel_abandon </td>
+          <td>(</td>
+          <td class="paramtype">mizu_channel *&#160;</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The forked-child teardown: releases only the process-local half of an inherited handle — the child's copies of the mapping and fds and its heap — writing no cross-process word (no close signal, no unlink, no parker or refcount change), so the creating process's handle and the wire state are untouched. </p>
+<p>Never blocks; as destroy, it frees the handle and the pointer is dead on return. In the owning process abandon is a contract violation (destroy is the verb). </p>
 
 </div>
 </div>
@@ -1796,6 +1823,27 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 
 <p>create: controller side. </p>
 <p>token as the channel's. ready_wait covers the given worker slots (startup handshake). destroy releases the handle. </p>
+
+</div>
+</div>
+<a id="a6aa71f10b01b228d6f0d271f234036c9" name="a6aa71f10b01b228d6f0d271f234036c9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a6aa71f10b01b228d6f0d271f234036c9">&#9670;&#160;</a></span>mizu_pool_abandon()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_pool_abandon </td>
+          <td>(</td>
+          <td class="paramtype">mizu_pool *&#160;</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The forked-child teardown: as mizu_channel_abandon — the child's copies of the mapping and fds plus its heap, no cross-process word (no shutdown broadcast, no slot release, no parker or refcount change). </p>
+<p>In the owning process destroy is the verb. </p>
 
 </div>
 </div>
