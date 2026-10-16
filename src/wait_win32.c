@@ -118,6 +118,11 @@ void mizu_death_watch_stop(mizu_death_watch *w) {
   free(w);
 }
 
+/* No fork on Windows: the abandon path is unreachable. */
+void mizu_death_watch_abandon(mizu_death_watch *w) {
+  free(w);
+}
+
 void mizu_death_listener_teardown(void) {
 }
 

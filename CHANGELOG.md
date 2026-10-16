@@ -13,6 +13,17 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- `mizu_channel_abandon` / `mizu_pool_abandon`: the forked-child teardown
+  for an inherited handle. Each releases only the process-local half —
+  the child's copies of the mapping and fds plus its heap — and writes no
+  cross-process word (no close signal or shutdown broadcast, no unlink,
+  no slot release, no parker or refcount change), so the creating
+  process's handle and the wire state are untouched. A binding finalizer
+  can now release an inherited handle instead of leaking it (valgrind's
+  default `definite,possible` leak kinds count such leaks as errors).
+  Calling abandon in the owning process remains a contract violation, as
+  destroy on an inherited handle was and remains.
+
 - The Arrow frame writer's inline small-table form: `mizu_arrow_write_ix`
   (one complete `'I'` stream of the whole frame — header, attr mark, the
   list of the columns' value forms, then the root dict `{names, class =

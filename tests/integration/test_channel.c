@@ -121,8 +121,61 @@ static void test_fork_guard(void) {
   puts("ok fork_guard");
 }
 
+/* The inherited handle's verb: a forked child abandons its copies of both
+   sides (create and attach allocations alike) — only the child's half is
+   released, and the parent's channel echoes on uncorrupted. */
+static void test_fork_abandon(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
+  opts.capacity = 64;
+  opts.slot_size = 512;
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof token) == MIZU_OK);
+  /* a peer-side handle attached in-process: the child abandons the attach
+     side's allocations alongside the create side's */
+  mizu_channel *peer_in;
+  assert(mizu_channel_attach(&peer_in, token, &b) == MIZU_OK);
+
+  /* in-flight state the child inherits: a warmup exchange both ways */
+  mizu_bytes warm = { (void *) "warm", 4 };
+  assert(mizu_channel_send(host, &warm) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_channel_recv(peer_in, &obj, 5000) == MIZU_OK);
+  mizu_bytes_free(obj);
+
+  fflush(stdout);
+  pid_t a = fork();
+  assert(a >= 0);
+  if (a == 0) {
+    mizu_channel_abandon(host);
+    mizu_channel_abandon(peer_in);
+    _exit(0);
+  }
+  assert(wait_exit(a) == 0);
+
+  /* nothing the child released may leak into the live channel */
+  mizu_bytes tb = { (void *) "ping", 4 };
+  assert(mizu_channel_send(host, &tb) == MIZU_OK);
+  assert(mizu_channel_recv(peer_in, &obj, 5000) == MIZU_OK);
+  mizu_bytes *rb = obj;
+  assert(rb->len == 4 && memcmp(rb->data, "ping", 4) == 0);
+  mizu_bytes_free(rb);
+  mizu_bytes pong = { (void *) "pong", 4 };
+  assert(mizu_channel_send(peer_in, &pong) == MIZU_OK);
+  assert(mizu_channel_recv(host, &obj, 5000) == MIZU_OK);
+  rb = obj;
+  assert(rb->len == 4 && memcmp(rb->data, "pong", 4) == 0);
+  mizu_bytes_free(rb);
+  mizu_channel_destroy(peer_in);   /* its close bit lets the host's unlink */
+  mizu_channel_destroy(host);
+  puts("ok fork_abandon");
+}
+
 int main(void) {
   test_fork_guard();
+  test_fork_abandon();
   puts("test_channel integration: all passed");
   return 0;
 }

@@ -1314,3 +1314,31 @@ void mizu_channel_destroy(mizu_channel *c) {
   free(c->keepers);
   free(c);
 }
+
+/* The forked-child teardown (mizu.h): releases only the child's own
+   copies — the mapping, the heap — and writes no cross-process word.
+   Every helper on this path is already local or creator-guarded: region
+   teardown unlinks in the creator only, the keeper drop is binding-local,
+   the parker holds no process resource to release, and the liveness fds
+   are the atfork handler's (closed in the child, so no live_close). The
+   shared half of destroy (close signal, rendezvous unlink, lock probes)
+   never runs. */
+void mizu_channel_abandon(mizu_channel *c) {
+  if (c == NULL) return;
+  if (!c->released) {
+    c->released = 1;
+    if (c->watch != NULL) {
+      mizu_death_watch_abandon(c->watch);
+      c->watch = NULL;
+    }
+    mizu_stage_rollback(&c->h);
+    mizu_keepers_teardown(&c->h, c->keepers, c->pre.cap);
+    mizu_spill_fl_teardown(&c->h.fl);
+    mizu_oc_teardown(&c->h.oc);
+    if (c->shm.addr != NULL) mizu_shm_close_stack(&c->shm, 0);
+    c->base = NULL;
+  }
+  free(c->tx.aend);
+  free(c->keepers);
+  free(c);
+}

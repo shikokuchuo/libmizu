@@ -207,6 +207,11 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
                                         const mizu_parker *pk,
                                         void (*cb)(void *), void *cb_arg);
 
+/* The forked-child release, for the handles' abandon path: no listener
+   interaction (the thread is the parent's), just the child's own fd copy
+   and the struct. */
+void mizu_death_watch_abandon(mizu_death_watch *w);
+
 // Liveness lock internals (liveness.c) ------------------------------------------
 
 /* The liveness contract, mizu_live_dir/open/try/close, and the

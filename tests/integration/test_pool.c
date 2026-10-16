@@ -433,6 +433,47 @@ static void test_lame_duck(void) {
   puts("ok lame_duck");
 }
 
+/* A forked child abandons its inherited handles (controller + worker):
+   only the child's copies are released, no shared word moves, and the
+   parent's pool runs on — a real worker echoes a task. */
+static void test_fork_abandon(void) {
+  mizu_pool *ctrl = make_pool(2, 2);
+  mizu_binding wb;
+  child_binding(&wb, 1);
+  mizu_pool *wk;
+  assert(mizu_pool_worker_join(&wk, child_token, 0, &wb) == MIZU_OK);
+
+  fflush(stdout);
+  pid_t a = fork();
+  assert(a >= 0);
+  if (a == 0) {
+    mizu_pool_abandon(ctrl);
+    mizu_pool_abandon(wk);
+    _exit(0);
+  }
+  assert(wait_exit(a) == 0);
+
+  child_expect = MIZU_EXIT_SHUTDOWN;
+  child_linger = 0;
+  pid_t w = spawn(ROLE_WORKER, 1);
+  uint32_t slot1 = 1;
+  assert(mizu_pool_ready_wait(ctrl, &slot1, 1, 5000) == MIZU_OK);
+  mizu_bytes tb = { (void *) "hi", 2 };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+  mizu_bytes *rb = obj;
+  assert(rb != NULL && rb->len == 2 && memcmp(rb->data, "hi", 2) == 0);
+  mizu_bytes_free(rb);
+  assert(mizu_pool_leave(wk) == MIZU_OK);   /* the in-process worker's clean exit */
+  mizu_pool_destroy(wk);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  assert(wait_exit(w) == 0);
+  mizu_pool_destroy(ctrl);
+  puts("ok fork_abandon");
+}
+
 int main(void) {
   test_worker_death();
   test_orphan_deque_drain();
@@ -440,6 +481,7 @@ int main(void) {
   test_submitter_death();
   test_stop_live_workers();
   test_lame_duck();
+  test_fork_abandon();
   puts("test_pool integration: all passed");
   return 0;
 }

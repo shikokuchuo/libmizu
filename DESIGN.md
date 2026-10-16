@@ -586,6 +586,10 @@ Four of them carry the correctness guarantees:
 - `check` runs at abandon-safe points only, once per spin or park iteration.
   A nonzero return unwinds the verb as `MIZU_ERR` with `MIZU_ERRCAT_INTERRUPTED` and consumes nothing.
 
+A forked child holds a copy of its parent's handles: every verb on one fails `MIZU_ERR`, and the teardown splits along the same line.
+`destroy` stays the owning process's verb — it writes cross-process words (the close signal, the rendezvous unlink, the shutdown broadcast, the slot release).
+`mizu_channel_abandon` / `mizu_pool_abandon` are the inherited handle's verb: only the child's own copies (the mappings, the fds, the heap) are released, no cross-process word moves, so the parent's handle and the wire state are untouched.
+
 ### Staging policy
 
 `mizu_stage_raw` (dual-form in `mizu_ext.h`; the slow path is `stage_raw.c`) is the core-owned raw-tier reservation: the RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both first-party bindings stage by the same rules.

@@ -19,6 +19,7 @@ mizu_aux_type
 mizu_binding_bytes
 mizu_binding_init
 mizu_bytes_free
+mizu_channel_abandon
 mizu_channel_alive
 mizu_channel_attach
 mizu_channel_close
@@ -110,6 +111,7 @@ mizu_park
 mizu_parker_attach
 mizu_parker_detach
 mizu_parker_snapshot
+mizu_pool_abandon
 mizu_pool_attach
 mizu_pool_cancel
 mizu_pool_collect

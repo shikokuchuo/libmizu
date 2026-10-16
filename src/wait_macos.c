@@ -144,6 +144,12 @@ void mizu_death_watch_stop(mizu_death_watch *w) {
   free(w);
 }
 
+/* Dispatch objects must not be touched after fork, so the source and
+   queue stay with the dying child; only the struct itself is freed. */
+void mizu_death_watch_abandon(mizu_death_watch *w) {
+  free(w);
+}
+
 void mizu_death_listener_teardown(void) {
 }
 

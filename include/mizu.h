@@ -652,12 +652,21 @@ MIZU_API mizu_status mizu_channel_recv_batch_fn(mizu_channel *, size_t cap,
    Handles are process-private and do not survive fork(): verbs on an
    inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer
    empty. destroy on an inherited handle is a contract violation —
-   teardown belongs to the creating process. */
+   teardown belongs to the creating process; abandon is the inherited
+   handle's verb. */
 MIZU_API mizu_status mizu_channel_close(mizu_channel *, double timeout_ms);
 MIZU_API mizu_status mizu_channel_close_signal(mizu_channel *);
 /** Logically a read; the probe can run survivor cleanup internally. */
 MIZU_API int mizu_channel_alive(const mizu_channel *);
 MIZU_API void mizu_channel_destroy(mizu_channel *);
+/** The forked-child teardown: releases only the process-local half of an
+   inherited handle — the child's copies of the mapping and fds and its
+   heap — writing no cross-process word (no close signal, no unlink, no
+   parker or refcount change), so the creating process's handle and the
+   wire state are untouched. Never blocks; as destroy, it frees the
+   handle and the pointer is dead on return. In the owning process
+   abandon is a contract violation (destroy is the verb). */
+MIZU_API void mizu_channel_abandon(mizu_channel *);
 
 /** Handle-local + wire-state snapshot. name is borrowed. Counters are
    process-local where noted. */
@@ -733,6 +742,11 @@ MIZU_API mizu_status mizu_pool_token(const mizu_pool *, char *buf, size_t cap);
 MIZU_API mizu_status mizu_pool_ready_wait(mizu_pool *, const uint32_t *slots,
                                        size_t n, double timeout_ms);
 MIZU_API void mizu_pool_destroy(mizu_pool *);
+/** The forked-child teardown: as mizu_channel_abandon — the child's
+   copies of the mapping and fds plus its heap, no cross-process word
+   (no shutdown broadcast, no slot release, no parker or refcount
+   change). In the owning process destroy is the verb. */
+MIZU_API void mizu_pool_abandon(mizu_pool *);
 
 /** Submitter side: attach joins a live pool from another process,
    claiming a free submitter slot with its own injection ring and

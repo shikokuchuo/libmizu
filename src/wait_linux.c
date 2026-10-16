@@ -265,6 +265,15 @@ void mizu_death_watch_stop(mizu_death_watch *w) {
   free(w);
 }
 
+/* The fork guard has dropped the inherited registration, so the stop
+   path's listed branch can never fire here: only the child's own fd copy
+   and the struct remain. */
+void mizu_death_watch_abandon(mizu_death_watch *w) {
+  mizu_dl_fork_guard();
+  if (w->pidfd >= 0) close(w->pidfd);
+  free(w);
+}
+
 void mizu_death_listener_teardown(void) {
   mizu_dl_fork_guard();
   if (!mizu_dl_running) return;

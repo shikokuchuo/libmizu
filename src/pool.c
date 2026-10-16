@@ -829,6 +829,49 @@ void mizu_pool_destroy(mizu_pool *p) {
   free(p);
 }
 
+/* The forked-child teardown (mizu.h): as the channel's — only the
+   child's own copies (the mapping, the heap), no cross-process word. The
+   pool release's shared half (submitter-slot FREE, the liveness closes,
+   the parker detaches) never runs; the death-watch abandon is the
+   platform-local release. */
+void mizu_pool_abandon(mizu_pool *p) {
+  if (p == NULL) return;
+  if (!p->released) {
+    p->released = 1;
+    if (p->watch != NULL) {
+      mizu_death_watch_abandon(p->watch);
+      p->watch = NULL;
+    }
+    if (p->wk_watch != NULL)
+      for (uint32_t i = 0; i < p->hdr.max_workers; i++)
+        if (p->wk_watch[i] != NULL) {
+          mizu_death_watch_abandon(p->wk_watch[i]);
+          p->wk_watch[i] = NULL;
+        }
+    mizu_stage_rollback(&p->h);
+    mizu_keepers_teardown(&p->h, p->keepers, p->keepers_n);
+    mizu_keepers_teardown(&p->h, p->sub_keepers, p->sub_keepers_n);
+    mizu_spill_fl_teardown(&p->h.fl);
+    mizu_oc_teardown(&p->h.oc);
+    if (p->shm.addr != NULL) mizu_shm_close_stack(&p->shm, 0);
+    p->base = NULL;
+    free(p->pks);
+    p->pks = NULL;
+    free(p->live_all);
+    p->live_all = NULL;
+  }
+  free(p->reap_owner);
+  free(p->scratch);
+  free(p->rk);
+  free(p->rk_pos);
+  free(p->keepers);
+  free(p->sub_keepers);
+  free(p->wk_watch);
+  free((void *) p->wk_dead);
+  free(p->reap_ctx);
+  free(p);
+}
+
 // Attach helpers ----------------------------------------------------------------------
 
 /* Shared open: validate the token and the region header, allocate the
