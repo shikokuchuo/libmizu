@@ -56,6 +56,25 @@ jobs:
       - run: make
       - run: tools/check-exports.sh
 
+  # The Codecov upload: the unit tier's instrumented run as an lcov
+  # export (make coverage-export). The llvm-cov/llvm-profdata version
+  # must match the clang that produced the profraw.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          v=$(clang --version | sed -n 's/.*version \([0-9][0-9]*\)\..*/\1/p' | head -1)
+          if ! command -v llvm-cov-"$v" >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y llvm-"$v"
+          fi
+          make coverage-export LLVM_COV=llvm-cov-"$v" LLVM_PROFDATA=llvm-profdata-"$v"
+      - uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.lcov
+          fail_ci_if_error: false
+
   # libFuzzer bursts: fixed seed + fixed run count, so deterministic.
   # ASan+UBSan catch what the torn-byte parsers would otherwise hide.
   fuzz:

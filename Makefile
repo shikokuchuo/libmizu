@@ -77,8 +77,8 @@ FUZZ_RUNS ?= 100000
 FUZZ_SEED ?= 1
 
 .PHONY: all static shared test test-unit test-ext test-integration \
-        test-soak test-fuzz bench coverage install uninstall clean \
-        amalgamation tidy docs
+        test-soak test-fuzz bench coverage coverage-run coverage-export \
+        install uninstall clean amalgamation tidy docs
 
 all: static shared
 
@@ -176,15 +176,31 @@ else
   LLVM_COV      ?= llvm-cov
 endif
 
-coverage:
+# The instrumented unit-tier run, shared by the report and export
+# targets (each follows with its own llvm-cov step).
+COV_OBJECTS := $(firstword $(TEST_UNIT_BIN)) \
+  $(addprefix -object ,$(filter-out $(firstword $(TEST_UNIT_BIN)),$(TEST_UNIT_BIN)))
+
+coverage-run:
 	$(MAKE) clean
 	LLVM_PROFILE_FILE="mizu-%p.profraw" $(MAKE) CC=clang \
 	  CFLAGS="-O1 -g -fprofile-instr-generate -fcoverage-mapping" \
 	  LDFLAGS="-fprofile-instr-generate" test-unit
 	$(LLVM_PROFDATA) merge -sparse mizu-*.profraw -o mizu.profdata
-	$(LLVM_COV) report $(firstword $(TEST_UNIT_BIN)) \
-	  $(addprefix -object ,$(filter-out $(firstword $(TEST_UNIT_BIN)),$(TEST_UNIT_BIN))) \
-	  -instr-profile=mizu.profdata
+
+coverage: coverage-run
+	$(LLVM_COV) report $(COV_OBJECTS) -instr-profile=mizu.profdata
+	rm -f mizu-*.profraw mizu.profdata
+	$(MAKE) clean   # leave no instrumented objects behind
+
+# The Codecov upload file (CI's coverage job): the lcov export — the
+# one llvm-cov format Codecov parses natively (the JSON export errors
+# server-side), minus the branch records: Codecov counts a
+# partial-branch line as uncovered, and the project's metric is line
+# coverage. coverage.lcov is gitignored.
+coverage-export: coverage-run
+	$(LLVM_COV) export -format=lcov $(COV_OBJECTS) \
+	  -instr-profile=mizu.profdata | grep -v -E '^(BRDA|BRF|BRH)' > coverage.lcov
 	rm -f mizu-*.profraw mizu.profdata
 	$(MAKE) clean   # leave no instrumented objects behind
 

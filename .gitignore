@@ -27,6 +27,7 @@ bench/*
 !bench/*.c
 !bench/notes.md
 /mizu_ext.h
+/coverage.lcov
 tests/ext_surface
 tests/ext_surface.dSYM
 /docs/html/

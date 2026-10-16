@@ -1,6 +1,7 @@
 # libmizu 水
 
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 libmizu is a C library for lock-free shared-memory IPC.
