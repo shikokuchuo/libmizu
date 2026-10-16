@@ -74,7 +74,7 @@ $(function() {
   <div class="headertitle"><div class="title">libmizu 水 </div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p><a class="anchor" id="md_README"></a> <a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE)</p>
+<div class="textblock"><p><a class="anchor" id="md_README"></a> <a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE)</p>
 <p>libmizu is a C library for lock-free shared-memory IPC.</p>
 <p>libmizu is for runtimes that parallelize with processes rather than threads. It makes the communication between those processes fast enough to divide work at thread granularity.</p>
 <p>libmizu uses shared memory as the fastest IPC transport. Processes read and write into shared memory directly, with no kernel involvement and no data copies through system sockets. This means round trips drop from tens of microseconds over sockets to under a microsecond (see Performance).</p>
