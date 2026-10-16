@@ -2100,20 +2100,29 @@ static void test_cross_thread_waits(void) {
   collect_bytes(ctrl, &c.t, "c", 1);
   pool_end();
 
-  /* the stop broadcast wakes a full waiter with STOPPED */
-  pool_pair(1, 1, 8, 2, 64, 64, 512);
-  t1 = submit_bytes(ctrl, "a", 1);
-  t2 = submit_bytes(ctrl, "b", 1);
-  (void) t1;
-  (void) t2;
+  /* the stop broadcast wakes a full waiter with STOPPED. The waiter
+     parks on its own handle's parker, which the controller-side
+     teardown never touches (in production the waiter is a separate
+     process — the same isolation applies to its handle here) */
+  pool_pair(1, 1, 2, 2, 64, 64, 512);   /* 2 submitters, injection_cap 2 */
+  mizu_binding sb2;
+  make_binding(&sb2, 0);
+  assert(mizu_pool_attach(&sub, token, &sb2) == MIZU_OK);
+  mizu_task f1 = submit_bytes(sub, "a", 1);
+  mizu_task f2 = submit_bytes(sub, "b", 1);
+  (void) f1;
+  (void) f2;
   memset(&c, 0, sizeof c);
-  c.p = ctrl;
+  c.p = sub;
   c.b = (mizu_bytes) { (void *) "c", 1 };
   assert(pthread_create(&th, NULL, full_submit_main, &c) == 0);
   nanosleep(&ts, NULL);
   assert(mizu_pool_stop(ctrl, 500) == MIZU_TIMEOUT);   /* wk never exits */
   assert(pthread_join(th, NULL) == 0);
   assert(c.st == MIZU_ERR);
+  assert(mizu_pool_errcat(sub) == MIZU_ERRCAT_STOPPED);
+  mizu_pool_destroy(sub);
+  sub = NULL;
   mizu_pool_destroy(wk);
   wk = NULL;
   mizu_pool_destroy(ctrl);

@@ -230,12 +230,18 @@ int main(void) {
      set; a malformed view name is refused before the open */
   {
     mizu_shm *no = NULL;
-    assert(mizu_shm_open_rw(&no, "/mizu_0_0", 0) == MIZU_ERR);
+    char no_name[64];
+    int nn = snprintf(no_name, sizeof(no_name), "%s0_0", MIZU_PREFIX_LITERAL);
+    assert(nn > 0 && (size_t) nn < sizeof(no_name));
+    assert(mizu_shm_open_rw(&no, no_name, 0) == MIZU_ERR);
     assert(strstr(mizu_last_error_message(), "cannot open region") != NULL);
-    assert(mizu_shm_open_view_flags(&no, "/mizu_../x", 0) == MIZU_ERR);
+    char mal[64];
+    nn = snprintf(mal, sizeof(mal), "%s../x", MIZU_PREFIX_LITERAL);
+    assert(nn > 0 && (size_t) nn < sizeof(mal));
+    assert(mizu_shm_open_view_flags(&no, mal, 0) == MIZU_ERR);
     assert(strstr(mizu_last_error_message(), "malformed region name") !=
            NULL);
-    assert(mizu_shm_open_view_flags(&no, "/mizu_0_0", 0) == MIZU_ERR);
+    assert(mizu_shm_open_view_flags(&no, no_name, 0) == MIZU_ERR);
     assert(strstr(mizu_last_error_message(), "cannot open region") != NULL);
   }
 
