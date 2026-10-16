@@ -4,19 +4,21 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 libmizu is a C library for lock-free shared-memory IPC.
-It provides SPSC channels and work-stealing task pools through a language-agnostic C ABI.
-Channels and pools run over POSIX shm or Win32 file mappings, with the hot path entirely in user space.
 
 libmizu is for runtimes that parallelize with processes rather than threads.
-It makes the communication between those processes cheap enough that work can be divided at granularities usually reserved for threads.
+It makes the communication between those processes fast enough to divide work at thread granularity.
+
+libmizu uses shared memory as the fastest IPC transport.
+Processes read and write into shared memory directly, with no kernel involvement and no data copies through system sockets.
+This means round trips drop from tens of microseconds over sockets to under a microsecond (see [Performance](#performance)).
+
+Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows).
+The hot path stays in user space.
+Data moves through single-producer single-consumer rings with batched publication.
+Waiting is spin-then-park, and peer death arrives as an OS event.
+
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
-
-Shared memory has always been the fastest IPC transport.
-A socket round trip costs four system calls and four copies of the data; in shared memory, one process reads the bytes the other wrote — the kernel never touches the data.
-libmizu handles the synchronization, waiting, and peer crashes for you, so a round trip drops from tens of microseconds over sockets to under a microsecond.
-See [Performance](#performance).
-
-The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and [pymizu](https://github.com/shikokuchuo/pymizu) (Python).
+The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R and [pymizu](https://github.com/shikokuchuo/pymizu) for Python.
 [Writing a binding](#writing-a-binding) covers other languages.
 
 - Lock-free SPSC rings and work-stealing deques over shared memory
@@ -26,7 +28,7 @@ The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) (R) and
 - FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
 - C11, 64-bit: Linux, macOS, and Windows
 
-> **Pre-release.** The API is not stable and may change at any time before a release.
+> **Pre-release.** The API is not stable and can change at any time before a release.
 
 ## Performance
 
@@ -46,7 +48,8 @@ The full dated records, including parker wake latency and spill-region costs, li
 
 ## Quickstart
 
-This example makes a channel between two processes using the built-in bytes binding — no callbacks, so it compiles as written.
+This example makes a channel between two processes with the built-in bytes binding.
+The bytes binding needs no callbacks, so the example compiles as written.
 The host:
 
 ```c
@@ -94,24 +97,26 @@ The rendered API reference lives at [shikokuchuo.net/libmizu](https://shikokuchu
 
 ## Writing a binding
 
-A binding teaches libmizu how to turn the language's values into frames and back: the `stage` and `read` callbacks shown in the quickstart, plus `exec` for pool workers.
+A binding teaches libmizu to turn the language's values into frames and back.
+The `stage` and `read` callbacks from the quickstart do the conversion, and `exec` runs tasks on pool workers.
 libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
 To start without callbacks, the built-in bytes binding — `mizu_binding_bytes()` — sends and receives byte buffers, as the quickstart shows.
 
-Every operation is an exported function, so a language with a foreign function interface can call libmizu directly from the shared library without compiling any C of its own.
+Every operation is an exported function.
+A language with a foreign function interface can call libmizu from the shared library, with no C of its own.
 Every handle is opaque, so libmizu's internals can change without breaking the binding.
-Bindings that compile C themselves can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
+Bindings that compile C can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
 
 ## API tiers
 
-The headers are two deliberate tiers:
+The headers form two tiers:
 
 - **`mizu.h`** — the stable consumer API.
-  The soname tracks its ABI; the stability promise starts at 1.0.
+  The soname tracks its ABI. The stability promise starts at 1.0.
 - **`mizu_ext.h`** — the binding-author API: the callback seam (`stage`, `read`, `exec`, ...), the stager/read/publish services, the built-in bytes binding, and promoted internals (parker, liveness, preamble, map support).
-  It is version-pinned per minor release and may change without deprecation, ever — binding authors rebuild (or re-vendor) per minor release.
+  It is version-pinned per minor release and can change without deprecation. Binding authors rebuild (or re-vendor) per minor release.
 
-A third header, `src/internal.h`, is private and never installed; bindings never include it.
+A third header, `src/internal.h`, is private. It is never installed, and bindings never include it.
 
 ## Building
 
@@ -136,8 +141,7 @@ make install            # honors PREFIX (/usr/local) and DESTDIR;
 ```
 
 On Windows, run `tools\build-win.bat` instead.
-This script uses clang-cl: MSVC C11 atomics are experimental and are not a supported target.
-The script needs LLVM (clang-cl) and the Visual Studio C++ build tools.
+The script builds with clang-cl because MSVC C11 atomics are experimental, and it needs LLVM (clang-cl) and the Visual Studio C++ build tools.
 GitHub Windows runners have both preinstalled.
 
 Static builds need no defines: `MIZU_API` is empty by default.
