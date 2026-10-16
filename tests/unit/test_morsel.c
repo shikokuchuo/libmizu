@@ -109,6 +109,26 @@ static void check_tests(void) {
   memcpy(shm->addr, &bad, sizeof bad);
   assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) !=
          NULL);
+  bad = h;
+  bad.n = 0;   /* element count out of range */
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
+  bad = h;
+  bad.desc_len = 0;   /* the descriptor section is mandatory */
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
+  bad = h;
+  bad.x_kind = 0x7f;   /* neither RAW nor DESC */
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
+  bad = h;
+  bad.claim_n = 0;
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
+  bad = h;
+  bad.out_type = 0;   /* no output area: its fields must all be zero */
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
   memcpy(shm->addr, &h, sizeof h);   /* restore */
   mizu_shm_close(shm, 1);
 }

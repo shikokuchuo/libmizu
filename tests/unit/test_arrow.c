@@ -1291,6 +1291,296 @@ static void test_struct_batch_shape(void) {
   mizu_arrow_close(a);
 }
 
+/* The conversion kernels, direct: the f16 edge values, the rows no
+   single-char format maps to (numpy's '?' bool8 and 'c8' complex), the
+   all-null lane fill, and a 64-lane validity word straddling a ninth
+   byte. */
+static void test_cvt_kernels(void) {
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+
+  /* f16: inf/nan, ±0, and the subnormal normalization loop */
+  const uint16_t h[7] = { 0x7C00, 0xFC00, 0x7E00, 0x0000, 0x8000, 0x0001,
+                          0x03FF };
+  double d[7];
+  mizu_cvt_convert((uint8_t *) d, (const uint8_t *) h, NULL, 0, 7,
+                   mizu_cvt_for_arrow("e"), &warn);
+  assert(d[0] == 1.0 / 0.0 && d[1] == -1.0 / 0.0);
+  assert(d[2] != d[2]);
+  assert(d[3] == 0.0 && d[4] == 0.0);
+  assert(d[5] == 5.9604644775390625e-08);        /* 2^-24 */
+  assert(d[6] == 1023.0 * 5.9604644775390625e-08);
+
+  /* bool8: one byte per source lane */
+  const mizu_cvt_row b8 = { MIZU_TYPE_LGL, MIZU_CVT_BOOL8_LGL, 1, 4 };
+  const uint8_t bs[4] = { 0, 1, 0, 7 };
+  int32_t bo[4];
+  mizu_cvt_convert((uint8_t *) bo, bs, NULL, 0, 4, &b8, &warn);
+  assert(bo[0] == 0 && bo[1] == 1 && bo[2] == 0 && bo[3] == 1);
+
+  /* c64: float re/im pairs -> double re/im */
+  const mizu_cvt_row c64 = { MIZU_TYPE_CPLX, MIZU_CVT_C64_CPLX, 8, 16 };
+  const float cs[4] = { 1.5f, -2.5f, 0.25f, 4.0f };
+  double co[4];
+  mizu_cvt_convert((uint8_t *) co, (const uint8_t *) cs, NULL, 0, 2, &c64,
+                   &warn);
+  assert(co[0] == 1.5 && co[1] == -2.5 && co[2] == 0.25 && co[3] == 4.0);
+
+  /* masked lanes: an all-null group fills the sentinel whole */
+  const mizu_cvt_row *i32 = mizu_cvt_for_arrow("i");
+  int32_t src[65];
+  for (int i = 0; i < 65; i++) src[i] = i;
+  int32_t dst[65];
+  const uint8_t v0[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+  mizu_cvt_convert((uint8_t *) dst, (const uint8_t *) src, v0, 0, 64, i32,
+                   &warn);
+  assert(dst[0] == MIZU_NA_INT32 && dst[63] == MIZU_NA_INT32);
+
+  /* bit offset 1 over 64 lanes: the validity word straddles a ninth
+     byte — lane 63 rides bit 0 of byte 8 */
+  uint8_t v1[10];
+  memset(v1, 0xFF, sizeof v1);
+  v1[0] = 0xFD;   /* lane 0 (bit 1) null */
+  v1[8] = 0xFE;   /* lane 63 (byte 8 bit 0) null */
+  mizu_cvt_convert((uint8_t *) dst, (const uint8_t *) src, v1, 1, 65, i32,
+                   &warn);
+  assert(dst[0] == MIZU_NA_INT32 && dst[1] == 1 && dst[62] == 62);
+  assert(dst[63] == MIZU_NA_INT32 && dst[64] == 64);
+
+  /* the format table: unknown and multi-char formats miss; 'L' resolves
+     (classify's special case never consults the table for it) */
+  assert(mizu_cvt_for_arrow("") == NULL);
+  assert(mizu_cvt_for_arrow("xx") == NULL);
+  assert(mizu_cvt_for_arrow("?") == NULL);
+  assert(mizu_cvt_for_arrow("L") != NULL);
+  assert(mizu_cvt_for_arrow("L")->wire == MIZU_TYPE_REAL);
+}
+
+/* Open-time declines the frame tests have no shape for. */
+static void test_open_declines2(void) {
+  ArrowSchema cx, lv, root;
+  ArrowSchema *kids[1] = { &cx };
+  mizu_arrow *a = NULL;
+
+  /* the root schema is not a struct */
+  mk_schema(&root, "i", NULL, kids, 1, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, NULL, 0, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "not a struct") != NULL);
+
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int32_t x[2] = { 1, 2 };
+  const void *xb[2] = { NULL, x };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 2, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 2, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+
+  /* a column with no format */
+  mk_schema(&cx, NULL, "x", NULL, 0, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "no format") != NULL);
+
+  /* a dictionary with a non-integer index */
+  mk_schema(&cx, "f", "d", NULL, 0, &lv, 0);
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "non-integer index") != NULL);
+
+  /* a timezone name past the plan's storage */
+  char tzfmt[80];
+  memset(tzfmt, 'x', 4 + 70);
+  memcpy(tzfmt, "tsu:", 4);
+  tzfmt[4 + 70] = '\0';
+  mk_schema(&cx, tzfmt, "t", NULL, 0, NULL, 0);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "timezone name") != NULL);
+
+  /* batch shape: a string column short a buffer, then with a NULL data
+     buffer */
+  mk_schema(&cx, "u", "s", NULL, 0, NULL, 0);
+  ArrowArray as, sbatch;
+  ArrowArray *sk[1] = { &as };
+  const int32_t so[3] = { 0, 1, 2 };
+  const void *short_bufs[2] = { NULL, so };
+  mk_array(&as, 2, 0, 0, 2, short_bufs, NULL, NULL);
+  mk_array(&sbatch, 2, 0, 0, 1, NULL, sk, NULL);
+  sbatch.n_children = 1;
+  const ArrowArray *sb1[1] = { &sbatch };
+  assert(mizu_arrow_open(&a, &root, sb1, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow C Data") !=
+         NULL);
+  const void *null_data[3] = { NULL, so, NULL };
+  mk_array(&as, 2, 0, 0, 3, null_data, NULL, NULL);
+  assert(mizu_arrow_open(&a, &root, sb1, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow C Data") !=
+         NULL);
+
+  /* a dictionary whose level offsets walk backwards: the levels walk
+     fails its vet */
+  ArrowSchema cd2, lv2;
+  ArrowSchema *dk[1] = { &cd2 };
+  mk_schema(&lv2, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd2, "c", "d", NULL, 0, &lv2, 0);
+  mk_schema(&root, "+s", NULL, dk, 1, NULL, 0);
+  const char levbytes[7] = { 'l', 'o', 'w', 'h', 'i', 'g', 'h' };
+  const int32_t badoffs[3] = { 0, 5, 2 };
+  ArrowArray dict, ai, dbatch;
+  ArrowArray *dkids[1] = { &ai };
+  const void *db[3] = { NULL, badoffs, levbytes };
+  mk_array(&dict, 2, 0, 0, 3, db, NULL, NULL);
+  const int8_t codes[2] = { 0, 1 };
+  const void *cb[2] = { NULL, codes };
+  mk_array(&ai, 2, 0, 0, 2, cb, NULL, &dict);
+  mk_array(&dbatch, 2, 0, 0, 1, NULL, dkids, NULL);
+  dbatch.n_children = 1;
+  const ArrowArray *db1[1] = { &dbatch };
+  assert(mizu_arrow_open(&a, &root, db1, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow dictionary export") != NULL);
+}
+
+/* Dictionary index widths: every integer width signs and stages. */
+static void test_dict_widths(void) {
+  ArrowSchema lv, cd, root;
+  ArrowSchema *kids[1] = { &cd };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const char levbytes[7] = { 'l', 'o', 'w', 'h', 'i', 'g', 'h' };
+  const int32_t levoffs[3] = { 0, 3, 7 };
+  ArrowArray dict;
+  const void *db[3] = { NULL, levoffs, levbytes };
+  mk_array(&dict, 2, 0, 0, 3, db, NULL, NULL);
+
+  const uint8_t cC[3] = { 0, 1, 0 };
+  const uint16_t cS[3] = { 0, 1, 0 };
+  const int32_t ci[3] = { 0, 1, 0 };
+  const uint32_t cI[3] = { 0, 1, 0 };
+  const int64_t cl[3] = { 0, 1, 0 };
+  const uint64_t cL[3] = { 0, 1, 0 };
+  const char fmts[6][2] = { "C", "S", "i", "I", "l", "L" };
+  const void *codes[6] = { cC, cS, ci, cI, cl, cL };
+  const uint8_t nul = 0x05;   /* slot 1: the NA'd code */
+  for (int k = 0; k < 6; k++) {
+    mk_schema(&cd, fmts[k], "d", NULL, 0, &lv, 0);
+    const void *cb[2] = { &nul, codes[k] };
+    ArrowArray ai, batch;
+    ArrowArray *bk[1] = { &ai };
+    mk_array(&ai, 3, 1, 0, 2, cb, NULL, &dict);
+    mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+    batch.n_children = 1;
+    const ArrowArray *batches[1] = { &batch };
+    size_t total;
+    mizu_arrow_warn warn;
+    mizu_arrow *a;
+    uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+    mizu_mizl_entry e;
+    assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+    assert(e.sexptype == MIZU_TYPE_INT && e.length == 3);
+    const int32_t *v = (const int32_t *) (buf + e.data_offset);
+    assert(v[0] == 1 && v[1] == MIZU_NA_INT32 && v[2] == 1);
+    free(buf);
+    mizu_arrow_close(a);
+  }
+}
+
+/* A dict column on a zero-batch stream stages as the empty factor; a
+   one-level dictionary writes the scalar str form. */
+static void test_dict_edge_shapes(void) {
+  ArrowSchema lv, cd, root;
+  ArrowSchema *kids[1] = { &cd };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  mizu_arrow_warn warn;
+
+  /* zero batches: the canonical levels are empty, the codes body empty */
+  size_t total;
+  mizu_arrow *a;
+  uint8_t *buf = frame_write(&root, NULL, 0, 0, &total, &warn, &a);
+  int64_t aoff, asz, valid[2];
+  assert(frame_check(buf, total, &aoff, &asz, valid) == 1);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  assert(e.length == 0);
+  blob_check(buf + e.data_offset + e.data_size - e.attrs_size,
+             (size_t) e.attrs_size);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* one level: the blob's levels value is a bare str, not a strv */
+  const char levbytes[3] = { 'l', 'o', 'w' };
+  const int32_t levoffs[2] = { 0, 3 };
+  ArrowArray dict;
+  const void *db[3] = { NULL, levoffs, levbytes };
+  mk_array(&dict, 1, 0, 0, 3, db, NULL, NULL);
+  const int8_t codes[2] = { 0, 0 };
+  const void *cb[2] = { NULL, codes };
+  ArrowArray ai, batch;
+  ArrowArray *bk[1] = { &ai };
+  mk_array(&ai, 2, 0, 0, 2, cb, NULL, &dict);
+  mk_array(&batch, 2, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int32_t *v = (const int32_t *) (buf + e.data_offset);
+  assert(v[0] == 1 && v[1] == 1);   /* codes are 0-based + 1 */
+  const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(blob, (size_t) e.attrs_size, "\x04\x03\x00\x00\x00low",
+                   8) != NULL);   /* the str form, not a strv */
+  blob_check(blob, (size_t) e.attrs_size);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
+/* A referenced one-column int32 frame of the given length (defined with
+   the remote-leaf tests below). */
+static uint8_t *ref_region(int with_nulls, int64_t rows, size_t *total_out);
+
+/* The remote override's arg vetting. */
+static void test_remote_decline(void) {
+  ArrowSchema cx, root;
+  ArrowSchema *kids[1] = { &cx };
+  mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int32_t x[4] = { 1, 2, 3, 4 };
+  const void *xb[2] = { NULL, x };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 4, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 4, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+
+  /* a referenced frame of the wrong length: the override declines, the
+     column stays local */
+  size_t reftotal;
+  uint8_t *ref = ref_region(0, 5, &reftotal);   /* the frame has 4 rows */
+  const char *ident = "/mizu_testref";
+  assert(mizu_arrow_remote(a, 0, ident, strlen(ident), ref, reftotal,
+                           0) == -1);
+  assert(mizu_arrow_remote(a, 9, ident, strlen(ident), ref, reftotal,
+                           0) == -1);   /* no such column */
+  assert(mizu_arrow_remote(a, 0, NULL, 0, ref, reftotal, 0) == -1);
+  mizu_arrow_warn warn;
+  size_t total = mizu_arrow_size(a);
+  uint8_t *buf = malloc(total);
+  assert(buf != NULL);
+  memset(&warn, 0, sizeof warn);
+  mizu_arrow_write(a, buf, &warn);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  assert(e.sexptype == MIZU_TYPE_INT);   /* still the local leaf */
+  free(buf);
+  free(ref);
+  mizu_arrow_close(a);
+}
+
 // The remote leaf --------------------------------------------------------------------
 
 /* A referenced one-column int32 frame of the given length; nulls per the
@@ -1722,9 +2012,18 @@ static void test_stage(void) {
   mizu_shm_close(got, 0);
   free(exp);
 
+  /* the churn signal declines ahead of the region checkout */
+  mizu_arrow_close(stage_arrow);
+  assert(mizu_arrow_open(&stage_arrow, &root, batches, 1, caps) ==
+         MIZU_OK);
+  ((mizu_handle *) host)->fl.churn = 1;
+  assert(mizu_channel_send(host, &(mizu_bytes) { NULL, 0 }) == MIZU_ERR);
+  assert(stage_rc == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "churn") != NULL);
+  mizu_arrow_close(stage_arrow);
+
   mizu_channel_destroy(host);
   mizu_channel_destroy(peer);
-  mizu_arrow_close(stage_arrow);
 }
 
 static void test_col_info(void) {
@@ -2171,6 +2470,11 @@ int main(void) {
   test_declines();
   test_short_formats();
   test_struct_batch_shape();
+  test_cvt_kernels();
+  test_open_declines2();
+  test_dict_widths();
+  test_dict_edge_shapes();
+  test_remote_decline();
   test_remote();
   test_root_blob_override();
   test_tz_override();

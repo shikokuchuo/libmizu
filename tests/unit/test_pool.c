@@ -7,11 +7,21 @@
    reaper runs synchronously off the collect/stop probe paths.
    Assert-based; run via `make test`. */
 
+/* _GNU_SOURCE: glibc hides nanosleep and other POSIX declarations under
+   strict -std=c11; define before any system header. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <time.h>
+#endif
 
 #include "internal.h"
 
@@ -20,15 +30,18 @@
 static mizu_binding bytesb;
 static int exec_mode = 0;  /* 0 echo, 1 strand (no publish), 2 infra fail,
                               3 abandon (eval_mark + longjmp), 4 ERR inline,
-                              5 ERR tiered */
+                              5 ERR tiered, 6 cancel self mid-exec */
 static int err_read = 0;   /* read_fn returns the ERR envelope's bytes */
 static int fail_read = 0;  /* read_fn fails the "rf" payload (no CONSUME) */
+static int stage_fail = 0; /* the modal stage wrapper fails every stage */
 
 static void array_sink(void *ctx, size_t i, void *obj) {
   ((void **) ctx)[i] = obj;
 }
 static int exec_calls = 0;
 static jmp_buf abandon_jmp;
+static mizu_pool *ctrl, *wk, *wk2, *sub;   /* defined with the harness */
+static mizu_task cur_task;                 /* exec mode 6's cancel target */
 
 /* Resolve a task frame's bytes: INLINE/NIL directly, SHM_RAW through the
    read-side region service (the worker handle's open cache) on the exec
@@ -97,6 +110,26 @@ static int test_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
     assert(mizu_result_publish_err(sink, &b, 0) == 1);
     return 0;
   }
+  case 6: {
+    /* cancelled between the claim and the publish: the publish CAS
+       loses to CANCEL and the slot frees at pop */
+    assert(mizu_pool_cancel(ctrl, &cur_task) == 1);
+    const uint8_t *bytes = NULL;
+    size_t n = 0;
+    task_bytes(ctx, hdr, payload, limit, &bytes, &n);
+    mizu_bytes b = { (void *) bytes, n };
+    assert(mizu_result_publish(sink, &b) == 0);
+    return 0;
+  }
+  case 7: {
+    /* the publish's stage failure is an infrastructure failure */
+    const uint8_t *bytes = NULL;
+    size_t n = 0;
+    task_bytes(ctx, hdr, payload, limit, &bytes, &n);
+    mizu_bytes b = { (void *) bytes, n };
+    assert(mizu_result_publish(sink, &b) == -1);
+    return 1;
+  }
   default:
     break;
   }
@@ -132,9 +165,16 @@ static void trace_cb(mizu_trace_event ev, uint64_t task_id, void *ctx) {
   if (trace_n < 16) trace_events[trace_n++] = (int) ev;
 }
 
+/* A stage that fails on demand: the submit-side and publish-side
+   staging errors both record MIZU_ERRCAT_STAGE. */
+static int maybe_fail_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                            uint32_t inline_max, mizu_handle *h, void *ctx) {
+  if (stage_fail) return 1;
+  return bytesb.stage(obj, hdr, payload, inline_max, h, ctx);
+}
+
 // Harness ------------------------------------------------------------------------------
 
-static mizu_pool *ctrl, *wk, *wk2, *sub;
 static char token[64];
 
 static void make_binding(mizu_binding *b, int worker) {
@@ -1335,9 +1375,862 @@ static void test_zombie_entry(void) {
 }
 #endif
 
+/* Create validation: the binding check, then every opts gate and the
+   liveness-dir budget, refuses through the TLS slot. */
+static void test_create_validate(void) {
+  mizu_pool *bad = NULL;
+  mizu_pool_opts o;
+  mizu_pool_opts_init(&o);
+  o.max_workers = 1;
+  o.max_submitters = 8;
+  o.injection_cap = 64;
+  o.per_worker_cap = 64;
+  o.result_slots = 64;
+  o.slot_size = 512;
+  mizu_binding b;
+  make_binding(&b, 0);
+
+  mizu_binding nb;
+  mizu_binding_init(&nb);   /* no stage/read */
+  assert(mizu_pool_create(&bad, &o, &nb) == MIZU_ERR);
+  nb = b;
+  nb.ident = 0;             /* a zero language byte */
+  assert(mizu_pool_create(&bad, &o, &nb) == MIZU_ERR);
+
+  o.max_workers = 0;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.max_workers = MIZU_MAX_WORKERS + 1;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.max_workers = 1;
+  o.max_submitters = 0;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.max_submitters = 65;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.max_submitters = 8;
+  o.injection_cap = 3;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.injection_cap = 64;
+  o.per_worker_cap = 3;
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.per_worker_cap = 64;
+  o.slot_size = 64;         /* below the 128 floor */
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.slot_size = 1000;       /* not a power of two */
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.slot_size = 2u << 20;   /* past the 2^20 cap */
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.slot_size = 512;
+  o.result_slots = 4;       /* below max_submitters */
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  o.result_slots = 64;
+
+  /* a liveness directory path past the wire budget refuses */
+  char longdir[1000];
+  memset(longdir, 'd', sizeof(longdir) - 1);
+  longdir[sizeof(longdir) - 1] = '\0';
+  assert(setenv("MIZU_LIVENESS_DIR", longdir, 1) == 0);
+  assert(mizu_pool_create(&bad, &o, &b) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "liveness directory path too long") != NULL);
+  unsetenv("MIZU_LIVENESS_DIR");
+  assert(bad == NULL);
+
+  /* the token: NULL and released handles, a short buffer */
+  char tok[64];
+  assert(mizu_pool_token(NULL, tok, sizeof(tok)) == MIZU_ERR);
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  char tiny[2];
+  assert(mizu_pool_token(ctrl, tiny, sizeof(tiny)) == MIZU_ERR);
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  assert(mizu_pool_stop(ctrl, 1000) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, tok, sizeof(tok)) == MIZU_ERR);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok create_validate");
+}
+
+/* The wire header validator: one crafted header, every reject branch. */
+static void test_hdr_validate(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  /* read the live header back through the region */
+  char name[80];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = NULL;
+  assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+  mizu_pool_hdr h;
+  memcpy(&h, mizu_shm_addr(shm), sizeof(h));
+  const size_t region_size = mizu_shm_size(shm);
+
+  mizu_pool_hdr v;
+  assert(mizu_pool_hdr_validate(&h, region_size, &v) == NULL);
+  assert(mizu_pool_hdr_validate(&h, 32, NULL) != NULL);
+
+  mizu_pool_hdr bad = h;
+  bad.magic += 1;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.version += 1;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.max_workers = 0;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.max_submitters = 65;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.inj_cap = 3;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.deque_cap = 0;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.slot = 64;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.result_slots = 7;   /* not a multiple of max_submitters */
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  assert(mizu_pool_hdr_validate(&bad, 128, NULL) != NULL);   /* too small */
+  bad = h;
+  bad.livedir_offset = region_size + 64;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.livedir_size = 0;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+  bad = h;
+  bad.livedir_size = 901;
+  assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
+
+  mizu_shm_close(shm, 0);
+  pool_end();
+  puts("ok hdr_validate");
+}
+
+/* The handle guards: NULL and released handles answer with the TLS slot
+   or the handle's error record; role mismatches refuse. */
+static void test_handle_guards(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_bytes b = { (void *) "x", 1 };
+  mizu_task t = submit_bytes(ctrl, "x", 1);
+  void *obj = NULL;
+  size_t idx = 9, err = 9, consumed = 9, n_out = 9;
+  mizu_pool_status st;
+  mizu_pool_dump d;
+  mizu_rs_row rows[1];
+  uint32_t nrows = 9;
+  mizu_pool_sig *sig;
+  uint32_t free_rs, inj_cap, inline_entry;
+
+  /* role mismatches on live handles */
+  assert(mizu_pool_leave(ctrl) == MIZU_ERR);         /* not a worker */
+  assert(mizu_pool_help_once(ctrl) == -1);
+  assert(mizu_pool_deque_pull(ctrl, 1) == -1);
+  assert(mizu_pool_step(ctrl, 0) == MIZU_STEP_SHUTDOWN);
+  assert(mizu_pool_worker_run(ctrl) == MIZU_EXIT_ERROR);
+  assert(mizu_pool_stop(wk, 0) == MIZU_ERR);         /* not the controller */
+  assert(mizu_pool_ready_wait(wk, NULL, 0, 0) == MIZU_ERR);
+  assert(mizu_pool_retire(wk, 0) == MIZU_ERR);
+  assert(mizu_pool_retire(ctrl, 9) == MIZU_ERR);     /* out of range */
+  assert(mizu_pool_collect(wk, &t, &obj, 0) == MIZU_ERR);   /* not ours */
+
+  /* invalid task handles */
+  mizu_task bogus = mizu_task_make(1, 9999);
+  assert(mizu_pool_collect(ctrl, &bogus, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect(ctrl, NULL, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_cancel(ctrl, &bogus) == 0);
+  assert(mizu_pool_task_release(ctrl, &bogus) == 0);
+  assert(mizu_pool_task_state(ctrl, &bogus) == MIZU_RS_FREE);
+  assert(mizu_pool_collect_any(ctrl, &bogus, 1, &idx, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_any(ctrl, &t, 1, NULL, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_any(ctrl, NULL, 1, &idx, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_any(ctrl, &t, 0, &idx, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_all(ctrl, NULL, 1, &obj, &err, &consumed,
+                               0) == MIZU_ERR);
+  assert(mizu_pool_submit_flags(ctrl, &b, 0, NULL, 0) == MIZU_ERR);
+  assert(mizu_pool_submit_batch_fn(ctrl, NULL, NULL, 1, &t, &n_out,
+                                   0) == MIZU_ERR);
+  assert(mizu_pool_status_get(NULL, &st) == MIZU_ERR);
+  assert(mizu_pool_status_get(ctrl, NULL) == MIZU_ERR);
+  assert(mizu_pool_dump_get(NULL, &d) == MIZU_ERR);
+  assert(mizu_pool_dump_get(ctrl, NULL) == MIZU_ERR);
+  assert(mizu_pool_tasks_get(NULL, rows, 1, &nrows) == MIZU_ERR);
+  assert(mizu_pool_tasks_get(ctrl, rows, 1, NULL) == MIZU_ERR);
+  assert(mizu_pool_tasks_get(ctrl, NULL, 1, &nrows) == MIZU_ERR);
+
+  /* NULL handles outright */
+  assert(mizu_pool_submit(NULL, &b, &t, 0) == MIZU_ERR);
+  assert(mizu_pool_submit_batch_fn(NULL, NULL, NULL, 0, &t, &n_out,
+                                   0) == MIZU_ERR);
+  assert(mizu_pool_collect(NULL, &t, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_any(NULL, &t, 1, &idx, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_collect_all(NULL, &t, 1, &obj, &err, &consumed,
+                               0) == MIZU_ERR);
+  assert(mizu_pool_cancel(NULL, &t) == 0);
+  assert(mizu_pool_task_release(NULL, &t) == 0);
+  assert(mizu_pool_task_state(NULL, &t) == MIZU_RS_FREE);
+  assert(mizu_pool_map_caps(NULL, &free_rs, &inj_cap, &inline_entry) == -1);
+  assert(mizu_pool_signals(NULL) == NULL);
+  assert(mizu_pool_help_once(NULL) == -1);
+  assert(mizu_pool_deque_pull(NULL, 1) == -1);
+  assert(mizu_pool_leave(NULL) == MIZU_OK);
+  assert(mizu_pool_stop(NULL, 0) == MIZU_OK);
+  assert(mizu_pool_retire(NULL, 0) == MIZU_ERR);
+  assert(mizu_pool_ready_wait(NULL, NULL, 0, 0) == MIZU_ERR);
+  assert(mizu_pool_worker_ident(NULL) == 0);
+  assert(mizu_pool_lame_duck(NULL) == 1);
+  mizu_pool_destroy(NULL);   /* no-op */
+  (void) sig;
+
+  /* released handles: stop released the controller */
+  mizu_task live = submit_bytes(ctrl, "y", 1);
+  (void) live;
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  assert(mizu_pool_stop(ctrl, 1000) == MIZU_OK);
+  assert(mizu_pool_submit(ctrl, &b, &t, 0) == MIZU_ERR);
+  assert(mizu_pool_collect(ctrl, &t, &obj, 0) == MIZU_ERR);
+  assert(mizu_pool_status_get(ctrl, &st) == MIZU_ERR);
+  assert(mizu_pool_dump_get(ctrl, &d) == MIZU_ERR);
+  assert(mizu_pool_tasks_get(ctrl, rows, 1, &nrows) == MIZU_ERR);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_ERR);
+  assert(mizu_pool_signals(ctrl) == NULL);
+  assert(mizu_pool_map_caps(ctrl, &free_rs, NULL, NULL) == -1);
+  assert(mizu_pool_stop(ctrl, 0) == MIZU_OK);   /* idempotent */
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok handle_guards");
+}
+
+/* Join failures: slot range, the held lock (a live worker), the ghost
+   slot (a dead one), the language word, and the full submitter
+   registry. */
+static void test_join_errors(void) {
+  pool_pair(2, 1, 2, 64, 64, 64, 512);
+  mizu_binding wb, b;
+  make_binding(&wb, 1);
+  make_binding(&b, 0);
+  mizu_pool *x = NULL;
+
+  assert(mizu_pool_worker_join(&x, token, 2, &wb) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "out of range") != NULL);
+  assert(mizu_pool_worker_join(&x, token, 0, &wb) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "already held") != NULL);
+  assert(mizu_pool_retire(ctrl, 1) == MIZU_ERR);   /* slot never joined */
+  assert(strstr(mizu_pool_error(ctrl), "is not live") != NULL);
+
+  /* a dead worker's slot is LIVE: the join fail-fasts on the ghost */
+  mizu_pool_destroy(wk);   /* simulated crash */
+  wk = NULL;
+  assert(mizu_pool_worker_join(&x, token, 0, &wb) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "not free") != NULL);
+
+  /* a binding with a different identity word cannot join */
+  mizu_binding fb;
+  make_binding(&fb, 1);
+  fb.ident = MIZU_IDENT(MIZU_LANG_BYTES + 1, 0);
+  assert(mizu_pool_worker_join(&x, token, 1, &fb) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "language") != NULL);
+
+  /* two submitters of two: the third attach probes both LIVE slots and
+     reports the full registry */
+  mizu_pool *s1;
+  assert(mizu_pool_attach(&s1, token, &b) == MIZU_OK);
+  mizu_pool *s2;
+  assert(mizu_pool_attach(&s2, token, &b) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "submitter registry full") !=
+         NULL);
+  mizu_pool_destroy(s1);
+
+  /* the pool survives: a clean join on a fresh slot works */
+  assert(mizu_pool_worker_join(&wk, token, 1, &wb) == MIZU_OK);
+  mizu_task t = submit_bytes(ctrl, "ok", 2);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "ok", 2);
+  pool_end();
+  puts("ok join_errors");
+}
+
+/* A worker joined without an evaluator: step/run refuse, and the
+   full-deque nested submit errors instead of executing inline. */
+static void test_nested_no_exec(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 2;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_binding b, nb;
+  make_binding(&b, 0);
+  mizu_binding_init(&nb);   /* stage/read but no exec */
+  nb.stage = bytesb.stage;
+  nb.read = test_read;
+  nb.ident = MIZU_IDENT(MIZU_LANG_BYTES, 0);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &nb) == MIZU_OK);
+
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_SHUTDOWN);
+  assert(strstr(mizu_pool_error(wk), "no evaluator") != NULL);
+  assert(mizu_pool_worker_run(wk) == MIZU_EXIT_ERROR);
+
+  mizu_bytes x = { (void *) "n", 1 };
+  mizu_task t1, t2, t3;
+  assert(mizu_pool_submit(wk, &x, &t1, 0) == MIZU_OK);   /* deque: 1 */
+  assert(mizu_pool_submit(wk, &x, &t2, 0) == MIZU_OK);   /* deque: 2 (full) */
+  assert(mizu_pool_submit(wk, &x, &t3, 0) == MIZU_ERR);  /* inline: no exec */
+  assert(strstr(mizu_pool_error(wk), "no evaluator") != NULL);
+
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok nested_no_exec");
+}
+
+/* Staging failures: at submit (the slot never commits), at the nested
+   submit, and at the publish (an infrastructure failure — the worker
+   goes down). */
+static void test_stage_failure(void) {
+  mizu_binding fb, fwb;
+  make_binding(&fb, 0);
+  make_binding(&fwb, 1);
+  fb.stage = maybe_fail_stage;
+  fwb.stage = maybe_fail_stage;
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  assert(mizu_pool_create(&ctrl, &opts, &fb) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &fwb) == MIZU_OK);
+
+  mizu_bytes b = { (void *) "x", 1 };
+  mizu_task t;
+  stage_fail = 1;
+  assert(mizu_pool_submit(ctrl, &b, &t, 0) == MIZU_ERR);
+  assert(mizu_pool_errcat(ctrl) == MIZU_ERRCAT_STAGE);
+  stage_fail = 0;
+  t = submit_bytes(ctrl, "x", 1);                        /* recovered */
+  mizu_task t2 = submit_bytes(ctrl, "y", 1);
+
+  stage_fail = 1;
+  mizu_task tn;
+  assert(mizu_pool_submit(wk, &b, &tn, 0) == MIZU_ERR);  /* nested */
+  assert(mizu_pool_errcat(wk) == MIZU_ERRCAT_STAGE);
+  stage_fail = 0;
+
+  /* the publish's stage failure is an infrastructure failure: the
+     worker goes down mid-task, the next claim carries on */
+  exec_mode = 7;
+  stage_fail = 1;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_SHUTDOWN);   /* claims t */
+  assert(mizu_pool_errcat(wk) == MIZU_ERRCAT_OTHER);     /* the exec record */
+  assert(strstr(mizu_pool_error(wk), "exec_fn failed") != NULL);
+  stage_fail = 0;
+  exec_mode = 0;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);       /* t2 */
+  collect_bytes(ctrl, &t2, "y", 1);
+
+  /* the stranded task fails DIED at the worker's leave */
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  puts("ok stage_failure");
+}
+
+/* The vectored collects: the park/timeout cycle consuming nothing, the
+   dead-claimant backstop probe, and the help modes (a blocked worker's
+   own pop, then a steal from a peer's deque). */
+static void test_vectored_collect(void) {
+  pool_pair(2, 2, 8, 64, 64, 64, 512);
+  size_t idx = 9, err = 9, consumed = 9;
+  void *obj = NULL;
+  void *vals[2] = { NULL, NULL };
+
+  /* the park cycle: announced, slept, deadline — nothing consumed */
+  mizu_task t1 = submit_bytes(ctrl, "a", 1);
+  mizu_task t2 = submit_bytes(ctrl, "b", 1);
+  mizu_task ts[2] = { t1, t2 };
+  assert(mizu_pool_collect_any(ctrl, ts, 2, &idx, &obj, 30) ==
+         MIZU_TIMEOUT);
+  assert(obj == NULL);
+  assert(mizu_pool_task_state(ctrl, &t1) == MIZU_RS_PENDING);
+  assert(mizu_pool_collect_all(ctrl, ts, 2, vals, &err, &consumed, 30) ==
+         MIZU_TIMEOUT);
+  assert(consumed == 0);
+
+  /* a claimed-but-stranded task: the wake backstop probes the claimant,
+     which is alive here — the wait times out anyway */
+  exec_mode = 1;   /* claim, never publish */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  exec_mode = 0;
+  assert(mizu_pool_collect_any(ctrl, ts, 2, &idx, &obj, 60) ==
+         MIZU_TIMEOUT);
+  /* with the claimant dead the same probe reaps it: DIED, reported by
+     position, the other handle collectible */
+  mizu_pool_destroy(wk);   /* simulated crash */
+  wk = NULL;
+  assert(mizu_pool_collect_any(ctrl, ts, 2, &idx, &obj, 1500) == MIZU_ERR);
+  assert(idx == 0);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  assert(mizu_pool_step(wk2, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t2, "b", 1);
+
+  /* the reaped slot rejoins */
+  mizu_binding wb;
+  make_binding(&wb, 1);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+
+  /* help mode in collect_any: a worker blocked on its own nested tasks
+     pops and executes them rather than parking */
+  mizu_bytes b = { (void *) "n", 1 };
+  mizu_task n1, n2;
+  assert(mizu_pool_submit(wk2, &b, &n1, 0) == MIZU_OK);
+  assert(mizu_pool_submit(wk2, &b, &n2, 0) == MIZU_OK);
+  exec_calls = 0;
+  assert(mizu_pool_collect_any(wk2, &n1, 1, &idx, &obj, 1000) == MIZU_OK);
+  assert(idx == 0);
+  mizu_bytes_free(obj);
+  assert(exec_calls == 2);   /* both nested tasks ran as help */
+  collect_bytes(wk2, &n2, "n", 1);
+
+  /* help by steal: own deque empty (its one task is claimed and
+     stranded), the peer's deque feeds the steal */
+  mizu_task n3;
+  assert(mizu_pool_submit(wk2, &b, &n3, 0) == MIZU_OK);   /* wk2's deque */
+  mizu_task n4;
+  assert(mizu_pool_submit(wk, &b, &n4, 0) == MIZU_OK);    /* wk's deque */
+  exec_mode = 1;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* claims n4, strands */
+  exec_mode = 0;
+  assert(mizu_pool_collect_all(wk, &n4, 1, vals, &err, &consumed, 60) ==
+         MIZU_TIMEOUT);   /* n3 ran as help on the steal */
+  collect_bytes(wk2, &n3, "n", 1);
+  /* the leave fails the stranded claim and releases it in place: the
+     slot is FREE, the sub slot reaps clean */
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  assert(mizu_pool_task_state(ctrl, &n4) == MIZU_RS_FREE);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  pool_end();
+  puts("ok vectored_collect");
+}
+
+/* collect_all's claim order: the first non-OK by position is the only
+   handle consumed; a read failure past a consumed prefix reports the
+   prefix. */
+static void test_collect_all_errors(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_task t1 = submit_bytes(ctrl, "ok", 2);
+  mizu_task t2 = submit_bytes(ctrl, "rf", 2);   /* the read fails */
+  mizu_task ts[2] = { t1, t2 };
+  void *vals[2] = { NULL, NULL };
+  size_t err = 9, consumed = 9;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  fail_read = 1;
+  assert(mizu_pool_collect_all(ctrl, ts, 2, vals, &err, &consumed,
+                               1000) == MIZU_ERR);
+  assert(err == 1 && consumed == 1);   /* t1's product handed back */
+  mizu_bytes_free(vals[0]);
+  fail_read = 0;
+  collect_bytes(ctrl, &t2, "rf", 2);   /* retryable: still collectible */
+
+  /* an ERR outcome at position 0: only it is consumed */
+  exec_mode = 4;
+  mizu_task t3 = submit_bytes(ctrl, "x", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  exec_mode = 0;
+  mizu_task t4 = submit_bytes(ctrl, "z", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  mizu_task ts2[2] = { t3, t4 };
+  vals[0] = vals[1] = NULL;
+  assert(mizu_pool_collect_all(ctrl, ts2, 2, vals, &err, &consumed,
+                               1000) == MIZU_ERR);
+  assert(err == 0 && consumed == 0);
+  collect_bytes(ctrl, &t4, "z", 1);    /* t4 stayed collectible */
+  pool_end();
+  puts("ok collect_all_errors");
+}
+
+/* A cancelled-between-claim-and-publish task: the publish CAS loses to
+   CANCEL, the staged result is discarded, the submitter probe runs. */
+static void test_cancel_at_publish(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  size_t n = 100 * 1024;
+  unsigned char *big = malloc(n);
+  for (size_t i = 0; i < n; i++) big[i] = (unsigned char) (i * 31u);
+  exec_mode = 6;
+  cur_task = submit_bytes(ctrl, big, n);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* cancels itself */
+  exec_mode = 0;
+  /* the publish lost to the cancel: the slot is FREE outright (the
+     worker's publish-tail consume), not CANCEL */
+  assert(mizu_pool_task_state(ctrl, &cur_task) == MIZU_RS_FREE);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &cur_task, &obj, 0) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "task handle already collected") ==
+         0);
+  free(big);
+  pool_end();
+  puts("ok cancel_at_publish");
+}
+
+/* A stop with a worker still live: the interrupt hook abandons the wait
+   but the teardown completes. */
+static int stop_intr_check(void *ctx) {
+  (void) ctx;
+  static int calls;
+  return ++calls > 2;
+}
+
+static void test_stop_interrupt(void) {
+  mizu_binding b, wb;
+  make_binding(&b, 0);
+  make_binding(&wb, 1);
+  b.check = stop_intr_check;
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+
+  /* the worker never observes the shutdown: the wait would park
+     forever; the hook abandons it, the teardown still completes */
+  assert(mizu_pool_stop(ctrl, -1) == MIZU_ERR);
+  assert(mizu_pool_errcat(ctrl) == MIZU_ERRCAT_INTERRUPTED);
+  /* the pool is down: submits refuse, the worker's step exits */
+  mizu_bytes x = { (void *) "x", 1 };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &x, &t, 0) == MIZU_ERR);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_SHUTDOWN);
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok stop_interrupt");
+}
+
+/* map_caps: the worker's claim fails when the submitter registry is
+   full; a stopped pool refuses. */
+static void test_map_caps_errors(void) {
+  pool_pair(1, 1, 1, 64, 64, 64, 512);   /* ctrl owns the only sub slot */
+  uint32_t free_rs = 9, inj = 9, inl = 9;
+  assert(mizu_pool_map_caps(wk, &free_rs, &inj, &inl) == -1);
+  assert(strstr(mizu_pool_error(wk), "submitter registry full") != NULL);
+  /* a nested submit fails the same way */
+  mizu_bytes b = { (void *) "x", 1 };
+  mizu_task t;
+  assert(mizu_pool_submit(wk, &b, &t, 0) == MIZU_ERR);
+
+  /* a stop with the worker still live times out, but the teardown
+     runs — and the worker then reads the shutdown word */
+  assert(mizu_pool_stop(ctrl, 100) == MIZU_TIMEOUT);
+  assert(mizu_pool_map_caps(wk, &free_rs, &inj, &inl) == -1);
+  assert(mizu_pool_errcat(wk) == MIZU_ERRCAT_STOPPED);
+  mizu_task t2;
+  assert(mizu_pool_submit_batch_fn(wk, NULL, NULL, 0, &t2, &(size_t) { 0 },
+                                   0) == MIZU_ERR);
+  assert(mizu_pool_errcat(wk) == MIZU_ERRCAT_STOPPED);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok map_caps_errors");
+}
+
+/* submit_batch_fn: the worker's nested loop, the bad-argument refuses,
+   and a doorbell left set while entries remain. */
+static void test_batch_nested(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_bytes b1 = { (void *) "a", 1 }, b2 = { (void *) "b", 1 };
+  void *objs[2] = { &b1, &b2 };
+  mizu_task ts[2];
+  size_t n_out = 0;
+  /* the worker's batch form: nested submits onto its own deque */
+  assert(mizu_pool_submit_batch(wk, objs, 2, ts, &n_out, 0) == MIZU_OK);
+  assert(n_out == 2);
+  exec_calls = 0;
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(exec_calls == 2);
+  collect_bytes(wk, &ts[0], "a", 1);
+  collect_bytes(wk, &ts[1], "b", 1);
+
+  /* help_once with more work queued than claimed restores the doorbell */
+  mizu_task t1 = submit_bytes(ctrl, "x", 1);
+  mizu_task t2 = submit_bytes(ctrl, "y", 1);
+  exec_calls = 0;
+  assert(mizu_pool_help_once(wk) == 1);
+  assert(exec_calls == 1);
+  mizu_pool_dump d;
+  assert(mizu_pool_dump_get(ctrl, &d) == MIZU_OK);
+  assert(d.help_wanted == 1);   /* an entry remains: the bell rings on */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t1, "x", 1);
+  collect_bytes(ctrl, &t2, "y", 1);
+  pool_end();
+
+  /* the pull caps at a full deque: deque_cap 2 pulls 2 of 3 */
+  pool_pair(1, 1, 8, 64, 2, 64, 512);
+  mizu_task r1 = submit_bytes(ctrl, "q", 1);
+  mizu_task r2 = submit_bytes(ctrl, "r", 1);
+  mizu_task r3 = submit_bytes(ctrl, "s", 1);
+  assert(mizu_pool_deque_pull(wk, 3) == 2);   /* full: the ring keeps 1 */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* pops */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* pops */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* claims the ring */
+  collect_bytes(ctrl, &r1, "q", 1);
+  collect_bytes(ctrl, &r2, "r", 1);
+  collect_bytes(ctrl, &r3, "s", 1);
+  pool_end();
+  puts("ok batch_nested");
+}
+
+/* The keeper record follows a reused slot's new incarnation, and a
+   mid-table removal swaps the tail in. */
+static void test_rk_reuse(void) {
+  pool_pair(1, 1, 2, 64, 64, 2, 512);   /* ctrl: one result slot */
+  size_t n = 100 * 1024;
+  unsigned char *big = malloc(n);
+  for (size_t i = 0; i < n; i++) big[i] = (unsigned char) (i * 17u);
+
+  mizu_task t1 = submit_bytes(ctrl, big, n);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* kept: rk[0] */
+  collect_bytes(ctrl, &t1, big, n);                  /* slot FREE, rk held */
+  mizu_task t2 = submit_bytes(ctrl, big, n);         /* the same slot */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* record follows */
+  collect_bytes(ctrl, &t2, big, n);
+  free(big);
+  pool_end();
+
+  /* two kept results: collecting the first swaps the second's record
+     into the vacated slot at the worker's reap */
+  pool_pair(1, 1, 2, 64, 64, 4, 512);   /* ctrl: two result slots */
+  size_t m = 100 * 1024;
+  unsigned char *bg = malloc(m);
+  for (size_t i = 0; i < m; i++) bg[i] = (unsigned char) (i * 13u);
+  mizu_task u1 = submit_bytes(ctrl, bg, m);
+  mizu_task u2 = submit_bytes(ctrl, bg, m);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &u1, bg, m);   /* frees slot 1st: the swap runs at
+                                        the worker's next reap */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  collect_bytes(ctrl, &u2, bg, m);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  free(bg);
+  pool_end();
+  puts("ok rk_reuse");
+}
+
+#if !defined(_WIN32)
+/* Cross-thread waits: the full-ring space wait unparked by the claim's
+   backpressure wake, by the stop broadcast; a parked collect unparked
+   by the broadcast's cancel sweep. */
+struct wait_ctx {
+  mizu_pool *p;
+  mizu_bytes b;
+  mizu_task t;
+  mizu_task ct;
+  mizu_status st;
+  void *obj;
+};
+
+static void *full_submit_main(void *arg) {
+  struct wait_ctx *c = arg;
+  c->st = mizu_pool_submit(c->p, &c->b, &c->t, -1);
+  return NULL;
+}
+
+static void *parked_collect_main(void *arg) {
+  struct wait_ctx *c = arg;
+  c->st = mizu_pool_collect(c->p, &c->ct, &c->obj, -1);
+  return NULL;
+}
+
+static void test_cross_thread_waits(void) {
+  /* the space wait: the worker's claim wakes it */
+  pool_pair(1, 1, 8, 2, 64, 64, 512);   /* injection_cap 2 */
+  mizu_task t1 = submit_bytes(ctrl, "a", 1);
+  mizu_task t2 = submit_bytes(ctrl, "b", 1);
+  (void) t2;
+  struct wait_ctx c;
+  memset(&c, 0, sizeof c);
+  c.p = ctrl;
+  c.b = (mizu_bytes) { (void *) "c", 1 };
+  pthread_t th;
+  assert(pthread_create(&th, NULL, full_submit_main, &c) == 0);
+  struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
+  nanosleep(&ts, NULL);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* claims, wakes */
+  assert(pthread_join(th, NULL) == 0);
+  assert(c.st == MIZU_OK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t1, "a", 1);
+  collect_bytes(ctrl, &t2, "b", 1);
+  collect_bytes(ctrl, &c.t, "c", 1);
+  pool_end();
+
+  /* the stop broadcast wakes a full waiter with STOPPED */
+  pool_pair(1, 1, 8, 2, 64, 64, 512);
+  t1 = submit_bytes(ctrl, "a", 1);
+  t2 = submit_bytes(ctrl, "b", 1);
+  (void) t1;
+  (void) t2;
+  memset(&c, 0, sizeof c);
+  c.p = ctrl;
+  c.b = (mizu_bytes) { (void *) "c", 1 };
+  assert(pthread_create(&th, NULL, full_submit_main, &c) == 0);
+  nanosleep(&ts, NULL);
+  assert(mizu_pool_stop(ctrl, 500) == MIZU_TIMEOUT);   /* wk never exits */
+  assert(pthread_join(th, NULL) == 0);
+  assert(c.st == MIZU_ERR);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+
+  /* the stop broadcast's cancel sweep wakes a parked collect */
+  pool_pair(1, 1, 2, 64, 64, 64, 512);
+  mizu_binding sb;
+  make_binding(&sb, 0);
+  assert(mizu_pool_attach(&sub, token, &sb) == MIZU_OK);
+  memset(&c, 0, sizeof c);
+  c.p = sub;
+  c.b = (mizu_bytes) { (void *) "doomed", 6 };
+  assert(mizu_pool_submit(sub, &c.b, &c.ct, 0) == MIZU_OK);
+  assert(pthread_create(&th, NULL, parked_collect_main, &c) == 0);
+  nanosleep(&ts, NULL);
+  assert(mizu_pool_stop(ctrl, 500) == MIZU_TIMEOUT);   /* wk never exits */
+  assert(pthread_join(th, NULL) == 0);
+  assert(c.st == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(sub), "task cancelled or pool stopped") ==
+         0);
+  mizu_pool_destroy(sub);
+  sub = NULL;
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok cross_thread_waits");
+}
+
+/* The forked-child teardown: the fork guard refuses the verbs, then
+   abandon frees only the child's copies — the parent's pool is
+   unharmed. */
+static void test_abandon_fork(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    mizu_bytes b = { (void *) "x", 1 };
+    mizu_task t;
+    if (mizu_pool_submit(ctrl, &b, &t, 0) != MIZU_ERR ||
+        strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
+      exit(1);
+    mizu_pool_abandon(wk);
+    mizu_pool_abandon(ctrl);
+    exit(0);
+  }
+  int st;
+  assert(waitpid(pid, &st, 0) == pid);
+  assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+  mizu_task t = submit_bytes(ctrl, "alive", 5);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "alive", 5);
+  pool_end();
+  puts("ok abandon_fork");
+}
+#endif
+
+/* The announced-but-not-yet-parked wake: a pusher finding a worker in
+   WPK_IDLE unparks it (the epoch bump turns its upcoming sleep into an
+   immediate return). Wire state set up directly — the window is a race
+   no single-threaded sequence can schedule. */
+static void test_unpark_idle(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  char name[80];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = NULL;
+  assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+  unsigned char *base = mizu_shm_addr(shm);
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
+  mizu_pool_hdr h;
+  memcpy(&h, base, sizeof(h));
+  size_t ctrl_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+    (size_t) h.max_submitters *
+      (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
+    (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot) +
+    (size_t) h.result_slots * h.slot;
+  _Atomic uint64_t *parked =
+    (_Atomic uint64_t *) (base + ctrl_off + MIZU_CTRL_PARKED_OFF);
+
+  /* announce as the worker would mid-transition: IDLE + the mask bit */
+  atomic_store(&w0->park_state, MIZU_WPK_IDLE);
+  uint32_t epoch_before = atomic_load(&w0->park_epoch);
+  atomic_fetch_or(parked, 1ull);
+  mizu_task t = submit_bytes(ctrl, "x", 1);   /* the pusher wakes it */
+  assert(atomic_load(&w0->park_epoch) > epoch_before);
+  /* restore: the step must see a clean, running slot */
+  atomic_fetch_and(parked, ~1ull);
+  atomic_store(&w0->park_state, MIZU_WPK_RUNNING);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "x", 1);
+  mizu_shm_close(shm, 0);
+  pool_end();
+  puts("ok unpark_idle");
+}
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
+  test_create_validate();
+  test_hdr_validate();
+  test_handle_guards();
+  test_join_errors();
+  test_nested_no_exec();
+  test_stage_failure();
+  test_vectored_collect();
+  test_collect_all_errors();
+  test_cancel_at_publish();
+  test_stop_interrupt();
+  test_map_caps_errors();
+  test_batch_nested();
+  test_rk_reuse();
+#if !defined(_WIN32)
+  test_cross_thread_waits();
+  test_abandon_fork();
+#endif
+  test_unpark_idle();
   test_round_trip();
   test_spill();
   test_batch();

@@ -10,6 +10,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
 #include <fcntl.h>
@@ -211,6 +212,130 @@ int main(void) {
   memcpy(copy, seed, sizeof(seed));
   mizu_rng_jump(seed);
   assert(memcmp(copy, seed, sizeof(seed)) != 0);
+
+  /* err_describe: a summary per category, a hint only where one helps */
+  {
+    const char *summary, *hint;
+    mizu_err_describe(MIZU_ERRCAT_NOSPACE, &summary, &hint);
+    assert(strstr(summary, "space") != NULL && hint[0] != '\0');
+    mizu_err_describe(MIZU_ERRCAT_NOMEMORY, &summary, &hint);
+    assert(strstr(summary, "memory") != NULL && hint[0] == '\0');
+    mizu_err_describe(MIZU_ERRCAT_EXISTS, &summary, &hint);
+    assert(strstr(summary, "already in use") != NULL && hint[0] != '\0');
+    mizu_err_describe(MIZU_ERRCAT_OTHER, &summary, &hint);
+    assert(strstr(summary, "unexpected") != NULL && hint[0] == '\0');
+  }
+
+  /* the writable / view opens: a vanished name errors with the TLS slot
+     set; a malformed view name is refused before the open */
+  {
+    mizu_shm *no = NULL;
+    assert(mizu_shm_open_rw(&no, "/mizu_0_0", 0) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "cannot open region") != NULL);
+    assert(mizu_shm_open_view_flags(&no, "/mizu_../x", 0) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "malformed region name") !=
+           NULL);
+    assert(mizu_shm_open_view_flags(&no, "/mizu_0_0", 0) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "cannot open region") != NULL);
+  }
+
+  /* the view open: the default form performs the counted add, NOCOUNT
+     leaves it to the caller */
+  {
+    mizu_shm *vreg = NULL;
+    assert(mizu_shm_create(&vreg, 4096) == MIZU_OK);
+    mizu_shm *v = NULL;
+    assert(mizu_shm_open_view(&v, mizu_shm_name(vreg)) == MIZU_OK);
+    assert(mizu_zc_refcount(v) == 1);
+    mizu_zc_unref(v);
+    assert(mizu_shm_open_view_flags(&v, mizu_shm_name(vreg),
+                                    MIZU_OPEN_VIEW_NOCOUNT) == MIZU_OK);
+    assert(mizu_zc_refcount(v) == 0);
+    mizu_zc_ref(v);
+    assert(mizu_zc_refcount(v) == 1);
+    mizu_zc_unref(v);
+    mizu_shm_close(v, 0);
+    mizu_shm_close(vreg, 1);
+  }
+
+  /* the spin learner: a completed wait inside the cap grows 1.5x +
+     headroom (never below the base, never past the cap); a wait past the
+     cap halves toward the floor */
+  {
+    assert(mizu_spin_learn(20000.0, 16000, 16000) == 38000);
+    assert(mizu_spin_learn(1.0, 16000, 16000) == 16000);
+    assert(mizu_spin_learn(64000.0, 16000, 16000) == 64000);
+    assert(mizu_spin_learn(1e9, 64000, 16000) == 32000);
+    assert(mizu_spin_learn(1e9, 1600, 16000) == 1000);
+  }
+
+  /* the preamble validator's reject matrix (the happy path and the
+     slot-range mirror live in the channel tier) */
+  {
+    mizu_preamble p2;
+    memset(&p2, 0, sizeof(p2));
+    p2.magic = MIZU_MAGIC;
+    p2.version = MIZU_ABI_VERSION;
+    p2.cap = 8;
+    p2.slot = 64;
+    size_t region_size = MIZU_FIXED_LAYOUT_SIZE + 2 * 8 * 64;
+    assert(mizu_preamble_validate(&p2, MIZU_FIXED_LAYOUT_SIZE - 1,
+                                  NULL) != NULL);
+    p2.version += 1;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.version -= 1;
+    p2.cap = 3;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.cap = 8;
+    p2.arena_size = 32;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.arena_size = 64;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.arena_size = 4096;   /* rings + arenas exceed the region */
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.arena_size = 0;
+    p2.drop_offset = region_size + 64;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.drop_offset = 0;
+    p2.livedir_offset = region_size + 64;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.livedir_offset = 0;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) == NULL);
+  }
+
+  /* the death-listener teardown is callable (a no-op where the platform
+     needs none) */
+  mizu_death_listener_teardown();
+
+#ifndef _WIN32
+  /* a forked child: the atfork handler closes the inherited lock fds
+     (the registry in the child is empty, so a close of the stale handle
+     copy is a no-op) and the pid cache resets. The child exit()s so its
+     coverage profile flushes. */
+  {
+    char hpath2[1100];
+    int hn = snprintf(hpath2, sizeof(hpath2), "%s/mizu_test_atfork_%ld.live",
+                      dir, mizu_self_pid());
+    assert(hn > 0 && (size_t) hn < sizeof(hpath2));
+    intptr_t hf;
+    assert(mizu_live_open(hpath2, &hf) == 0);
+    long parent_pid = mizu_self_pid();
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      mizu_live_close(hf);   /* already closed by the handler: no-op */
+      if (mizu_self_pid() == parent_pid || mizu_self_pid() != (long) getpid())
+        exit(1);
+      if (mizu_live_dir() == NULL) exit(2);
+      exit(0);
+    }
+    int st;
+    assert(waitpid(pid, &st, 0) == pid);
+    assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    mizu_live_close(hf);
+    remove(hpath2);
+  }
+#endif
 
   puts("test_region: ok");
   return 0;

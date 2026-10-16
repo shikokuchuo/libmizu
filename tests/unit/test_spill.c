@@ -261,6 +261,101 @@ int main(void) {
   mizu_spill_fl_teardown(&h.fl);
   assert(h.fl.n == 0 && h.fl.total == 0 && h.fl.staging == NULL);
 
+  /* free-list caps: two entries per size class — the third is
+     destroyed, not listed */
+  handle_reset();
+  for (int i = 0; i < 2; i++) {
+    mizu_shm *q = NULL;
+    assert(mizu_shm_create_heap(&q, 4096) == MIZU_ERRCAT_NONE);
+    mizu_spill_fl_insert(&h.fl, q);
+  }
+  assert(h.fl.n == 2);
+  mizu_shm *q3 = NULL;
+  assert(mizu_shm_create_heap(&q3, 4096) == MIZU_ERRCAT_NONE);
+  mizu_spill_fl_insert(&h.fl, q3);
+  assert(h.fl.n == 2);              /* class full: destroyed */
+  mizu_spill_fl_teardown(&h.fl);
+
+  /* the byte cap evicts largest-oldest until the insert fits */
+  handle_reset();
+  mizu_shm *e1 = NULL, *e2 = NULL, *e3 = NULL;
+  assert(mizu_shm_create_heap(&e1, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
+  assert(mizu_shm_create_heap(&e2, (size_t) 8 << 20) == MIZU_ERRCAT_NONE);
+  assert(mizu_shm_create_heap(&e3, (size_t) 8 << 20) == MIZU_ERRCAT_NONE);
+  mizu_spill_fl_insert(&h.fl, e1);
+  mizu_spill_fl_insert(&h.fl, e2);
+  mizu_spill_fl_insert(&h.fl, e3);
+  assert(h.fl.n == 3 && h.fl.total == ((size_t) 32 << 20));
+  mizu_shm *e4 = NULL;
+  assert(mizu_shm_create_heap(&e4, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
+  mizu_spill_fl_insert(&h.fl, e4);   /* over the cap: e1 evicted */
+  assert(h.fl.n == 3 && h.fl.total == ((size_t) 32 << 20));
+  assert(h.fl.regions[0] == NULL ||
+         h.fl.regions[0] != e1);      /* e1's slot was reused */
+  mizu_spill_fl_teardown(&h.fl);
+
+  /* every slot occupied (two per class, eight classes): an insert of a
+     fresh class destroys outright */
+  handle_reset();
+  for (int c = 0; c < 8; c++)
+    for (int i = 0; i < 2; i++) {
+      mizu_shm *o = NULL;
+      assert(mizu_shm_create_heap(&o, (size_t) 4096 << c) ==
+             MIZU_ERRCAT_NONE);
+      mizu_spill_fl_insert(&h.fl, o);
+    }
+  assert(h.fl.n == MIZU_SPILL_FL_MAX);
+  mizu_shm *o17 = NULL;
+  assert(mizu_shm_create_heap(&o17, 1 << 20) == MIZU_ERRCAT_NONE);
+  mizu_spill_fl_insert(&h.fl, o17);
+  assert(h.fl.n == MIZU_SPILL_FL_MAX);   /* no room: destroyed */
+  mizu_spill_fl_teardown(&h.fl);
+
+  /* a free-list miss sweeps the ledger once and retries: a lent region
+     whose last view released rejoins and serves the checkout */
+  handle_reset();
+  mizu_shm *lz = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, lz);
+  mizu_keeper_commit(&h, tab, 0);
+  mizu_zc_ref(lz);
+  mizu_keeper_release(&h, tab, 0);    /* lent: rc 1 on the ledger */
+  assert(h.fl.led_n == 1 && h.fl.n == 0);
+  mizu_zc_unref(lz);                  /* the view releases */
+  mizu_shm *lz2 = mizu_spill_region_get(&h.fl, 100);
+  assert(lz2 == lz && h.fl.last_reused);   /* swept + popped */
+  assert(h.fl.led_n == 0 && h.fl.n == 0);
+  mizu_spill_fl_teardown(&h.fl);
+
+  /* a full ledger overflows: the region's mapping closes but its name
+     is deferred to the teardown (a REF in flight can still resolve) */
+  handle_reset();
+  for (uint32_t i = 0; i < MIZU_LEDGER_MAX; i++) {
+    mizu_shm *g = mizu_spill_region_get(&h.fl, 100);
+    mizu_stage_retain_zc(&h, g);
+    mizu_keeper_commit(&h, tab, 0);
+    mizu_zc_ref(g);
+    mizu_keeper_release(&h, tab, 0);
+  }
+  assert(h.fl.led_n == MIZU_LEDGER_MAX);
+  mizu_shm *g64 = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, g64);
+  mizu_keeper_commit(&h, tab, 0);
+  mizu_zc_ref(g64);
+  mizu_keeper_release(&h, tab, 0);
+  assert(h.fl.led_n == MIZU_LEDGER_MAX);   /* overflowed, not ledgered */
+  assert(h.fl.dropped_n == 1 && h.fl.dropped[0] == g64);
+  mizu_spill_fl_teardown(&h.fl);           /* the deferred name dies here */
+  assert(h.fl.dropped_n == 0 && h.fl.dropped == NULL);
+
+  /* a zero-length region name is gone, never opened */
+  handle_reset();
+  mizu_read_ctx ctx2;
+  memset(&ctx2, 0, sizeof(ctx2));
+  ctx2.size = sizeof(ctx2);
+  ctx2.handle = &h;
+  assert(mizu_read_region(&ctx2, (const uint8_t *) "/mizu_1_1", 0) == NULL);
+  assert(ctx2.gone == 1);
+
   puts("test_spill: ok");
   return 0;
 }

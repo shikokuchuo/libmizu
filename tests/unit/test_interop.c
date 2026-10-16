@@ -405,6 +405,122 @@ static void done_tests(void) {
   assert(strstr(mizu_last_error_message(), "truncated") != NULL);
 }
 
+/* Truncation and malformed-shape rejects: every tag's payload checks,
+   hand-trimmed streams. One assert per shape — the corpus pins the
+   rest. */
+static void trunc_tests(void) {
+  mizu_ix cur;
+  mizu_ix_item it;
+
+  /* a bare string (an strv element): no length word, a length below
+     -1, invalid UTF-8 */
+  unsigned char strv_short[] = { 'I', 0x01, 0x0b, 1, 0, 0, 0, 0, 0, 0, 0,
+                                 0 };
+  assert(mizu_ix_open(&cur, strv_short, sizeof strv_short) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_STRV);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "truncated") != NULL);
+
+  unsigned char strv_badlen[] = { 'I', 0x01, 0x0b, 1, 0, 0, 0, 0, 0, 0, 0,
+                                  0xfe, 0xff, 0xff, 0xff };
+  assert(mizu_ix_open(&cur, strv_badlen, sizeof strv_badlen) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "below -1") != NULL);
+
+  unsigned char strv_badutf[] = { 'I', 0x01, 0x0b, 1, 0, 0, 0, 0, 0, 0, 0,
+                                  1, 0, 0, 0, 0xff };
+  assert(mizu_ix_open(&cur, strv_badutf, sizeof strv_badutf) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid UTF-8") != NULL);
+
+  /* scalar payloads cut short: lgl1, real, cplx, bytes, a vector, a
+     container's count */
+  unsigned char lgl[] = { 'I', 0x01, 0x01 };
+  assert(mizu_ix_open(&cur, lgl, sizeof lgl) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char real[] = { 'I', 0x01, 0x03, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, real, sizeof real) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char cplx[] = { 'I', 0x01, 0x10, 0, 0, 0, 0, 0, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, cplx, sizeof cplx) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char byt[] = { 'I', 0x01, 0x05, 0, 0 };
+  assert(mizu_ix_open(&cur, byt, sizeof byt) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char vec[] = { 'I', 0x01, 0x07, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, vec, sizeof vec) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char list[] = { 'I', 0x01, 0x0c, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, list, sizeof list) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+
+  /* a bytes span / vector body / str1 payload whose count overruns */
+  unsigned char byt_over[] = { 'I', 0x01, 0x05, 9, 0, 0, 0, 0, 0, 0, 0,
+                               'x', 'y' };
+  assert(mizu_ix_open(&cur, byt_over, sizeof byt_over) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char vec_over[] = { 'I', 0x01, 0x08, 2, 0, 0, 0, 0, 0, 0, 0,
+                               0, 0, 0, 0, 0, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, vec_over, sizeof vec_over) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char str_len[] = { 'I', 0x01, 0x04, 0, 0 };
+  assert(mizu_ix_open(&cur, str_len, sizeof str_len) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char str_over[] = { 'I', 0x01, 0x04, 4, 0, 0, 0, 'a', 'b' };
+  assert(mizu_ix_open(&cur, str_over, sizeof str_over) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char str_badlen[] = { 'I', 0x01, 0x04, 0xfe, 0xff, 0xff, 0xff };
+  assert(mizu_ix_open(&cur, str_badlen, sizeof str_badlen) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "below -1") != NULL);
+  unsigned char str_badutf[] = { 'I', 0x01, 0x04, 1, 0, 0, 0, 0xff };
+  assert(mizu_ix_open(&cur, str_badutf, sizeof str_badutf) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid UTF-8") != NULL);
+
+  /* a task tag cut short, a ref with no length byte */
+  unsigned char task[] = { 'I', 0x01, 0x12, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, task, sizeof task) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char ref[] = { 'I', 0x01, 0x13 };
+  assert(mizu_ix_open(&cur, ref, sizeof ref) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+
+  /* the err tag: no flags word, the index cut, a string cut, an NA
+     string, an overrun string, invalid UTF-8 */
+  unsigned char err_f[] = { 'I', 0x01, 0x11, 0 };
+  assert(mizu_ix_open(&cur, err_f, sizeof err_f) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char err_idx[] = { 'I', 0x01, 0x11, 1, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, err_idx, sizeof err_idx) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char err_slen[] = { 'I', 0x01, 0x11, 0, 0, 0, 0 };
+  assert(mizu_ix_open(&cur, err_slen, sizeof err_slen) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char err_na[] = { 'I', 0x01, 0x11, 0, 0, 0xff, 0xff, 0xff, 0xff };
+  assert(mizu_ix_open(&cur, err_na, sizeof err_na) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "err string is NA") != NULL);
+  unsigned char err_over[] = { 'I', 0x01, 0x11, 0, 0, 5, 0, 0, 0, 'a' };
+  assert(mizu_ix_open(&cur, err_over, sizeof err_over) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  unsigned char err_badutf[] = { 'I', 0x01, 0x11, 0, 0, 1, 0, 0, 0, 0xff };
+  assert(mizu_ix_open(&cur, err_badutf, sizeof err_badutf) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid UTF-8") != NULL);
+
+  /* ix_end ahead of the root value's completion reports truncated */
+  unsigned char buf[16];
+  size_t off = mizu_ix_put_header(buf);
+  off += mizu_ix_put_strv_begin(buf + off, 1);
+  off += mizu_ix_put_strelt(buf + off, "x", 1);
+  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
+  assert(mizu_ix_end(&cur) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "truncated") != NULL);
+}
+
 /* The emit/cursor round trip across every helper, strv/dict-key bare
    strings and the NA forms included. */
 static void roundtrip_tests(void) {
@@ -716,6 +832,7 @@ int main(void) {
   err_task_tests();
   ref_tests();
   done_tests();
+  trunc_tests();
   roundtrip_tests();
   utf8_tests();
   err_framer_tests();

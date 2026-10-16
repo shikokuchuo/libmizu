@@ -154,6 +154,42 @@ int main(int argc, char **argv) {
   assert(mizu_channel_ready_wait(lonely, 20) == MIZU_TIMEOUT);
   mizu_channel_destroy(lonely);
 
+  /* create validation: the binding check, then every opts gate, refuses
+     with the TLS slot set */
+  {
+    mizu_channel *bad = NULL;
+    mizu_binding nb;
+    mizu_binding_init(&nb);            /* no stage/read */
+    assert(mizu_channel_create(&bad, &opts, &nb) == MIZU_ERR);
+    assert(bad == NULL);
+    mizu_channel_opts o2 = opts;
+    o2.capacity = 3;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.capacity = 1;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.capacity = 8;
+    o2.slot_size = 32;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.slot_size = 96;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.slot_size = 256;
+    o2.arena_size = 32;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.arena_size = opts.arena_size;
+    o2.drop = NULL;                    /* drop_size without its bytes */
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    /* a liveness directory path past the wire budget refuses */
+    char longdir[1000];
+    memset(longdir, 'd', sizeof(longdir) - 1);
+    longdir[sizeof(longdir) - 1] = '\0';
+    assert(setenv("MIZU_LIVENESS_DIR", longdir, 1) == 0);
+    assert(mizu_channel_create(&bad, &opts, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "liveness directory path too long") != NULL);
+    unsetenv("MIZU_LIVENESS_DIR");
+    assert(bad == NULL);
+  }
+
   /* pre-attach the peer's lock is untaken by construction, so no probe
      may read death from it: the full-ring disambiguation returns FULL,
      alive() reports no verdict, and the channel still rendezvouses */
@@ -179,6 +215,30 @@ int main(int argc, char **argv) {
   assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
   assert(mizu_channel_alive(host) == 1);
   assert(mizu_channel_alive(peer) == 1);
+
+  /* attach validation: a region whose preamble fails validation (the
+     open half of chan_failed), a second peer on an established channel
+     (the liveness lock refuses), and a token buffer too small */
+  {
+    mizu_shm *garbage = NULL;
+    assert(mizu_shm_create(&garbage, 4096) == MIZU_OK);   /* zero-filled */
+    char gtoken[64];
+    snprintf(gtoken, sizeof(gtoken), "%s",
+             mizu_shm_name(garbage) + strlen(MIZU_PREFIX_LITERAL));
+    mizu_channel *gb = NULL;
+    assert(mizu_channel_attach(&gb, gtoken, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "invalid channel region") !=
+           NULL);
+    assert(gb == NULL);
+    mizu_shm_close(garbage, 1);
+
+    mizu_channel *dup = NULL;
+    assert(mizu_channel_attach(&dup, token, &bytesb) == MIZU_ERR);
+    assert(dup == NULL);
+
+    char tiny[2];
+    assert(mizu_channel_token(host, tiny, sizeof(tiny)) == MIZU_ERR);
+  }
 
   /* INLINE round trip */
   send_bytes(host, "hello", 5);
@@ -402,9 +462,75 @@ int main(int argc, char **argv) {
   /* close rendezvous: the peer's bit is already set */
   assert(mizu_channel_close(host, 5000) == MIZU_OK);
   assert(mizu_channel_alive(host) == 0);   /* released handle */
+  /* the released handle keeps the sentinel / closed-error guards */
+  {
+    mizu_bytes b = { "x", 1 };
+    void *obj = NULL;
+    void *objs1[1] = { &b };
+    void *got1[1] = { NULL };
+    size_t ac = 9, nc = 9;
+    assert(mizu_channel_send(host, &b) == MIZU_CLOSED);
+    assert(mizu_channel_recv(host, &obj, 0) == MIZU_CLOSED);
+    assert(mizu_channel_send_batch(host, objs1, 1, &ac) == MIZU_CLOSED &&
+           ac == 0);
+    assert(mizu_channel_recv_batch_fn(host, 1, &nc, array_sink, got1, 0) ==
+           MIZU_CLOSED && nc == 0);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_ERR);
+    assert(mizu_channel_ready_set(host) == MIZU_ERR);
+    assert(mizu_channel_ready_wait(host, 0) == MIZU_ERR);
+    assert(mizu_channel_info_get(host, &info) == MIZU_ERR);
+    assert(mizu_channel_peer_ident(host) == 0);
+    const uint8_t *db2;
+    uint64_t dn2 = 1;
+    mizu_channel_drop(host, &db2, &dn2);
+    assert(db2 == NULL && dn2 == 0);
+  }
   assert(mizu_channel_close(host, 0) == MIZU_OK);   /* idempotent */
   mizu_channel_destroy(host);              /* frees */
   mizu_channel_destroy(peer);
+
+  /* the NULL handle answers the same guards */
+  {
+    mizu_bytes b = { "x", 1 };
+    void *obj = NULL;
+    void *objs1[1] = { &b };
+    void *got1[1] = { NULL };
+    size_t ac = 9, nc = 9;
+    assert(mizu_channel_send(NULL, &b) == MIZU_CLOSED);
+    assert(mizu_channel_recv(NULL, &obj, 0) == MIZU_CLOSED);
+    assert(mizu_channel_send_batch(NULL, objs1, 1, &ac) == MIZU_CLOSED &&
+           ac == 0);
+    assert(mizu_channel_recv_batch_fn(NULL, 1, &nc, array_sink, got1, 0) ==
+           MIZU_CLOSED && nc == 0);
+    assert(mizu_channel_token(NULL, token, sizeof(token)) == MIZU_ERR);
+    assert(mizu_channel_ready_set(NULL) == MIZU_ERR);
+    assert(mizu_channel_ready_wait(NULL, 0) == MIZU_ERR);
+    assert(mizu_channel_info_get(NULL, &info) == MIZU_ERR);
+    assert(mizu_channel_close_signal(NULL) == MIZU_OK);
+    assert(mizu_channel_close(NULL, 0) == MIZU_OK);
+    assert(mizu_channel_alive(NULL) == 0);
+    assert(mizu_channel_peer_ident(NULL) == 0);
+    const uint8_t *db2;
+    uint64_t dn2 = 1;
+    mizu_channel_drop(NULL, &db2, &dn2);
+    assert(db2 == NULL && dn2 == 0);
+    mizu_channel_destroy(NULL);            /* no-op */
+  }
+
+  /* a send past the sender's own close signal answers CLOSED */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    mizu_bytes b = { "x", 1 };
+    assert(mizu_channel_close_signal(host) == MIZU_OK);
+    assert(mizu_channel_send(host, &b) == MIZU_CLOSED);
+    mizu_channel_destroy(peer);
+    mizu_channel_destroy(host);
+  }
+
 
   /* close timeout leaves the handle usable; a later signal rendezvous */
   assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
@@ -513,6 +639,61 @@ int main(int argc, char **argv) {
   mizu_channel_destroy(peer);
 
 #ifndef _WIN32
+  /* a peer that dies without its close bit: the lock verdict sticks and
+     the send side answers PEER_GONE, not just the wait side */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      mizu_channel *cp = NULL;
+      if (mizu_channel_attach(&cp, token, &bytesb) != MIZU_OK) _exit(2);
+      if (mizu_channel_ready_set(cp) != MIZU_OK) _exit(3);
+      _exit(0);   /* dies holding no close bit */
+    }
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    assert(mizu_channel_alive(host) == 0);   /* the lock verdict */
+    mizu_bytes b = { "x", 1 };
+    assert(mizu_channel_send(host, &b) == MIZU_PEER_GONE);
+    void *obj = NULL;
+    assert(mizu_channel_recv(host, &obj, 0) == MIZU_PEER_GONE);
+    mizu_channel_destroy(host);
+  }
+
+  /* the forked-child teardown: the fork guard refuses the raising
+     verbs, then abandon frees only the child's copies — the parent's
+     channel is unharmed */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      mizu_bytes b = { "x", 1 };
+      void *obj = NULL;
+      if (mizu_channel_send(host, &b) != MIZU_ERR ||
+          mizu_channel_errcat(host) != MIZU_ERRCAT_OTHER)
+        exit(1);
+      if (mizu_channel_recv(peer, &obj, 0) != MIZU_ERR) exit(2);
+      mizu_channel_abandon(host);
+      mizu_channel_abandon(peer);
+      exit(0);
+    }
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+    send_bytes(host, "alive", 5);
+    recv_bytes(peer, "alive", 5);
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
   /* the death flag with the lock still HELD (a squatter outlives the
      peer) must not veto the park: recv waits out its own deadline, and
      the verdict lands once the last holder exits */
