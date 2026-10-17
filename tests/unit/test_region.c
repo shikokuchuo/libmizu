@@ -376,13 +376,16 @@ int main(void) {
     const char *tmp0 = getenv("TMPDIR");
     snprintf(saved_tmp, sizeof(saved_tmp), "%s", tmp0 != NULL ? tmp0 : "");
 
+    struct live_dir_args a;
+    pthread_t th;
+#ifndef __linux__
+    /* an oversized TMPDIR fails the resolution (Linux never consults
+       TMPDIR: the liveness dir is always /dev/shm) */
     char longtmp[2000];
     memset(longtmp, 't', sizeof(longtmp) - 1);
     longtmp[sizeof(longtmp) - 1] = '\0';
-    struct live_dir_args a;
     memset(&a, 0, sizeof(a));
     a.tmpdir = longtmp;
-    pthread_t th;
     assert(pthread_create(&th, NULL, live_dir_main, &a) == 0);
     assert(pthread_join(th, NULL) == 0);
     assert(a.dir == NULL);
@@ -392,6 +395,7 @@ int main(void) {
     assert(a.pl_rc == MIZU_ERR);
     assert(strstr(a.pl_msg, "cannot resolve liveness lock directory") !=
            NULL);
+#endif
 
     memset(&a, 0, sizeof(a));
     a.tmpdir = NULL;
