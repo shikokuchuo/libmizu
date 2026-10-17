@@ -2755,6 +2755,156 @@ static void test_threaded_races(void) {
   puts("ok threaded_races");
 }
 
+/* The collect wait's announce -> fence -> re-check: a flip landing in
+   the ~100 ns between spin exit and the re-check is learned there, not
+   by the spin or the post-park read. mizu_pool_cancel is the one
+   publisher with no exec variance, so a busy-timed cancel from a second
+   thread lands in that window; the spin's clock-stride quantization
+   smears the window start over a stride block, which the sweep absorbs.
+   Every round runs a fresh pool, so the adaptive spin budget never
+   leaves its 32 us initial value, and the 0.1 us sweep straddles the
+   window wherever the collect's entry overhead puts it. The outcome is
+   deterministic — every task ends CANCEL — only the observing branch
+   varies. The cancel shares the collector's handle: the verb touches
+   only atomics and immutable fields, so the pair is race-free. */
+static _Atomic int poke_seq;
+static _Atomic int poke_ack;
+static mizu_task poke_tasks[8];
+static int poke_n;
+static int poke_first;
+static double poke_delay;
+
+static void *poke_cancel_main(void *arg) {
+  (void) arg;
+  int seen = 0;
+  for (;;) {
+    int s = atomic_load_explicit(&poke_seq, memory_order_acquire);
+    if (s == seen) {
+      MIZU_PAUSE();
+      continue;
+    }
+    if (s < 0) return NULL;
+    seen = s;
+    if (poke_first) assert(mizu_pool_cancel(ctrl, &poke_tasks[0]) == 1);
+    double t0 = mizu_now();
+    while (mizu_now() - t0 < poke_delay) MIZU_PAUSE();
+    mizu_pool_cancel(ctrl, &poke_tasks[poke_n - 1]);
+    atomic_store_explicit(&poke_ack, seen, memory_order_release);
+  }
+}
+
+static void test_collect_recheck(void) {
+  pthread_t th;
+  assert(pthread_create(&th, NULL, poke_cancel_main, NULL) == 0);
+  const char *want = "task cancelled or pool stopped";
+  for (int round = 0; round < 3 * 40 * 8; round++) {
+    int site = round % 3;
+    poke_n = site == 1 ? 8 : site == 2 ? 2 : 1;
+    poke_first = site == 2;
+    poke_delay = (31.0 + (double) ((round / 3) % 40) * 0.1) * 1e-6;
+    pool_pair(1, 1, 8, 64, 64, 64, 512);
+    for (int i = 0; i < poke_n; i++)
+      poke_tasks[i] = submit_bytes(ctrl, "x", 1);
+    atomic_store_explicit(&poke_seq, round + 1, memory_order_release);
+    size_t idx = 99, err = 99, consumed = 99;
+    void *obj = NULL;
+    if (site == 0) {
+      assert(mizu_pool_collect(ctrl, &poke_tasks[0], &obj, 5000) ==
+             MIZU_ERR);
+    } else if (site == 1) {
+      assert(mizu_pool_collect_any(ctrl, poke_tasks, 8, &idx, &obj,
+                                   5000) == MIZU_ERR);
+    } else {
+      void *vals[2] = { NULL, NULL };
+      assert(mizu_pool_collect_all(ctrl, poke_tasks, 2, vals, &err,
+                                   &consumed, 5000) == MIZU_ERR);
+    }
+    while (atomic_load_explicit(&poke_ack, memory_order_acquire) !=
+           round + 1)
+      MIZU_PAUSE();
+    assert(strcmp(mizu_pool_error(ctrl), want) == 0);
+    if (site == 1) assert(idx == 7);
+    if (site == 2) assert(err == 0);
+    pool_end();
+  }
+  atomic_store_explicit(&poke_seq, -1, memory_order_release);
+  assert(pthread_join(th, NULL) == 0);
+  puts("ok collect_recheck");
+}
+
+/* The ready-mask clear's re-check and the claim CAS loss, which no
+   single-threaded sequence schedules: a drain leaves ring 0's bit set
+   on an empty ring, so the next scan's clear re-reads tail against the
+   producer's next push, and two draining workers lose the head CAS to
+   each other. The producer's pacing is randomized — a fixed period
+   aliases with the claim cycle and never lands in either window. */
+struct storm_ctx {
+  mizu_pool *p;
+  mizu_task *ts;
+  _Atomic long *submitted;
+  _Atomic long *collected;
+  long n;
+};
+
+static void *storm_submit_main(void *arg) {
+  struct storm_ctx *c = arg;
+  uint64_t rng = 0x243f6a8885a308d3ull;
+  mizu_bytes b = { (void *) "s", 1 };
+  for (long i = 0; i < c->n; i++) {
+    /* the result-slot wait is the caller's (pool_alloc_rs fails, it does
+       not block): throttle below the 1024-slot subrange or a collector
+       slower than the producer (shared CI VMs) exhausts it */
+    while (i - atomic_load_explicit(c->collected, memory_order_acquire) >=
+           960)
+      MIZU_PAUSE();
+    assert(mizu_pool_submit(c->p, &b, &c->ts[i], 30000) == MIZU_OK);
+    atomic_fetch_add_explicit(c->submitted, 1, memory_order_release);
+    rng ^= rng << 13;
+    rng ^= rng >> 7;
+    rng ^= rng << 17;
+    double t0 = mizu_now(), d = (double) (rng % 512) * 1e-9;
+    while (mizu_now() - t0 < d) MIZU_PAUSE();
+  }
+  return NULL;
+}
+
+static void *storm_step_main(void *arg) {
+  struct storm_ctx *c = arg;
+  while (atomic_load_explicit(&exec_calls, memory_order_acquire) < c->n)
+    (void) mizu_pool_step(c->p, 100.0);
+  return NULL;
+}
+
+static void test_ready_claim_storm(void) {
+  pool_pair(2, 2, 8, 64, 64, 8192, 512);
+  long n = 6000;
+  mizu_task *ts = malloc((size_t) n * sizeof *ts);
+  assert(ts != NULL);
+  _Atomic long submitted = 0, collected = 0;
+  exec_mode = 0;
+  exec_calls = 0;
+  struct storm_ctx cs = { ctrl, ts, &submitted, &collected, n };
+  struct storm_ctx cw = { wk, NULL, NULL, NULL, n };
+  struct storm_ctx cw2 = { wk2, NULL, NULL, NULL, n };
+  pthread_t ps, pw, pw2;
+  assert(pthread_create(&ps, NULL, storm_submit_main, &cs) == 0);
+  assert(pthread_create(&pw, NULL, storm_step_main, &cw) == 0);
+  assert(pthread_create(&pw2, NULL, storm_step_main, &cw2) == 0);
+  for (long i = 0; i < n; i++) {
+    while (atomic_load_explicit(&submitted, memory_order_acquire) <= i)
+      MIZU_PAUSE();
+    collect_bytes(ctrl, &ts[i], "s", 1);
+    atomic_store_explicit(&collected, i + 1, memory_order_release);
+  }
+  assert(pthread_join(ps, NULL) == 0);
+  assert(pthread_join(pw, NULL) == 0);
+  assert(pthread_join(pw2, NULL) == 0);
+  assert(exec_calls == n);
+  free(ts);
+  pool_end();
+  puts("ok ready_claim_storm");
+}
+
 /* The forked-child teardown: the fork guard refuses the verbs, then
    abandon frees only the child's copies — the parent's pool is
    unharmed. */
@@ -3450,6 +3600,8 @@ int main(void) {
 #if !defined(_WIN32)
   test_cross_thread_waits();
   test_threaded_races();
+  test_collect_recheck();
+  test_ready_claim_storm();
   test_abandon_fork();
 #endif
   test_unpark_idle();
