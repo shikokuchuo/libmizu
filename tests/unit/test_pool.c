@@ -715,6 +715,79 @@ static void test_orphan_drain(void) {
   puts("ok orphan_drain");
 }
 
+/* The fairness tick's orphan-deque scan: the route that bounds
+   ownerless-work latency when the ordinary steal tier never falls to it.
+   Deterministic: the tick fires on a handle's 61st claim, so the orphan
+   appears after the second worker's 60 idle claims and its 61st step
+   takes the scan (the steal tier never gets a look). */
+static void test_fairness_orphan(void) {
+  pool_pair(2, 2, 8, 64, 64, 64, 512);
+  for (int i = 0; i < 60; i++)
+    assert(mizu_pool_step(wk2, 0) == MIZU_STEP_IDLE);   /* claims -> 60 */
+  mizu_bytes b = { (void *) "q", 1 };
+  mizu_task t;
+  assert(mizu_pool_submit(wk, &b, &t, 0) == MIZU_OK);   /* wk's own deque */
+  assert(mizu_pool_leave(wk) == MIZU_OK);   /* REAPING with a queued deque */
+
+  exec_calls = 0;
+  assert(mizu_pool_step(wk2, 0) == MIZU_STEP_TASK);   /* the tick's scan */
+  assert(exec_calls == 1);
+  mizu_pool_status ps;
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[0] == MIZU_WK_FREE);   /* the drained slot freed */
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  pool_end();
+  puts("ok fairness_orphan");
+}
+
+/* The thief-probe backstop: repeated failed steals against an
+   apparently-live, apparently-nonempty victim warrant one death probe —
+   the cross-check for a reap the listener never ran. A corrupt deque
+   entry (rs_index out of range) fails every steal; after
+   MIZU_PROBE_STREAK the probe runs the verdict on the crashed slot. */
+static void test_probe_streak(void) {
+  pool_pair(2, 2, 8, 64, 64, 64, 512);
+  mizu_bytes b = { (void *) "q", 1 };
+  mizu_task t;
+  assert(mizu_pool_submit(wk2, &b, &t, 0) == MIZU_OK);   /* wk2's own deque */
+
+  /* corrupt the queued entry through a fresh mapping (the fields are
+     plain shared memory), then "crash" wk2: the slot reads LIVE, its
+     liveness lock is released */
+  char name[64];
+  int nl = snprintf(name, sizeof(name), "%s%s", MIZU_PREFIX_LITERAL, token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = mizu_shm_open_rw_heap(name, 0);
+  assert(shm != NULL);
+  unsigned char *base = shm->addr;
+  mizu_wk_slot *w1 = (mizu_wk_slot *) (base + 64) + 1;
+  mizu_entry_hdr *eh = (mizu_entry_hdr *) (base + w1->deque_buf_off);
+  eh->rs_index = UINT32_MAX;
+  mizu_pool_destroy(wk2);   /* no leave: exactly a crash */
+  wk2 = NULL;
+
+  mizu_pool_status ps;
+  for (int i = 0; i < 15; i++)
+    assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[1] == MIZU_WK_LIVE);   /* below the streak bound */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);   /* the probe fires */
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[1] == MIZU_WK_REAPING);
+
+  /* the drained orphan's slot frees at the next observation */
+  atomic_store(&w1->deque_top, 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[1] == MIZU_WK_FREE);
+
+  mizu_shm_close_stack(shm, 0);
+  free(shm);
+  pool_end();
+  puts("ok probe_streak");
+}
+
 /* Submitter death, reaped in-line: a worker whose claim consumes a CANCEL
    probes the submitter — dead here — and the reap frees its slot (the
    registry of two has no room for a new attach otherwise). */
@@ -3716,6 +3789,8 @@ int main(void) {
   test_unwind();
   test_retire_lame_duck();
   test_orphan_drain();
+  test_fairness_orphan();
+  test_probe_streak();
   test_submitter_reap();
   test_sub_slot_recycle();
   test_step_idle();

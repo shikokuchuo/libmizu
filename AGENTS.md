@@ -169,13 +169,19 @@ these.
 
 ## CI
 
-- `.github/workflows/ci.yml` — matrix: ubuntu-latest, ubuntu-24.04-arm,
-  macos-latest, macos-15-intel. Runs `make`, `make test`,
-  `make test-integration`, `tools/check-exports.sh`, and the amalgamation
-  smoke test (compiles unit tests against `mizu.c`, then links and runs a
-  public-only program plus `tests/ext_surface.c` against `mizu.c`/`mizu.h`
-  with no defines). A fuzz leg runs the fixed-seed bursts
-  on ubuntu; sanitizer legs cover ASan/UBSan/TSan on the unit tier.
+- `.github/workflows/ci.yml` — legs: `build-test` (matrix: ubuntu-latest,
+  ubuntu-24.04-arm, macos-latest, macos-15-intel) runs `make`, `make test`,
+  `make test-integration`, the interop-corpus `--check` (regenerating must
+  be a clean diff), and the amalgamation smoke test (compiles unit tests
+  against `mizu.c`, then links and runs a public-only program plus
+  `tests/ext_surface.c` against `mizu.c`/`mizu.h` with no defines);
+  `exports` runs `tools/check-exports.sh`; `coverage` runs
+  `make coverage-export` and uploads the lcov to Codecov; `fuzz` runs the
+  fixed-seed bursts on ubuntu; `sanitizers` covers ASan/UBSan/TSan on the
+  unit tier; `windows` (windows-latest) runs `tools\build-win.bat test` —
+  the unit tier plus the ext-surface proof linked against the DLL
+  (the Windows-side ABI check); `windows-mingw` (windows-latest, MSYS2
+  UCRT64 gcc) runs `make test`, guarding the R package's Rtools toolchain.
 - `.github/workflows/release.yml` — on `v*` tags: checks tag matches
   `MIZU_VERSION`, generates the amalgamation for the release.
 - `.github/workflows/docs.yml` — on pushes to main: builds the doxygen

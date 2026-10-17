@@ -6,7 +6,8 @@
    wait); a killed worker's orphaned deque drains through a surviving
    peer; owner death -> worker exit (MIZU_EXIT_OWNER_GONE) + orphan
    teardown; submitter death -> registry-slot reclaim; stop with live
-   workers through a collect_all round trip; the lame-duck linger.
+   workers through a collect_all round trip; the lame-duck linger;
+   a forked child abandoning handles whose death watches are armed.
    Compiles against the installed headers (mizu.h + mizu_ext.h — the bytes
    binding is ext-tier surface) with internal.h absent: the API's
    compile-time contract check.
@@ -45,7 +46,8 @@ static int child_linger;
 static int go_pipe[2] = { -1, -1 };   /* parent -> child go-ahead */
 static int joined_wr = -1;            /* child -> parent join signal */
 
-enum { ROLE_WORKER, ROLE_NEST, ROLE_SUB_CANCEL, ROLE_SUB_ECHO };
+enum { ROLE_WORKER, ROLE_NEST, ROLE_SUB_CANCEL, ROLE_SUB_ECHO,
+       ROLE_SUB_WATCH_ABANDON };
 
 static void sleep_ms(long ms) {
   struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
@@ -149,6 +151,36 @@ static void run_submitter_echo(void) {
   _exit(ok ? 0 : 8);
 }
 
+/* Attach (the owner watch arms), then fork: the grandchild abandons the
+   inherited handle — the owner-watch arm of mizu_pool_abandon. The
+   parent's own handle stays valid: an echo round trip proves it. */
+static void run_sub_watch_abandon(void) {
+  mizu_binding b;
+  child_binding(&b, 0);
+  mizu_pool *p;
+  if (mizu_pool_attach(&p, child_token, &b) != MIZU_OK) _exit(3);
+  fflush(stdout);
+  pid_t g = fork();
+  if (g < 0) _exit(9);
+  if (g == 0) {
+    mizu_pool_abandon(p);
+    _exit(0);
+  }
+  int st = 0;
+  if (waitpid(g, &st, 0) != g || !WIFEXITED(st) || WEXITSTATUS(st) != 0)
+    _exit(9);
+  mizu_bytes tb = { (void *) "z", 1 };
+  mizu_task t;
+  if (mizu_pool_submit(p, &tb, &t, 1000) != MIZU_OK) _exit(6);
+  void *obj = NULL;
+  if (mizu_pool_collect(p, &t, &obj, 5000) != MIZU_OK) _exit(7);
+  mizu_bytes *rb = obj;
+  int ok = rb != NULL && rb->len == 1 && memcmp(rb->data, "z", 1) == 0;
+  mizu_bytes_free(rb);
+  mizu_pool_destroy(p);
+  _exit(ok ? 0 : 8);
+}
+
 static pid_t spawn(int role, uint32_t slot) {
   fflush(stdout);
   child_role = role;
@@ -161,6 +193,7 @@ static pid_t spawn(int role, uint32_t slot) {
     case ROLE_NEST: run_nest(child_slot); break;
     case ROLE_SUB_CANCEL: run_submitter_cancel(); break;
     case ROLE_SUB_ECHO: run_submitter_echo(); break;
+    case ROLE_SUB_WATCH_ABANDON: run_sub_watch_abandon(); break;
     }
     _exit(2);
   }
@@ -474,6 +507,46 @@ static void test_fork_abandon(void) {
   puts("ok fork_abandon");
 }
 
+/* A forked child abandons an inherited handle whose death watches are
+   armed — the controller's per-worker watches (armed at ready_wait) and,
+   one generation down, a submitter's owner watch. The abandons are
+   platform-local: no shared word moves, and the pool runs on. */
+static void test_abandon_watches(void) {
+  mizu_pool *ctrl = make_pool(2, 2);
+  child_expect = MIZU_EXIT_SHUTDOWN;
+  child_linger = 0;
+  pid_t w = spawn(ROLE_WORKER, 0);
+  uint32_t slot0 = 0;
+  assert(mizu_pool_ready_wait(ctrl, &slot0, 1, 5000) == MIZU_OK);   /* arms
+                                                                      the
+                                                                      watch */
+
+  fflush(stdout);
+  pid_t a = fork();
+  assert(a >= 0);
+  if (a == 0) {
+    mizu_pool_abandon(ctrl);   /* the wk_watch abandon loop */
+    _exit(0);
+  }
+  assert(wait_exit(a) == 0);
+
+  pid_t sub = spawn(ROLE_SUB_WATCH_ABANDON, 0);   /* the owner-watch arm */
+  assert(wait_exit(sub) == 0);
+
+  mizu_bytes tb = { (void *) "hi", 2 };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+  mizu_bytes *rb = obj;
+  assert(rb != NULL && rb->len == 2 && memcmp(rb->data, "hi", 2) == 0);
+  mizu_bytes_free(rb);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  assert(wait_exit(w) == 0);
+  mizu_pool_destroy(ctrl);
+  puts("ok abandon_watches");
+}
+
 int main(void) {
   test_worker_death();
   test_orphan_deque_drain();
@@ -482,6 +555,7 @@ int main(void) {
   test_stop_live_workers();
   test_lame_duck();
   test_fork_abandon();
+  test_abandon_watches();
   puts("test_pool integration: all passed");
   return 0;
 }

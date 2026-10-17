@@ -6,7 +6,8 @@ rem preinstalled on GitHub Windows runners (LLVM).
 rem
 rem Usage: tools\build-win.bat [test]
 rem   (no args)  build mizu.lib (static) and mizu.dll (shared)
-rem   test       also build and run the unit tier
+rem   test       also build and run the unit tier, plus the ext surface
+rem              proof against the DLL (the Windows-side ABI check)
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0\.."
@@ -51,6 +52,12 @@ if "%~1"=="test" (
     clang-cl %CFLAGS% %%t build\mizu.lib -Fe:build\%%~nf.exe || exit /b 1
     build\%%~nf.exe || exit /b 1
   )
+  rem The ext surface in its exported-symbol form, linked against the
+  rem DLL's import library and run against the DLL: every mizu_ext.h
+  rem symbol must be dllexport'ed (check-exports.sh's Windows twin).
+  clang-cl %CFLAGS% /DEXT_PROBE_EXPORTS tests\ext_surface.c build\mizu-dll.lib -Fe:build\ext_surface.exe || exit /b 1
+  set "PATH=%CD%\build;!PATH!"
+  build\ext_surface.exe || exit /b 1
 )
 
 echo build-win: ok
