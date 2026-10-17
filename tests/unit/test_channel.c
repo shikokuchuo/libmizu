@@ -292,6 +292,14 @@ int main(int argc, char **argv) {
     o2.arena_size = opts.arena_size;
     o2.drop = NULL;                    /* drop_size without its bytes */
     assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    /* the region size budget: a huge drop payload exceeds 2^46 before
+       any allocation happens (the ring/slot/arena caps alone cannot) */
+    o2.drop = opts.drop;
+    o2.drop_size = (uint64_t) 1 << 46;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "channel region too large") !=
+           NULL);
+    o2.drop_size = opts.drop_size;
     /* a liveness directory path past the wire budget refuses */
 #ifndef _WIN32
     char longdir[1000];

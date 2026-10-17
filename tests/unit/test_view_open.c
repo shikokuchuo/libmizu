@@ -11,7 +11,8 @@
 
 int main(void) {
   mizu_shm *shm = NULL;
-  assert(mizu_shm_create(&shm, 8192) == MIZU_OK);
+  assert(mizu_shm_create(&shm, 65536) == MIZU_OK);   /* > any page size:
+     the view open mprotects the tail */
   /* a fresh region is zero-filled: the refcount word starts at 0 */
   assert(mizu_zc_refcount(shm) == 0);
 

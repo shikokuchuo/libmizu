@@ -16,6 +16,8 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -75,6 +77,16 @@ static void *eintr_park_main(void *arg) {
   uint32_t e = mizu_parker_snapshot(&intr_pk);
   return (void *) (intptr_t) mizu_park(&intr_pk, e, 30000);
 }
+
+/* An unpark on a short delay: the indefinite park wakes from its sleep,
+   never waiting out the nominal bound. */
+static void *delayed_unpark(void *arg) {
+  mizu_parker *pk = arg;
+  struct timespec ts = { 0, 1000000 };
+  nanosleep(&ts, NULL);
+  mizu_unpark(pk);
+  return NULL;
+}
 #endif
 
 int main(void) {
@@ -110,6 +122,33 @@ int main(void) {
   assert(mizu_last_error_category() != MIZU_ERRCAT_NONE);
   assert(mizu_last_error_message()[0] != '\0');
 
+#ifndef _WIN32
+  /* a zero-length object: the create-side mmap fails (the create-fail
+     walk-back), and both consumer opens fail the same way */
+  {
+    mizu_shm z;
+    assert(mizu_shm_create_stack(&z, 0) != MIZU_ERRCAT_NONE);
+    char zname[MIZU_NAME_MAX];
+    snprintf(zname, sizeof(zname), "/mizu_zl_%ld", (long) getpid());
+#ifdef __linux__
+    char zpath[64];
+    snprintf(zpath, sizeof(zpath), "/dev/shm%s", zname);
+    int zfd = open(zpath, O_CREAT | O_RDWR | O_TRUNC, 0600);
+#else
+    int zfd = shm_open(zname, O_CREAT | O_RDWR | O_TRUNC, 0600);
+#endif
+    assert(zfd >= 0);
+    assert(close(zfd) == 0);
+    assert(mizu_shm_open_stack(&z, zname) != 0);
+    assert(mizu_shm_open_rw_stack(&z, zname, 0) != 0);
+#ifdef __linux__
+    assert(unlink(zpath) == 0);
+#else
+    assert(shm_unlink(zname) == 0);
+#endif
+  }
+#endif
+
   /* preamble write + validate, incl. a corrupt-magic rejection (the
      region must hold the fixed layout plus both rings: 512 + 2*8*64) */
   mizu_shm *ctl = NULL;
@@ -141,6 +180,14 @@ int main(void) {
   mizu_unpark(&pk);
   assert(mizu_park(&pk, snap, 0) == MIZU_PARK_WOKEN);
   assert(mizu_park(&pk, mizu_parker_snapshot(&pk), 0) == MIZU_PARK_TIMEOUT);
+#ifndef _WIN32
+  /* an indefinite park (timeout < 0) sleeps for the nominal bound unless
+     unparked — never the untimed-wait swallow */
+  pthread_t un;
+  assert(pthread_create(&un, NULL, delayed_unpark, &pk) == 0);
+  assert(mizu_park(&pk, mizu_parker_snapshot(&pk), -1) == MIZU_PARK_WOKEN);
+  assert(pthread_join(un, NULL) == 0);
+#endif
   mizu_parker_detach(&pk);
   mizu_shm_close(ctl, 1);
 
@@ -348,6 +395,8 @@ int main(void) {
     assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
     p2.version -= 1;
     p2.cap = 3;
+    assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
+    p2.cap = 64;          /* 64*64 of rings past half the spare extent */
     assert(mizu_preamble_validate(&p2, region_size, NULL) != NULL);
     p2.cap = 8;
     p2.arena_size = 32;

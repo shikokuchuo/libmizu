@@ -1,13 +1,16 @@
-/* Reaping: orphan regions (shm.c), and the worker-reap serialization
-   (pool.c). The orphan test: a child creates a region and exits without
-   teardown, leaving the region — and on macOS its registry log — behind.
-   The parent's mizu_shm_reap must report the name, unlink the region,
-   and drop the dead process's log. The race test: the controller's
-   kept-fd probe and its off-thread death-callback reap must never run
-   concurrently on one slot. Exercises the Linux /dev/shm scan and the
-   macOS log scan; other platforms have no enumerable namespace. Worker
-   children exec this binary (argv mode "child") so a threaded parent
-   never forks. Run via `make test`. */
+/* Reaping: orphan regions (shm.c), the worker-reap serialization
+   (pool.c), and the owner-death orphan teardown. The orphan test: a
+   child creates a region and exits without teardown, leaving the region
+   — and on macOS its registry log — behind. The parent's mizu_shm_reap
+   must report the name, unlink the region, and drop the dead process's
+   log. The race test: the controller's kept-fd probe and its off-thread
+   death-callback reap must never run concurrently on one slot. The
+   owner-death test: an attached submitter's watch must fire on the
+   owner's exit, and the first verb past the verdict must run the orphan
+   teardown (files removed, dead creator's regions reaped). Exercises
+   the Linux /dev/shm scan and the macOS log scan; other platforms have
+   no enumerable namespace. Worker children exec this binary (argv mode
+   "child") so a threaded parent never forks. Run via `make test`. */
 
 /* _GNU_SOURCE: glibc hides O_CLOEXEC, MAP_POPULATE, pidfd_open, ...
    under strict -std=c11; define before any system header. */
@@ -282,12 +285,115 @@ static void test_reap_skips_lock_files(void) {
 }
 #endif
 
+// Owner death: the orphan teardown ---------------------------------------------
+
+/* The pool-owning child (a plain fork, like the orphan-region child's):
+   one create, the token across the pipe, then _exit on the parent's
+   go-ahead. The parent attaches while the owner is alive (the owner
+   watch arms on a foreign pid), the child's death fires it, and the
+   first verb past the verdict runs the orphan teardown: the owner lock
+   acquires, the shutdown broadcasts, the liveness files are removed,
+   and the dead creator's regions are reaped. */
+static void test_owner_death(void) {
+  char scratch[PATH_MAX];
+  int sn = snprintf(scratch, sizeof(scratch), "/tmp/mizu_test_owner_%ld",
+                    (long) getpid());
+  assert(sn > 0 && (size_t) sn < sizeof(scratch));
+  assert(mkdir(scratch, 0700) == 0);
+  assert(setenv("TMPDIR", scratch, 1) == 0);
+
+  int tok[2], go[2];
+  assert(pipe(tok) == 0 && pipe(go) == 0);
+
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(tok[0]);
+    close(go[1]);
+    mizu_pool_opts o;
+    mizu_pool_opts_init(&o);
+    o.max_workers = 1;
+    o.max_submitters = 2;
+    o.injection_cap = 64;
+    o.per_worker_cap = 64;
+    o.result_slots = 64;
+    o.slot_size = 256;
+    mizu_binding b;
+    mizu_binding_bytes(&b);
+    mizu_pool *c = NULL;
+    if (mizu_pool_create(&c, &o, &b) == MIZU_OK) {
+      char token[64];
+      if (mizu_pool_token(c, token, sizeof token) == MIZU_OK) {
+        ssize_t w = write(tok[1], token, strlen(token) + 1);
+        (void) w;
+      }
+    }
+    char gate;
+    ssize_t r = read(go[0], &gate, 1);
+    (void) r;
+    _exit(0);                  /* death without teardown: an orphan pool */
+  }
+  close(tok[1]);
+  close(go[0]);
+
+  char token[64];
+  ssize_t got = read(tok[0], token, sizeof(token) - 1);
+  close(tok[0]);
+  assert(got > 0 && token[got - 1] == '\0');
+
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *sub = NULL;
+  assert(mizu_pool_attach(&sub, token, &b) == MIZU_OK);
+
+  assert(write(go[1], "x", 1) == 1);
+  close(go[1]);
+  int st;
+  assert(waitpid(pid, &st, 0) == pid);
+
+  /* the death listener translates the owner's exit into owner_dead */
+  mizu_pool_sig *sig = mizu_pool_signals(sub);
+  assert(sig != NULL);
+  int saw_dead = 0;
+  MIZU_SPIN_WAIT(*sig->owner_dead == 1,
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, saw_dead);
+  assert(saw_dead);
+  free(sig);
+
+  /* the first verb past the verdict runs the orphan teardown */
+  mizu_bytes t1 = { (void *) "x", 1 };
+  mizu_task t;
+  assert(mizu_pool_submit(sub, &t1, &t, 0) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(sub), "pool stopped or owner dead") == 0);
+
+  /* ... which removed the liveness files and reaped the dead creator's
+     region */
+  char opath[PATH_MAX];
+  int on = snprintf(opath, sizeof(opath), "%s/mizu_%s.owner",
+                    mizu_live_dir(), token);
+  assert(on > 0 && (size_t) on < sizeof(opath));
+  errno = 0;
+  assert(access(opath, F_OK) != 0 && errno == ENOENT);
+  char region[MIZU_NAME_MAX];
+  int rn = snprintf(region, sizeof(region), "%s%s", MIZU_PREFIX_LITERAL,
+                    token);
+  assert(rn > 0 && (size_t) rn < sizeof(region));
+  mizu_shm *gone = NULL;
+  assert(mizu_shm_open(&gone, region) == MIZU_ERR);
+
+  /* teardown stops the armed watch */
+  mizu_pool_destroy(sub);
+  assert(rmdir(scratch) == 0);
+  puts("ok owner_death");
+}
+
 int main(int argc, char **argv) {
   if (argc == 4 && strcmp(argv[1], "child") == 0)
     reap_race_child(argv[2], atoi(argv[3]));   /* _exit()s, never returns */
   test_reap_probe_cb_race(argv[0]);   /* before the orphan test clutters
                                          and deletes its scratch TMPDIR */
   test_orphan_region();
+  test_owner_death();
 #ifdef __linux__
   test_reap_skips_lock_files();
 #endif

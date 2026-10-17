@@ -3570,6 +3570,101 @@ static void test_unpark_idle(void) {
   puts("ok unpark_idle");
 }
 
+/* owner_dead gates: every verb past the verdict fails STOPPED after an
+   orphan-teardown attempt — refused here, because the join handle's
+   liveness fd is a fresh open file description: the in-process owner
+   still holds its lock, so no shutdown, no cancel sweep, and the
+   collect loops just wait out the deadline. The verdict itself is
+   poked through the public signals word: the cross-process delivery
+   (watch -> flag) is the reap tier's. */
+static void test_owner_dead_gates(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_binding b0;
+  make_binding(&b0, 0);
+  assert(mizu_pool_attach(&sub, token, &b0) == MIZU_OK);
+  mizu_task t = submit_bytes(sub, "x", 1);   /* an outstanding task for
+                                                the collect loops */
+
+  mizu_pool_sig *sig = mizu_pool_signals(sub);
+  assert(sig != NULL);
+  *sig->owner_dead = 1;
+
+  mizu_bytes b = { (void *) "x", 1 };
+  mizu_task t2;
+  assert(mizu_pool_submit(sub, &b, &t2, 5000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(sub), "pool stopped or owner dead") == 0);
+  void *objs[1] = { &b };
+  mizu_task bt[1];
+  size_t ndone = 9;
+  assert(mizu_pool_submit_batch(sub, objs, 1, bt, &ndone, 5000) ==
+         MIZU_ERR);
+
+  void *obj = NULL;
+  assert(mizu_pool_collect(sub, &t, &obj, 50) == MIZU_TIMEOUT);
+  size_t idx = 9;
+  assert(mizu_pool_collect_any(sub, &t, 1, &idx, &obj, 50) ==
+         MIZU_TIMEOUT);
+  void *vals[1];
+  size_t err_i = 9, used = 9;
+  assert(mizu_pool_collect_all(sub, &t, 1, vals, &err_i, &used, 50) ==
+         MIZU_TIMEOUT);
+  *sig->owner_dead = 0;
+  free(sig);
+
+  /* the worker's run loop takes the same verdict to OWNER_GONE */
+  mizu_pool_sig *wsig = mizu_pool_signals(wk);
+  assert(wsig != NULL);
+  *wsig->owner_dead = 1;
+  assert(mizu_pool_worker_run(wk) == MIZU_EXIT_OWNER_GONE);
+  *wsig->owner_dead = 0;
+  free(wsig);
+
+  pool_end();
+  puts("ok owner_dead_gates");
+}
+
+#ifndef _WIN32
+/* A blocked injection-space wait wakes into the verdict. The poke is
+   gated on the dump's full_waiter bit: announced means the wait loop's
+   owner check fires — not the submit gate's (which runs first at
+   entry). The join handle again (its fd keeps the teardown refused). */
+static void *rf_submit_main(void *arg) {
+  (void) arg;
+  mizu_bytes b = { (void *) "x", 1 };
+  mizu_task t;
+  return (void *) (intptr_t) mizu_pool_submit(sub, &b, &t, 5000);
+}
+
+static void test_owner_dead_ring_full(void) {
+  pool_pair(1, 1, 2, 8, 64, 64, 512);
+  mizu_binding b0;
+  make_binding(&b0, 0);
+  assert(mizu_pool_attach(&sub, token, &b0) == MIZU_OK);
+  for (int i = 0; i < 8; i++) (void) submit_bytes(sub, "x", 1);
+
+  pthread_t th;
+  assert(pthread_create(&th, NULL, rf_submit_main, NULL) == 0);
+  mizu_pool_dump d;
+  int announced = 0;
+  MIZU_SPIN_WAIT((mizu_pool_dump_get(ctrl, &d) == MIZU_OK &&
+                  d.submitters[1].full_waiter == 1),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, announced);
+  assert(announced);
+
+  mizu_pool_sig *sig = mizu_pool_signals(sub);
+  assert(sig != NULL);
+  *sig->owner_dead = 1;
+  intptr_t st = MIZU_OK;
+  assert(pthread_join(th, (void **) &st) == 0);
+  assert((mizu_status) st == MIZU_ERR);
+  *sig->owner_dead = 0;
+  free(sig);
+
+  pool_end();
+  puts("ok owner_dead_ring_full");
+}
+#endif
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
@@ -3629,6 +3724,10 @@ int main(void) {
   test_collect_timeout();
   test_worker_run_exits();
   test_stop_reaps_dead_worker();
+  test_owner_dead_gates();
+#if !defined(_WIN32)
+  test_owner_dead_ring_full();
+#endif
   test_collect_any();
   test_collect_all();
   test_introspection();
