@@ -687,6 +687,20 @@ static void test_retire_lame_duck(void) {
   puts("ok retire_lame_duck");
 }
 
+/* A lame-duck probe on a non-worker handle answers done and never
+   releases: the controller's round trip and orderly teardown are
+   unaffected (a released controller could never unlink — only its
+   stop/destroy protocol does). */
+static void test_lame_duck_role_guard(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  assert(mizu_pool_lame_duck(ctrl) == 1);
+  mizu_task t = submit_bytes(ctrl, "ok", 2);   /* still live, not released */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "ok", 2);
+  pool_end();                                  /* destroy unlinks as ever */
+  puts("ok lame_duck_role_guard");
+}
+
 /* A leaver's nonempty deque orphans (REAPING) and drains through the
    steal path; the observer of the drained deque frees the slot. */
 static void test_orphan_drain(void) {
@@ -3788,6 +3802,7 @@ int main(void) {
   test_leave_fails_executing();
   test_unwind();
   test_retire_lame_duck();
+  test_lame_duck_role_guard();
   test_orphan_drain();
   test_fairness_orphan();
   test_probe_streak();

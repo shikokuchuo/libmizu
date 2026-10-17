@@ -374,6 +374,12 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- `mizu_pool_lame_duck` no longer releases a non-worker handle: probing a
+  controller or submitter returns nonzero without touching it. Previously
+  any probe with an empty keeper table released the handle in place, and
+  a controller released this way could never unlink — only its
+  stop/destroy protocol removes the region and liveness files — orphaning
+  the pool (and the creator's macOS registry log) irrecoverably.
 - A worker dying between its claim announce and the claim CAS no longer
   lets the still-queued entry execute against the slot's next
   incarnation: the announce (and the sink) now carry the entry's own

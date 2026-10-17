@@ -764,7 +764,9 @@ MIZU_API mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
    it through the sink. A retired worker (MIZU_EXIT_RETIRED) lingers as
    the lifetime anchor for its uncollected results: the binding loops
    lame_duck on a plain sleep (no unpark can reach a released slot)
-   until it returns nonzero — shutdown or owner death ends the linger.
+   until it returns nonzero — shutdown or owner death ends the linger;
+   a probe on a handle of any other role returns nonzero without touching
+   it.
    leave is the clean-exit handshake: an announced in-flight claim (an
    exec_fn escape left unpublished) fails as DIED there, so an orderly
    leave after an infrastructure failure never strands a task — the

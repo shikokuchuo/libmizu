@@ -1258,6 +1258,10 @@ mizu_status mizu_pool_leave(mizu_pool *p) {
    and shutdown or owner death ends the linger. */
 int mizu_pool_lame_duck(mizu_pool *p) {
   if (p == NULL || p->released) return 1;
+  /* Worker-only beat: probing another role answers done without touching
+     the handle — a controller released here could never unlink (only its
+     stop/destroy protocol does), orphaning the pool irrecoverably. */
+  if (p->role != MIZU_ROLE_WORKER) return 1;
   pool_idle_sweep(p);
   if (p->rk_n == 0 ||
       atomic_load_explicit(p->shutdown, memory_order_acquire) != 0 ||
