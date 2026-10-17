@@ -2882,12 +2882,11 @@ enum { POOL_RUN_TASK = 1, POOL_RUN_IDLE = 0, POOL_RUN_SHUTDOWN = -1,
    (single = 1) runs one iteration — claim + execute one task or park —
    returning after the task, on timeout, or on a terminal condition; the
    in-process harnesses single-step it. mizu_pool_worker_run (single = 0)
-   stays in C across tasks and returns only the terminal exits. Two
-   per-task disciplines: an interrupt check after each execute (a binding
-   run loop's back-edge check) and, for single = 0 with a finite timeout,
-   a deadline recompute at park-timeout expiry. The evaluator comes from
-   the handle, checked up front so a claim can never outrun a missing
-   evaluator. */
+   stays in C across tasks and returns only the terminal exits, waiting
+   without a deadline — a finite deadline below therefore implies single.
+   The evaluator comes from the handle, checked up front so a claim can
+   never outrun a missing evaluator. The interrupt check after each
+   execute is a binding run loop's back-edge check. */
 static int pool_step_impl(mizu_pool *p, double timeout_ms, int single) {
   if (p->h.binding.exec == NULL) {
     mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
@@ -3028,8 +3027,7 @@ static int pool_step_impl(mizu_pool *p, double timeout_ms, int single) {
     }
     if (deadline >= 0 && mizu_now() >= deadline) {
       pool_idle_sweep(p);
-      if (single) return POOL_RUN_IDLE;
-      deadline = mizu_now() + timeout_ms / 1000;
+      return POOL_RUN_IDLE;
     }
   }
 }

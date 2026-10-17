@@ -395,15 +395,9 @@ static void arrow_ixe_strv(arrow_ixe *e, int64_t n, const char *const *strs,
                                         (int32_t) lens[i]));
 }
 
-/* An intv value, or the 0x02 scalar at length 1. Vector elements must fit
-   int32 (the callers' contract); the scalar form keeps the full i64. */
+/* An intv value. Vector elements must fit int32 (the caller's contract). */
 static void arrow_ixe_intv(arrow_ixe *e, int64_t n, const int64_t *vals,
                            const int *na) {
-  if (n == 1) {
-    int64_t v = na != NULL && na[0] ? INT64_MIN : vals[0];
-    ARROW_IXE_PUT(e, mizu_ix_put_int(ARROW_IXE_DST(e), v));
-    return;
-  }
   ARROW_IXE_PUT(e, arrow_ixe_vec_begin(ARROW_IXE_DST(e), MIZU_IX_TAG_INTV,
                                        (uint64_t) n));
   if (e->dst != NULL) {
@@ -865,12 +859,9 @@ static int arrow_levels_check(mizu_arrow *a, int col) {
     pc->nlev = 0;
     return 0;
   }
+  /* batch 0's dictionary: shape-vetted with every batch at open
+     (arrow_check_batch), ahead of this walk */
   const ArrowArray *dict = a->batches[0]->children[col]->dictionary;
-  if (!arrow_dict_shape_ok(dict)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                        "column '%s': an invalid Arrow dictionary export", nm);
-    return -1;
-  }
   int64_t blen = 0;
   for (int64_t i = 0; i < dict->length; i++) {
     const uint8_t *s;
