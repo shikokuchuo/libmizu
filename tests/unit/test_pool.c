@@ -2527,6 +2527,25 @@ static void test_cross_thread_waits(void) {
    thieves on one orphaned entry (the steal CAS loser), two claimants on
    one ring entry (the claim CAS loser). Each thread drives its own
    handle; the assertions are race-invariant — exactly one side wins. */
+/* A double collect's loser runs the read before its claim CAS loses:
+   the product stays with the binding (the core has no free hook), so
+   the racing tests' reads record their allocations for the cleanup. */
+static void *tracked_a[2], *tracked_b[2];
+static int tracked_a_n, tracked_b_n;
+static void *tracking_read_a(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                             size_t limit, mizu_read_ctx *ctx) {
+  void *obj = test_read(hdr, payload, limit, ctx);
+  if (obj != NULL && tracked_a_n < 2) tracked_a[tracked_a_n++] = obj;
+  return obj;
+}
+static void *tracking_read_b(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                             size_t limit, mizu_read_ctx *ctx) {
+  void *obj = test_read(hdr, payload, limit, ctx);
+  if (obj != NULL && tracked_b_n < 2) tracked_b[tracked_b_n++] = obj;
+  return obj;
+}
+
+
 static _Atomic int race_ready;   /* both racers hot-spin before the flip */
 static _Atomic int race_gate;
 
@@ -2572,16 +2591,32 @@ static void *drain_main(void *arg) {
 
 static void test_threaded_races(void) {
   /* OK: one takes the product, the other reads "already collected" — a
-     big result widens the winner's claim window */
-  pool_pair(1, 1, 2, 64, 64, 64, 512);
-  mizu_binding sb;
+     big result widens the winner's claim window; the loser's product
+     stays with the binding (tracked and freed) */
+  mizu_binding b, wb, sb;
+  make_binding(&b, 0);
+  make_binding(&wb, 1);
   make_binding(&sb, 0);
+  b.read = tracking_read_a;
+  sb.read = tracking_read_b;
+  mizu_pool_opts o;
+  mizu_pool_opts_init(&o);
+  o.max_workers = 1;
+  o.max_submitters = 2;
+  o.injection_cap = 64;
+  o.per_worker_cap = 64;
+  o.result_slots = 64;
+  o.slot_size = 512;
+  assert(mizu_pool_create(&ctrl, &o, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
   assert(mizu_pool_attach(&sub, token, &sb) == MIZU_OK);
   size_t n = 100 * 1024;
   unsigned char *big = malloc(n);
   for (size_t i = 0; i < n; i++) big[i] = (unsigned char) (i * 13u);
   pthread_t ta, tb;
   for (int round = 0; round < 30; round++) {
+    tracked_a_n = tracked_b_n = 0;
     mizu_task t = submit_bytes(ctrl, big, n);
     assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
     struct race_ctx ra = { .p = ctrl, .t = t }, rb = { .p = sub, .t = t };
@@ -2589,7 +2624,12 @@ static void test_threaded_races(void) {
     assert(pthread_join(ta, NULL) == 0);
     assert(pthread_join(tb, NULL) == 0);
     assert((ra.st == MIZU_OK) != (rb.st == MIZU_OK));
-    mizu_bytes_free(ra.st == MIZU_OK ? ra.obj : rb.obj);
+    void *win = ra.st == MIZU_OK ? ra.obj : rb.obj;
+    mizu_bytes_free(win);
+    for (int k = 0; k < tracked_a_n; k++)
+      if (tracked_a[k] != win) mizu_bytes_free(tracked_a[k]);
+    for (int k = 0; k < tracked_b_n; k++)
+      if (tracked_b[k] != win) mizu_bytes_free(tracked_b[k]);
     assert(strstr(mizu_pool_error(ra.st == MIZU_OK ? sub : ctrl),
                   "already collected") != NULL);
   }
@@ -2714,6 +2754,34 @@ static void test_threaded_races(void) {
   ctrl = NULL;
   puts("ok threaded_races");
 }
+
+/* The forked-child teardown: the fork guard refuses the verbs, then
+   abandon frees only the child's copies — the parent's pool is
+   unharmed. */
+static void test_abandon_fork(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    mizu_bytes b = { (void *) "x", 1 };
+    mizu_task t;
+    if (mizu_pool_submit(ctrl, &b, &t, 0) != MIZU_ERR ||
+        strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
+      exit(1);
+    mizu_pool_abandon(wk);
+    mizu_pool_abandon(ctrl);
+    exit(0);
+  }
+  int st;
+  assert(waitpid(pid, &st, 0) == pid);
+  assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+  mizu_task t = submit_bytes(ctrl, "alive", 5);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "alive", 5);
+  pool_end();
+  puts("ok abandon_fork");
+}
+#endif
 
 /* Mid-burst failures: a staging error raises with the accepted prefix;
    a space wait abandoned by the check hook likewise. */
@@ -3300,33 +3368,6 @@ static void test_reap_paths(void) {
   puts("ok reap_paths");
 }
 
-/* The forked-child teardown: the fork guard refuses the verbs, then
-   abandon frees only the child's copies — the parent's pool is
-   unharmed. */
-static void test_abandon_fork(void) {
-  pool_pair(1, 1, 8, 64, 64, 64, 512);
-  pid_t pid = fork();
-  assert(pid >= 0);
-  if (pid == 0) {
-    mizu_bytes b = { (void *) "x", 1 };
-    mizu_task t;
-    if (mizu_pool_submit(ctrl, &b, &t, 0) != MIZU_ERR ||
-        strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
-      exit(1);
-    mizu_pool_abandon(wk);
-    mizu_pool_abandon(ctrl);
-    exit(0);
-  }
-  int st;
-  assert(waitpid(pid, &st, 0) == pid);
-  assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
-  mizu_task t = submit_bytes(ctrl, "alive", 5);
-  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
-  collect_bytes(ctrl, &t, "alive", 5);
-  pool_end();
-  puts("ok abandon_fork");
-}
-#endif
 
 /* The announced-but-not-yet-parked wake: a pusher finding a worker in
    WPK_IDLE unparks it (the epoch bump turns its upcoming sleep into an

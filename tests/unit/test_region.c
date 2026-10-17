@@ -42,19 +42,22 @@ static void *live_dir_main(void *arg) {
   else
     setenv("TMPDIR", a->tmpdir, 1);
   a->dir = mizu_live_dir();
-  mizu_binding b;
-  mizu_binding_bytes(&b);
-  mizu_channel_opts co;
-  mizu_channel_opts_init(&co);
-  mizu_channel *c = NULL;
-  a->ch_rc = mizu_channel_create(&c, &co, &b);
-  snprintf(a->ch_msg, sizeof(a->ch_msg), "%s", mizu_last_error_message());
-  mizu_pool_opts po;
-  mizu_pool_opts_init(&po);
-  po.max_workers = 1;
-  mizu_pool *p = NULL;
-  a->pl_rc = mizu_pool_create(&p, &po, &b);
-  snprintf(a->pl_msg, sizeof(a->pl_msg), "%s", mizu_last_error_message());
+  if (a->dir == NULL) {
+    /* a failed resolution refuses the creates through the TLS slot */
+    mizu_binding b;
+    mizu_binding_bytes(&b);
+    mizu_channel_opts co;
+    mizu_channel_opts_init(&co);
+    mizu_channel *c = NULL;
+    a->ch_rc = mizu_channel_create(&c, &co, &b);
+    snprintf(a->ch_msg, sizeof(a->ch_msg), "%s", mizu_last_error_message());
+    mizu_pool_opts po;
+    mizu_pool_opts_init(&po);
+    po.max_workers = 1;
+    mizu_pool *p = NULL;
+    a->pl_rc = mizu_pool_create(&p, &po, &b);
+    snprintf(a->pl_msg, sizeof(a->pl_msg), "%s", mizu_last_error_message());
+  }
   /* a region create resolves the registry log's dir on this thread too */
   mizu_shm *s = NULL;
   a->sh_rc = mizu_shm_create(&s, 4096);
