@@ -14,6 +14,8 @@
 #include <string.h>
 #ifndef _WIN32
 #include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -21,6 +23,56 @@
 #endif
 
 #include "internal.h"
+
+#ifndef _WIN32
+/* The liveness dir resolution is thread-local: a fresh thread re-resolves
+   it (TMPDIR unset falls back to the platform default; an oversized
+   TMPDIR fails the resolution, refusing the creates). */
+struct live_dir_args {
+  const char *tmpdir;   /* NULL unsets */
+  const char *dir;
+  mizu_status ch_rc, pl_rc, sh_rc;
+  char ch_msg[128], pl_msg[128];
+};
+
+static void *live_dir_main(void *arg) {
+  struct live_dir_args *a = arg;
+  if (a->tmpdir == NULL)
+    unsetenv("TMPDIR");
+  else
+    setenv("TMPDIR", a->tmpdir, 1);
+  a->dir = mizu_live_dir();
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts co;
+  mizu_channel_opts_init(&co);
+  mizu_channel *c = NULL;
+  a->ch_rc = mizu_channel_create(&c, &co, &b);
+  snprintf(a->ch_msg, sizeof(a->ch_msg), "%s", mizu_last_error_message());
+  mizu_pool_opts po;
+  mizu_pool_opts_init(&po);
+  po.max_workers = 1;
+  mizu_pool *p = NULL;
+  a->pl_rc = mizu_pool_create(&p, &po, &b);
+  snprintf(a->pl_msg, sizeof(a->pl_msg), "%s", mizu_last_error_message());
+  /* a region create resolves the registry log's dir on this thread too */
+  mizu_shm *s = NULL;
+  a->sh_rc = mizu_shm_create(&s, 4096);
+  mizu_shm_close(s, a->sh_rc == MIZU_OK);
+  return NULL;
+}
+
+/* A signal to the parked thread breaks the sleep as PARK_INTR. */
+static mizu_parker intr_pk;
+static void eintr_handler(int sig) {
+  (void) sig;
+}
+static void *eintr_park_main(void *arg) {
+  (void) arg;
+  uint32_t e = mizu_parker_snapshot(&intr_pk);
+  return (void *) (intptr_t) mizu_park(&intr_pk, e, 30000);
+}
+#endif
 
 int main(void) {
   assert(mizu_version() != NULL);
@@ -314,6 +366,87 @@ int main(void) {
   /* the death-listener teardown is callable (a no-op where the platform
      needs none) */
   mizu_death_listener_teardown();
+
+#ifndef _WIN32
+  /* the liveness dir resolution is per-thread: on a fresh thread an
+     oversized TMPDIR fails it (the creates refuse), an unset TMPDIR
+     falls back to the platform default */
+  {
+    char saved_tmp[1100];
+    const char *tmp0 = getenv("TMPDIR");
+    snprintf(saved_tmp, sizeof(saved_tmp), "%s", tmp0 != NULL ? tmp0 : "");
+
+    char longtmp[2000];
+    memset(longtmp, 't', sizeof(longtmp) - 1);
+    longtmp[sizeof(longtmp) - 1] = '\0';
+    struct live_dir_args a;
+    memset(&a, 0, sizeof(a));
+    a.tmpdir = longtmp;
+    pthread_t th;
+    assert(pthread_create(&th, NULL, live_dir_main, &a) == 0);
+    assert(pthread_join(th, NULL) == 0);
+    assert(a.dir == NULL);
+    assert(a.ch_rc == MIZU_ERR);
+    assert(strstr(a.ch_msg, "cannot resolve liveness lock directory") !=
+           NULL);
+    assert(a.pl_rc == MIZU_ERR);
+    assert(strstr(a.pl_msg, "cannot resolve liveness lock directory") !=
+           NULL);
+
+    memset(&a, 0, sizeof(a));
+    a.tmpdir = NULL;
+    assert(pthread_create(&th, NULL, live_dir_main, &a) == 0);
+    assert(pthread_join(th, NULL) == 0);
+    assert(a.dir != NULL);
+    assert(a.sh_rc == MIZU_OK);
+
+    if (tmp0 != NULL)
+      setenv("TMPDIR", saved_tmp, 1);
+    else
+      unsetenv("TMPDIR");
+  }
+
+  /* a forked child with TMPDIR unset resolves the registry log dir via
+     the platform default (confstr on macOS) — the resolution runs per
+     process, so only a child re-opens its log */
+  {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      unsetenv("TMPDIR");
+      mizu_shm *s = NULL;
+      if (mizu_shm_create(&s, 4096) != MIZU_OK) exit(1);
+      mizu_shm_close(s, 1);
+      exit(0);
+    }
+    int st;
+    assert(waitpid(pid, &st, 0) == pid);
+    assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+  }
+
+  /* a signal to the parked thread breaks its sleep as PARK_INTR */
+  {
+    mizu_shm *ctl2 = NULL;
+    assert(mizu_shm_create(&ctl2, 4096) == MIZU_OK);
+    _Atomic uint32_t *epoch2 = (_Atomic uint32_t *) mizu_shm_addr(ctl2);
+    assert(mizu_parker_attach(&intr_pk, epoch2, mizu_shm_name(ctl2),
+                             MIZU_ENTITY_HOST, 1) == 0);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = eintr_handler;
+    assert(sigaction(SIGUSR1, &sa, NULL) == 0);
+    pthread_t th;
+    assert(pthread_create(&th, NULL, eintr_park_main, NULL) == 0);
+    struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
+    nanosleep(&ts, NULL);
+    assert(pthread_kill(th, SIGUSR1) == 0);
+    void *rc = NULL;
+    assert(pthread_join(th, &rc) == 0);
+    assert((intptr_t) rc == MIZU_PARK_INTR);
+    mizu_parker_detach(&intr_pk);
+    mizu_shm_close(ctl2, 1);
+  }
+#endif
 
 #ifndef _WIN32
   /* a forked child: the atfork handler closes the inherited lock fds

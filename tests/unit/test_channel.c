@@ -17,9 +17,12 @@
 #include <string.h>
 #ifndef _WIN32
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -91,6 +94,30 @@ static int check_intr(void *ctx) {
   return ++check_calls > 2;
 }
 
+/* A modal stager: one view-tier frame on demand, bytes otherwise — the
+   batch mid-stream read failure needs a good message ahead of a bad
+   one. */
+static int vec_next;
+static int stage_modal_vec(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                           uint32_t inline_max, mizu_handle *h, void *ctx) {
+  if (vec_next) return stage_shm_vec(obj, hdr, payload, inline_max, h, ctx);
+  return bytesb.stage(obj, hdr, payload, inline_max, h, ctx);
+}
+
+/* A hand-crafted RAWSPILL frame: offset 0 reads the arena head (the
+   arena is fresh — zero bytes); mode 1 points past it (corrupt). */
+static int rawspill_mode;
+static int stage_rawspill(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                          uint32_t inline_max, mizu_handle *h, void *ctx) {
+  (void) obj; (void) h; (void) ctx; (void) inline_max;
+  hdr->kind = MIZU_KIND_RAWSPILL;
+  uint64_t off = rawspill_mode ? (uint64_t) 1 << 20 : 0;
+  memcpy(payload, &off, sizeof(off));
+  hdr->len = 8;
+  hdr->aux = 0;
+  return 0;
+}
+
 #ifndef _WIN32
 /* The gone-peer child (exec'd): attach, rendezvous, die. exec'd rather
    than forked so the attach's death-listener thread starts in a fresh
@@ -130,6 +157,77 @@ static void held_lock_peer(const char *token, const char *lock_path,
     _exit(0);
   }
   _exit(0);                              /* the lock holder dies */
+}
+
+/* Cross-thread waits: one end parked in recv, the other publishing. The
+   flush's unpark, the spin catch, the budget learn, and the wake-register
+   re-checks fire only across a real thread boundary. */
+struct chan_thread {
+  mizu_channel *c;
+  long n;
+  mizu_status st;
+};
+
+/* RLIMIT_NOFILE caps the fd VALUE, not the count of open fds: with holes
+   in the fd space, "exactly k coexisting new fds" means the soft limit
+   one past the k-th free value (the k-th free value itself for k = 0).
+   Recomputed per level — the failed creates return fds to the holes. */
+static rlim_t rlim_for_free(int k) {
+  int free_n = 0;
+  for (int i = 0; i < 65536; i++) {
+    if (fcntl(i, F_GETFD) != -1) continue;
+    if (k == 0) return (rlim_t) i;         /* the first free value */
+    if (free_n + 1 == k) return (rlim_t) i + 1;   /* the k-th, plus one */
+    free_n++;
+  }
+  return (rlim_t) -1;
+}
+
+static void *chan_recv_main(void *arg) {
+  struct chan_thread *a = arg;
+  a->st = MIZU_OK;
+  for (long i = 0; i < a->n; i++) {
+    void *obj = NULL;
+    mizu_status st = mizu_channel_recv(a->c, &obj, 30000);
+    if (st != MIZU_OK) {
+      a->st = st;
+      break;
+    }
+    mizu_bytes_free(obj);
+  }
+  return NULL;
+}
+
+static void chan_send_n(mizu_channel *c, long n) {
+  mizu_bytes b = { "t", 1 };
+  for (long i = 0; i < n; i++) {
+    mizu_status st;
+    while ((st = mizu_channel_send(c, &b)) == MIZU_FULL)
+      ;
+    assert(st == MIZU_OK);
+  }
+}
+
+/* A producer pacing at the spin budget: publishes land in the consumer's
+   spin, park-announce, and parked phases alike. A full ring simply
+   delays the pace. */
+static void *chan_paced_send_main(void *arg) {
+  struct chan_thread *a = arg;
+  a->st = MIZU_OK;
+  mizu_bytes b = { "t", 1 };
+  for (long i = 0; i < a->n; i++) {
+    double t0 = mizu_now();
+    while (mizu_now() - t0 < 16e-6)
+      ;
+    mizu_status st;
+    while ((st = mizu_channel_send(a->c, &b)) == MIZU_FULL)
+      ;
+    if (st != MIZU_OK) {
+      a->st = st;
+      break;
+    }
+  }
+  return NULL;
 }
 #endif
 
@@ -203,6 +301,12 @@ int main(int argc, char **argv) {
     assert(mizu_channel_create(&bad, &opts, &bytesb) == MIZU_ERR);
     assert(strstr(mizu_last_error_message(),
                   "liveness directory path too long") != NULL);
+    /* a liveness directory that cannot be opened fails at the host
+       lock, after the region already exists (the walk-back unlinks) */
+    assert(setenv("MIZU_LIVENESS_DIR", "/mizu_no_such_dir_9f8b7c", 1) == 0);
+    assert(mizu_channel_create(&bad, &opts, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "cannot lock host liveness") != NULL);
     unsetenv("MIZU_LIVENESS_DIR");
 #endif
     assert(bad == NULL);
@@ -231,12 +335,14 @@ int main(int argc, char **argv) {
 
   assert(mizu_channel_ready_set(peer) == MIZU_OK);
   assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  /* a repeat ready_wait keeps the armed death watch (no re-arm) */
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
   assert(mizu_channel_alive(host) == 1);
   assert(mizu_channel_alive(peer) == 1);
 
   /* attach validation: a region whose preamble fails validation (the
-     open half of chan_failed), a second peer on an established channel
-     (the liveness lock refuses), and a token buffer too small */
+     open half of chan_failed), a token whose region is gone, and a
+     token buffer too small */
   {
     mizu_shm *garbage = NULL;
     assert(mizu_shm_create(&garbage, 4096) == MIZU_OK);   /* zero-filled */
@@ -252,6 +358,24 @@ int main(int argc, char **argv) {
 
     mizu_channel *dup = NULL;
     assert(mizu_channel_attach(&dup, token, &bytesb) == MIZU_ERR);
+    assert(dup == NULL);
+
+    /* the token grammar: the charset gate, then the length budget */
+    assert(mizu_channel_attach(&dup, "nonsense!", &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "malformed region-name") !=
+           NULL);
+    char longtok[40];
+    memset(longtok, 'a', sizeof(longtok) - 1);
+    longtok[sizeof(longtok) - 1] = '\0';
+    assert(mizu_channel_attach(&dup, longtok, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "malformed region-name") !=
+           NULL);
+    /* a second peer on an established channel: the peer's liveness lock
+       refuses (the token still names the live host channel) */
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&dup, token, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "cannot lock peer liveness file") != NULL);
     assert(dup == NULL);
 
     char tiny[2];
@@ -369,10 +493,13 @@ int main(int argc, char **argv) {
     mizu_bytes_free(obj);
   }
 
-  /* timeout: an empty poll returns TIMEOUT */
+  /* timeout: an empty poll returns TIMEOUT; a sub-spin-budget deadline
+     expires inside the spin, so the park call site itself refuses */
   {
     void *obj = NULL;
     assert(mizu_channel_recv(peer, &obj, 20) == MIZU_TIMEOUT);
+    assert(obj == NULL);
+    assert(mizu_channel_recv(peer, &obj, 0.001) == MIZU_TIMEOUT);
     assert(obj == NULL);
   }
 
@@ -394,6 +521,48 @@ int main(int argc, char **argv) {
     assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);
     assert(mizu_channel_errcat(vpeer) == MIZU_ERRCAT_OTHER);
     assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);  /* wedged */
+    mizu_channel_destroy(vpeer);
+    mizu_channel_destroy(vhost);
+
+    /* batch form: the failure first errors with the record; past a good
+       prefix it ends the batch early with MIZU_OK and stays as the next
+       receive's head */
+    assert(mizu_channel_create(&vhost, &opts, &vb) == MIZU_OK);
+    assert(mizu_channel_token(vhost, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&vpeer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(vpeer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(vhost, 5000) == MIZU_OK);
+    /* an empty ring on a zero timeout: TIMEOUT, nothing delivered */
+    size_t bn = 9;
+    void *bgot[2] = { NULL, NULL };
+    assert(mizu_channel_recv_batch_fn(vpeer, 4, &bn, array_sink, bgot,
+                                     0) == MIZU_TIMEOUT);
+    assert(bn == 0);
+    assert(mizu_channel_send(vhost, &b) == MIZU_OK);
+    assert(mizu_channel_recv_batch_fn(vpeer, 4, &bn, array_sink, bgot,
+                                     1000) == MIZU_ERR);
+    assert(bn == 0);
+    assert(strcmp(mizu_channel_error(vpeer), "payload read failed") == 0);
+    mizu_channel_destroy(vpeer);
+    mizu_channel_destroy(vhost);
+
+    mizu_binding mb = bytesb;
+    mb.stage = stage_modal_vec;
+    assert(mizu_channel_create(&vhost, &opts, &mb) == MIZU_OK);
+    assert(mizu_channel_token(vhost, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&vpeer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(vpeer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(vhost, 5000) == MIZU_OK);
+    vec_next = 0;
+    assert(mizu_channel_send(vhost, &b) == MIZU_OK);   /* a good frame */
+    vec_next = 1;
+    assert(mizu_channel_send(vhost, &b) == MIZU_OK);   /* then the view */
+    assert(mizu_channel_recv_batch_fn(vpeer, 4, &bn, array_sink, bgot,
+                                     1000) == MIZU_OK);
+    assert(bn == 1);
+    mizu_bytes_free(bgot[0]);
+    vec_next = 0;
+    assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);  /* deferred */
     mizu_channel_destroy(vpeer);
     mizu_channel_destroy(vhost);
   }
@@ -656,7 +825,315 @@ int main(int argc, char **argv) {
   mizu_channel_destroy(host);
   mizu_channel_destroy(peer);
 
+  /* the arena gives up after one forced reap: a chunk that still
+     doesn't fit falls to the spill tier (5 x 12 KiB fill the 64 KiB
+     arena with ring capacity to spare, so the 6th send reaches the
+     arena-full path, not the ring-full one) */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    unsigned char chunk[12288];
+    for (size_t i = 0; i < sizeof(chunk); i++) chunk[i] = (unsigned char) i;
+    for (int i = 0; i < 5; i++) send_bytes(host, chunk, sizeof(chunk));
+    assert(mizu_handle_keep_out((const mizu_handle *) host) == 0);
+    send_bytes(host, chunk, sizeof(chunk));       /* arena full: SHM_RAW */
+    assert(mizu_handle_keep_out((const mizu_handle *) host) == 1);
+    for (int i = 0; i < 6; i++) recv_bytes(peer, chunk, sizeof(chunk));
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
+  /* a torn ARENA slot (its arena offset poked past the end via the
+     shared mapping) is a corrupt payload, never an out-of-bounds read */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    unsigned char mid[4096];
+    for (size_t i = 0; i < sizeof(mid); i++) mid[i] = (unsigned char) i;
+    send_bytes(host, mid, sizeof(mid));           /* ARENA at slot 0 */
+    mizu_shm *shm = NULL;
+    char name[80];
+    snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+    assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+    uint64_t bad_off = 64u << 20;                 /* past the arena */
+    memcpy((char *) mizu_shm_addr(shm) + MIZU_FIXED_LAYOUT_SIZE + 8,
+           &bad_off, 8);                          /* slot 0's hdr.aux */
+    mizu_shm_close(shm, 0);
+    void *obj = NULL;
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+    assert(strcmp(mizu_channel_error(peer), "corrupt payload slot") == 0);
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
+  /* a hand-staged RAWSPILL resolves against the arena: in bounds it
+     reads the bytes there; out of bounds is the same corrupt verdict */
+  {
+    mizu_binding rb = bytesb;
+    rb.stage = stage_rawspill;
+    assert(mizu_channel_create(&host, &opts, &rb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    mizu_bytes b = { "x", 1 };
+    rawspill_mode = 0;
+    assert(mizu_channel_send(host, &b) == MIZU_OK);
+    void *obj = NULL;
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+    assert(((mizu_bytes *) obj)->len == 8);   /* the arena's zero bytes */
+    mizu_bytes_free(obj);
+    rawspill_mode = 1;
+    assert(mizu_channel_send(host, &b) == MIZU_OK);
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+    assert(strcmp(mizu_channel_error(peer), "corrupt payload slot") == 0);
+    rawspill_mode = 0;
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
+  /* a preamble whose livedir_size is torn fails the attach's
+     validation */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    mizu_shm *shm = NULL;
+    char name[80];
+    snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+    assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+    uint64_t zero = 0;
+    memcpy((char *) mizu_shm_addr(shm) + 56, &zero, 8);   /* livedir_size */
+    mizu_shm_close(shm, 0);
+    mizu_channel *tp = NULL;
+    assert(mizu_channel_attach(&tp, token, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "liveness directory path") != NULL);
+    assert(tp == NULL);
+    mizu_channel_destroy(host);
+  }
+
 #ifndef _WIN32
+  /* threaded waits: a parked consumer is woken by the producer's flush;
+     sustained traffic exercises the spin catch, the budget learn, and
+     the wake-register re-checks that single-threaded drains never
+     reach */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    pthread_t th;
+    struct chan_thread ct;
+    /* the deterministic park: the consumer sleeps on its parker until
+       the flush's unpark lands */
+    ct.c = peer;
+    ct.n = 1;
+    assert(pthread_create(&th, NULL, chan_recv_main, &ct) == 0);
+    {
+      struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
+      nanosleep(&ts, NULL);
+    }
+    send_bytes(host, "w", 1);
+    assert(pthread_join(th, NULL) == 0);
+    assert(ct.st == MIZU_OK);
+    /* traffic: the consumer parks, spins, catches, and re-checks */
+    ct.c = peer;
+    ct.n = 100000;
+    assert(pthread_create(&th, NULL, chan_recv_main, &ct) == 0);
+    chan_send_n(host, ct.n);
+    assert(pthread_join(th, NULL) == 0);
+    assert(ct.st == MIZU_OK);
+    /* paced sends: publishes land in the park-announce window too */
+    ct.c = host;
+    ct.n = 20000;
+    assert(pthread_create(&th, NULL, chan_paced_send_main, &ct) == 0);
+    {
+      struct chan_thread cr;
+      cr.c = peer;
+      cr.n = ct.n;
+      chan_recv_main(&cr);
+      assert(cr.st == MIZU_OK);
+    }
+    assert(pthread_join(th, NULL) == 0);
+    assert(ct.st == MIZU_OK);
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
+  /* the pure-spin channel: the wait never parks — a send lands inside
+     the spin window, an empty spin burns the deadline */
+  {
+    mizu_channel_opts so = opts;
+    so.flags = MIZU_CHANNEL_SPIN;
+    assert(mizu_channel_create(&host, &so, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    pthread_t th;
+    struct chan_thread ct;
+    ct.c = peer;
+    ct.n = 20000;
+    assert(pthread_create(&th, NULL, chan_recv_main, &ct) == 0);
+    chan_send_n(host, ct.n);
+    assert(pthread_join(th, NULL) == 0);
+    assert(ct.st == MIZU_OK);
+    void *obj = NULL;
+    assert(mizu_channel_recv(peer, &obj, 0.001) == MIZU_TIMEOUT);
+    assert(obj == NULL);
+    mizu_channel_destroy(host);
+    mizu_channel_destroy(peer);
+  }
+
+  /* fd exhaustion: one free fd fits the region create's transient fd
+     but not a second persistent liveness one; zero free fds fails the
+     region create itself. The child restores the soft limit before
+     exit so its coverage profile flushes. */
+  {
+    /* a second channel for the child to attach: its host's liveness
+       files must exist before the fork */
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    char ptok[64];
+    assert(mizu_channel_token(host, ptok, sizeof(ptok)) == MIZU_OK);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      mizu_shm *warm = NULL;        /* open the child's cached log fd */
+      if (mizu_shm_create(&warm, 4096) != MIZU_OK) _exit(2);
+      mizu_shm_close(warm, 1);
+      struct rlimit rl;
+      if (getrlimit(RLIMIT_NOFILE, &rl) != 0) _exit(3);
+      rlim_t saved = rl.rlim_cur;
+      mizu_pool_opts po;
+      mizu_pool_opts_init(&po);
+      po.max_workers = 2;
+      po.max_submitters = 2;
+      po.injection_cap = 8;
+      po.per_worker_cap = 8;
+      po.result_slots = 16;
+      po.slot_size = 256;
+
+      rl.rlim_cur = rlim_for_free(1);   /* one free fd at a time */
+      if (setrlimit(RLIMIT_NOFILE, &rl) != 0) _exit(4);
+      mizu_channel *fc = NULL;
+      if (mizu_channel_create(&fc, &opts, &bytesb) != MIZU_ERR ||
+          fc != NULL)
+        _exit(5);
+      if (strstr(mizu_last_error_message(), "peer liveness") == NULL)
+        _exit(6);
+      mizu_pool *fp = NULL;
+      if (mizu_pool_create(&fp, &po, &bytesb) != MIZU_ERR || fp != NULL)
+        _exit(7);
+      if (strstr(mizu_last_error_message(), "liveness") == NULL) _exit(8);
+      /* attach: the peer-side lock fits, the host file's open doesn't */
+      mizu_channel *at = NULL;
+      if (mizu_channel_attach(&at, ptok, &bytesb) != MIZU_ERR ||
+          at != NULL)
+        _exit(25);
+      if (strstr(mizu_last_error_message(), "host liveness") == NULL)
+        _exit(26);
+
+      rl.rlim_cur = rlim_for_free(4);   /* the four slot files fit */
+      if (setrlimit(RLIMIT_NOFILE, &rl) != 0) _exit(9);
+      if (mizu_pool_create(&fp, &po, &bytesb) != MIZU_ERR || fp != NULL)
+        _exit(10);
+      if (strstr(mizu_last_error_message(), "owner liveness") == NULL)
+        _exit(11);
+
+      rl.rlim_cur = rlim_for_free(0);       /* zero free fds */
+      if (setrlimit(RLIMIT_NOFILE, &rl) != 0) _exit(15);
+      if (mizu_channel_create(&fc, &opts, &bytesb) != MIZU_ERR ||
+          fc != NULL)
+        _exit(16);
+      if (strstr(mizu_last_error_message(),
+                 "cannot create channel region") == NULL)
+        _exit(17);
+      if (mizu_pool_create(&fp, &po, &bytesb) != MIZU_ERR || fp != NULL)
+        _exit(18);
+      if (strstr(mizu_last_error_message(),
+                 "cannot create pool region") == NULL)
+        _exit(19);
+      mizu_shm *fs = NULL;
+      if (mizu_shm_create(&fs, 4096) != MIZU_ERR || fs != NULL) _exit(20);
+      if (strstr(mizu_last_error_message(), "cannot create region") ==
+          NULL)
+        _exit(21);
+      mizu_handle bh;
+      memset(&bh, 0, sizeof(bh));
+      mizu_shm *sp = NULL;
+      if (mizu_stage_spill_get(&bh, 8192, &sp) != MIZU_ERR || sp != NULL)
+        _exit(22);
+      if (strstr(mizu_last_error_message(),
+                 "cannot create payload region") == NULL)
+        _exit(23);
+
+      rl.rlim_cur = saved;
+      if (setrlimit(RLIMIT_NOFILE, &rl) != 0) _exit(24);
+      exit(0);
+    }
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+    mizu_channel_destroy(host);
+  }
+
+  /* an attach that finds the host's lock acquirable learns the host
+     died before the channel was established: the child creates a
+     channel, hands the token over, and exits with it unestablished */
+  {
+    int pipefd[2];
+    assert(pipe(pipefd) == 0);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      close(pipefd[0]);
+      mizu_channel *dh = NULL;
+      if (mizu_channel_create(&dh, &opts, &bytesb) != MIZU_OK) _exit(2);
+      char dtok[64];
+      if (mizu_channel_token(dh, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
+      size_t want = strlen(dtok) + 1;
+      if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
+      exit(0);                       /* dies holding the host lock */
+    }
+    close(pipefd[1]);
+    char dtok[64];
+    size_t got = 0;
+    while (got < sizeof(dtok)) {
+      ssize_t r = read(pipefd[0], dtok + got, sizeof(dtok) - got);
+      assert(r > 0);
+      got += (size_t) r;
+      if (memchr(dtok, '\0', got) != NULL) break;
+    }
+    close(pipefd[0]);
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+    mizu_channel *dp = NULL;
+    assert(mizu_channel_attach(&dp, dtok, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(),
+                  "host died before the channel was established") != NULL);
+    assert(dp == NULL);
+    /* the failed attach's survivor unlink reaped the orphan's names:
+       the region and its two liveness files */
+    char name[80];
+    snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", dtok);
+    mizu_shm *orphan = NULL;
+    assert(mizu_shm_open(&orphan, name) == MIZU_ERR);
+    const char *dir = mizu_live_dir();
+    char lp[1100];
+    snprintf(lp, sizeof(lp), "%s/mizu_%s.live.host", dir, dtok);
+    assert(remove(lp) != 0);
+    snprintf(lp, sizeof(lp), "%s/mizu_%s.live.peer", dir, dtok);
+    assert(remove(lp) != 0);
+  }
+
   /* a peer that dies without its close bit: the lock verdict sticks and
      the send side answers PEER_GONE, not just the wait side */
   {
@@ -697,6 +1174,20 @@ int main(int argc, char **argv) {
           mizu_channel_errcat(host) != MIZU_ERRCAT_OTHER)
         exit(1);
       if (mizu_channel_recv(peer, &obj, 0) != MIZU_ERR) exit(2);
+      /* every raising verb answers the fork guard, token included */
+      char ftok[64];
+      if (mizu_channel_token(host, ftok, sizeof(ftok)) != MIZU_ERR)
+        exit(3);
+      void *objs1[1] = { &b };
+      size_t ac = 9;
+      if (mizu_channel_send_batch(host, objs1, 1, &ac) != MIZU_ERR ||
+          ac != 0)
+        exit(4);
+      void *got1[1] = { NULL };
+      size_t nc = 9;
+      if (mizu_channel_recv_batch_fn(peer, 1, &nc, array_sink, got1, 0) !=
+          MIZU_ERR || nc != 0)
+        exit(5);
       mizu_channel_abandon(host);
       mizu_channel_abandon(peer);
       exit(0);
