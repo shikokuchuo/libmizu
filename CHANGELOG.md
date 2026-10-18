@@ -374,6 +374,14 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- `mizu_arrow_str_at` no longer declines a string_view span that
+  references the array's trailing buffer slot: the C Data spec puts the
+  int64 variadic-sizes array there, but nanoarrow's nested and standalone
+  exports put a data buffer there instead, so every out-of-line string
+  from such an export (any view longer than 12 bytes) read as malformed.
+  A view naming the trailing slot now proves the no-sizes layout and
+  crosses unbounded; any other span the sizes array bounds by the
+  declared size, as before.
 - `mizu_pool_lame_duck` no longer releases a non-worker handle: probing a
   controller or submitter returns nonzero without touching it. Previously
   any probe with an empty keeper table released the handle in place, and

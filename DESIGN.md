@@ -498,7 +498,7 @@ The writer borrows them: the schema and the batches pointer array are caller-own
 The column kinds:
 
 - **CVT**: a fixed-width column through its `mizu_cvt_row` (the conversion table below), the identity rows included.
-- **STR**: utf8 / large_utf8 / string_view → an MIZS leaf, the producer's UTF-8 taken on Arrow's contract; the catastrophic cases (negative or non-monotonic offsets, a view buffer index past the variadic data buffers — the trailing slot is the producers' sizes array, not a data buffer — or a view span past its declared size) decline.
+- **STR**: utf8 / large_utf8 / string_view → an MIZS leaf, the producer's UTF-8 taken on Arrow's contract; the catastrophic cases (negative or non-monotonic offsets, a view buffer index past the buffer array, or — for a producer that wrote the spec's sizes array — a view span past its declared size) decline. A view naming the trailing slot proves a no-sizes export (nanoarrow's nested or standalone form appends none) and crosses with its span unbounded.
 - **DICT**: a dictionary of strings → a factor: 1-based INT32 codes, null → INT_MIN, the levels blob. An ordered dictionary declines (the factor shape has no ordered bit in format 0x01).
 - **DATE / TS / TD**: date32 → a REAL leaf of days + the Date blob; `timestamp[unit, tz]` and `duration[unit]` (units s/m/u/n) → a REAL leaf of seconds + the POSIXct or difftime blob, the zone name riding the POSIXct blob. The ns unit is the `tscale` case below.
 

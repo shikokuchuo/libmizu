@@ -2074,15 +2074,20 @@ MIZU_EXT_INLINE int mizu_ext_arrow_str_at_impl(const ArrowArray *arr,
       int32_t bi, off;
       memcpy(&bi, vw + 8, 4);
       memcpy(&off, vw + 12, 4);
-      /* the variadic data buffers are slots [2, n_buffers - 1): the last
-         slot is the sizes array the re-viewing producers append, never a
-         data buffer. A span is bounded by the declared size where that
-         array is present. */
-      if (bi < 0 || 2 + (int64_t) bi >= arr->n_buffers - 1 || off < 0)
+      /* The variadic data buffers are slots [2, n_buffers): the C Data
+         spec's trailing slot is the int64 sizes array, but a producer
+         that skips it (a nanoarrow nested or standalone export) puts a
+         data buffer there. The reference tells the layouts apart: a
+         spec-layout view never names the trailing slot, so one that
+         does proves the no-sizes layout, its span the producer's word;
+         any other span the sizes array bounds by the declared size. */
+      if (bi < 0 || off < 0 || 2 + (int64_t) bi >= arr->n_buffers)
         return -1;
-      const int64_t *sizes =
-        (const int64_t *) arr->buffers[arr->n_buffers - 1];
-      if (sizes != NULL && (int64_t) off + l > sizes[bi]) return -1;
+      if (2 + bi < arr->n_buffers - 1) {
+        const int64_t *sizes =
+          (const int64_t *) arr->buffers[arr->n_buffers - 1];
+        if (sizes != NULL && (int64_t) off + l > sizes[bi]) return -1;
+      }
       *ptr = (const uint8_t *) arr->buffers[2 + bi] + off;
     }
     *len = l;
@@ -2104,10 +2109,11 @@ MIZU_EXT_INLINE int mizu_arrow_valid(const ArrowArray *arr, int64_t k) {
    unset), -1 on a malformed record. The Arrow C Data Interface carries no
    buffer lengths, so beyond the view form the byte extent stays the
    producer's word; what is checked here are the catastrophic cases — a
-   view's buffer index past the variadic data buffers (the trailing slot
-   is the producers' sizes array, not a data buffer) or a view span past
-   its declared size, negative lengths or offsets, and non-monotonic
-   offset spans (which would size one way and gather another). */
+   view's buffer index past the buffer array, negative lengths or
+   offsets, non-monotonic offset spans (which would size one way and
+   gather another), and, for a producer that wrote the spec's sizes
+   array, a view span past its declared size (a view naming the trailing
+   slot proves a no-sizes export, and its span crosses unbounded). */
 MIZU_EXT_INLINE int mizu_arrow_str_at(const ArrowArray *arr, int64_t k,
                                       int form, const uint8_t **ptr,
                                       int32_t *len) {

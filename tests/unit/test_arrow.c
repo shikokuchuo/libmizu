@@ -609,9 +609,10 @@ static void test_string_forms(void) {
 }
 
 static void test_strview_buffer_bound(void) {
-  /* a view's buffer index into the trailing sizes array (bi == ndata),
-     and a span past the declared size, are malformed; a NULL sizes array
-     is the producer's word */
+  /* a span past the declared size is malformed, as is a buffer index
+     past the buffer array; a view naming the trailing slot proves a
+     no-sizes export (nanoarrow's nested or standalone form) and crosses
+     unbounded */
   ArrowSchema cv, root;
   ArrowSchema *kids[1] = { &cv };
   mk_schema(&cv, "vu", "v", NULL, 0, NULL, 0);
@@ -620,7 +621,10 @@ static void test_strview_buffer_bound(void) {
   memset(views, 0, sizeof views);
   char data[20];
   memset(data, 'z', sizeof data);
-  const int64_t sizes[1] = { (int64_t) sizeof data };
+  unsigned char sizes[32];
+  memset(sizes, 0, sizeof sizes);
+  int64_t s0 = (int64_t) sizeof data;
+  memcpy(sizes, &s0, 8);
   int32_t l = 20, bi = 0, bo = 0;
   memcpy(views, &l, 4);
   memcpy(views + 8, &bi, 4);
@@ -634,7 +638,7 @@ static void test_strview_buffer_bound(void) {
   const ArrowArray *batches[1] = { &batch };
   mizu_arrow *a = NULL;
 
-  bi = 1;   /* == ndata: the sizes array is not a data buffer */
+  bi = 2;   /* past the buffer array */
   memcpy(views + 8, &bi, 4);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "malformed") != NULL);
@@ -660,8 +664,31 @@ static void test_strview_buffer_bound(void) {
   free(buf);
   mizu_arrow_close(a);
 
-  vbufs[3] = NULL;   /* no sizes array: the producer's word */
+  bi = 1;   /* the trailing slot: the no-sizes tell, crosses unbounded */
+  memcpy(views + 8, &bi, 4);
   buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  assert(buf != NULL);
+  free(buf);
+  mizu_arrow_close(a);
+
+  bi = 0;   /* a NULL sizes array: the producer's word */
+  memcpy(views + 8, &bi, 4);
+  vbufs[3] = NULL;
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* the no-sizes layout proper: one fewer buffer, the last a data slot */
+  const void *nbuf3[3] = { NULL, views, data };
+  bi = 0;
+  memcpy(views + 8, &bi, 4);
+  mk_array(&av, 1, 0, 0, 3, nbuf3, NULL, NULL);
+  buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  assert(buf != NULL);
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  offs = (const int64_t *) (buf + e.data_offset + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 20);
+  assert(memcmp(buf + e.data_offset + g.data, data, sizeof data) == 0);
   free(buf);
   mizu_arrow_close(a);
 }

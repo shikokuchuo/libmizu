@@ -167,6 +167,56 @@ int main(void) {
   aoffs[0] = -1;
   assert(mizu_arrow_str_at(&aa, 0, 2, &sp, &sl) == -1);
 
+  /* mizu_arrow_str_at form 3 (string_view): the spec layout's trailing
+     sizes array bounds a span; a view naming the trailing slot proves a
+     no-sizes export (nanoarrow's nested or standalone form) and crosses
+     unbounded. */
+  const char vdata[] = "alpha alpha alpha alphabeta beta beta beta beta";
+  unsigned char vsizes[32];
+  memset(vsizes, 0, sizeof vsizes);
+  int64_t s0 = 47;
+  memcpy(vsizes, &s0, 8);
+  uint8_t views[16];
+  memset(views, 0, sizeof views);
+  int32_t nfl = 23, nbi = 0, noff = 0;
+  memcpy(views, &nfl, 4);
+  memcpy(views + 4, vdata, 4);
+  memcpy(views + 8, &nbi, 4);
+  memcpy(views + 12, &noff, 4);
+  const void *vbufs[4] = { NULL, views, vdata, vsizes };
+  memset(&aa, 0, sizeof aa);
+  aa.length = 1;
+  aa.n_buffers = 4;
+  aa.buffers = vbufs;
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == 1);
+  assert(sl == 23 && sp == (const uint8_t *) vdata);
+  /* a span past the declared size rejects */
+  noff = 40;
+  memcpy(views + 12, &noff, 4);
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == -1);
+  /* a buffer index past the array rejects */
+  noff = 0;
+  nbi = 2;
+  memcpy(views + 8, &nbi, 4);
+  memcpy(views + 12, &noff, 4);
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == -1);
+  /* the trailing slot referenced: the no-sizes tell — crosses unbounded */
+  nbi = 1;
+  memcpy(views + 8, &nbi, 4);
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == 1);
+  assert(sp == vsizes && sl == 23);
+  /* the no-sizes layout proper: [NULL, views, data] — previously declined */
+  const void *nbuf3[3] = { NULL, views, vdata };
+  nbi = 0;
+  memcpy(views + 8, &nbi, 4);
+  aa.n_buffers = 3;
+  aa.buffers = nbuf3;
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == 1);
+  assert(sl == 23 && sp == (const uint8_t *) vdata);
+  nbi = 1;
+  memcpy(views + 8, &nbi, 4);
+  assert(mizu_arrow_str_at(&aa, 0, 3, &sp, &sl) == -1);
+
   printf("test_wire: OK\n");
   return 0;
 }
