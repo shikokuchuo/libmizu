@@ -419,6 +419,38 @@ int main(void) {
      needs none) */
   mizu_death_listener_teardown();
 
+#ifdef __linux__
+  /* the listener restarts after a teardown: a fresh watch fires on the
+     watched pid's exit, and a pre-teardown (now unlisted) watch's stop
+     frees directly */
+  {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      sleep(30);
+      _exit(0);
+    }
+    _Atomic int dl_flag = 0;
+    mizu_death_watch *w1 = mizu_death_watch_start((long) pid, &dl_flag, NULL);
+    assert(w1 != NULL);
+    mizu_death_listener_teardown();
+    mizu_death_watch *w2 = mizu_death_watch_start((long) pid, &dl_flag, NULL);
+    assert(w2 != NULL);
+    kill(pid, SIGKILL);
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    for (int i = 0; i < 5000 && !dl_flag; i++) {
+      struct timespec ts = {0, 1000000};
+      nanosleep(&ts, NULL);
+    }
+    assert(dl_flag);
+    mizu_death_watch_stop(w1);
+    mizu_death_watch_stop(w2);
+    mizu_death_listener_teardown();
+    puts("ok death listener restart");
+  }
+#endif
+
 #ifndef _WIN32
   /* the liveness dir resolution is per-thread: on a fresh thread an
      oversized TMPDIR fails it (the creates refuse), an unset TMPDIR

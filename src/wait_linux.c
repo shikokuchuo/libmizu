@@ -119,10 +119,12 @@ static void mizu_dw_fire(struct mizu_death_watch_s *w) {
 static void *mizu_dl_main(void *arg) {
   (void) arg;
   struct epoll_event evs[16];
+  int abnormal = 0;
   for (;;) {
     int n = epoll_wait(mizu_dl_epfd, evs, 16, -1);
     if (n < 0) {
       if (errno == EINTR) continue;
+      abnormal = 1;
       break;
     }
     pthread_mutex_lock(&mizu_dl_mu);
@@ -160,6 +162,35 @@ static void *mizu_dl_main(void *arg) {
     pthread_mutex_unlock(&mizu_dl_mu);
     if (shut) break;
   }
+  if (!abnormal) return NULL;
+  /* epoll_wait failed: with the thread gone and mizu_dl_running still
+     set, every watch would register into a listener that never fires.
+     Fire all active watches conservatively (a wake trigger only — the
+     liveness lock stays the verdict), unlist them so death_watch_stop
+     frees directly, and reset the state so the next registration starts
+     a fresh listener. Detach: a restart overwrites mizu_dl_thread, and
+     teardown joins only the thread it pokes. */
+  pthread_mutex_lock(&mizu_dl_mu);
+  for (struct mizu_death_watch_s *w = mizu_dl_watches, *next; w; w = next) {
+    next = w->next;
+    if (w->state == MIZU_DW_STOPPED) {
+      if (w->pidfd >= 0) close(w->pidfd);
+      free(w);
+    } else {
+      if (w->state == MIZU_DW_ACTIVE) mizu_dw_fire(w);
+      if (w->pidfd >= 0) close(w->pidfd);
+      w->pidfd = -1;
+      w->listed = 0;
+    }
+  }
+  mizu_dl_watches = NULL;
+  close(mizu_dl_epfd);
+  close(mizu_dl_evfd);
+  mizu_dl_epfd = mizu_dl_evfd = -1;
+  mizu_dl_running = 0;
+  mizu_dl_shutdown = 0;
+  pthread_mutex_unlock(&mizu_dl_mu);
+  pthread_detach(pthread_self());
   return NULL;
 }
 
