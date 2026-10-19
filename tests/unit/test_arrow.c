@@ -391,6 +391,134 @@ static void test_masked_unaligned(void) {
   mizu_arrow_close(a);
 }
 
+static void test_unaligned_buffers(void) {
+  /* the read paths' alignment discipline (cvt_run's, applied to the
+     string/dict/date/timestamp walks): every Arrow buffer sits at an odd
+     address — the gathers read exactly the aligned case's values */
+  ArrowSchema cs, cu, cd, cdt, cts, cv, lv, root;
+  ArrowSchema *kids[6] = { &cs, &cu, &cd, &cdt, &cts, &cv };
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&cu, "U", "u", NULL, 0, NULL, 0);
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "i", "d", NULL, 0, &lv, 0);
+  mk_schema(&cdt, "tdD", "dt", NULL, 0, NULL, 0);
+  mk_schema(&cts, "tss:", "ts", NULL, 0, NULL, 0);
+  mk_schema(&cv, "vu", "v", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 6, NULL, 0);
+
+  /* every typed buffer is forced to an odd address (the pad byte covers
+     the even case; the odd case already is one) */
+#define ODD(p) ((void *) ((uintptr_t) (p) | 1u))
+  const int32_t so[5] = { 0, 1, 3, 6, 7 };
+  uint8_t so1[1 + sizeof so];
+  uint8_t *sop = ODD(so1);
+  memcpy(sop, so, sizeof so);
+  const uint8_t ubm = 0x0D;   /* u: element 1 null */
+  const int64_t lo[5] = { 0, 3, 3, 5, 9 };
+  uint8_t lo1[1 + sizeof lo];
+  uint8_t *lop = ODD(lo1);
+  memcpy(lop, lo, sizeof lo);
+  const int32_t lvoffs[3] = { 0, 3, 7 };
+  uint8_t lv1[1 + sizeof lvoffs];
+  uint8_t *lvp = ODD(lv1);
+  memcpy(lvp, lvoffs, sizeof lvoffs);
+  const int32_t dc[4] = { 0, 1, 1, 0 };
+  uint8_t dc1[1 + sizeof dc];
+  uint8_t *dcp = ODD(dc1);
+  memcpy(dcp, dc, sizeof dc);
+  const int32_t dd[4] = { 19723, 0, -1, 18993 };
+  uint8_t dd1[1 + sizeof dd];
+  uint8_t *ddp = ODD(dd1);
+  memcpy(ddp, dd, sizeof dd);
+  const int64_t tc[4] = { 1700000000LL, 0, -86400, 1 };
+  uint8_t tc1[1 + sizeof tc];
+  uint8_t *tcp = ODD(tc1);
+  memcpy(tcp, tc, sizeof tc);
+  /* four string_view elements naming one 20-byte span, the sizes array
+     misaligned */
+  uint8_t vws[4 * 16];
+  memset(vws, 0, sizeof vws);
+  char vdata[20];
+  memset(vdata, 'z', sizeof vdata);
+  for (int i = 0; i < 4; i++) {
+    int32_t vl = 20, bi = 0, bo = 0;
+    memcpy(vws + 16 * i, &vl, 4);
+    memcpy(vws + 16 * i + 8, &bi, 4);
+    memcpy(vws + 16 * i + 12, &bo, 4);
+  }
+  int64_t vsz = 20;
+  uint8_t vs1[1 + 8];
+  uint8_t *vsp = ODD(vs1);
+  memcpy(vsp, &vsz, 8);
+
+  const void *sb[3] = { NULL, sop, "abbcccd" };
+  const void *ub[3] = { &ubm, lop, "aaabbdddd" };
+  const void *db[3] = { NULL, lvp, "lowhigh" };
+  const void *cb[2] = { NULL, dcp };
+  const void *dtb[2] = { NULL, ddp };
+  const void *tb[2] = { NULL, tcp };
+  const void *vb[4] = { NULL, vws, vdata, vsp };
+  ArrowArray as, au, adict, ad, adt, ats, av, batch;
+  ArrowArray *bk[6] = { &as, &au, &ad, &adt, &ats, &av };
+  mk_array(&as, 4, 0, 0, 3, sb, NULL, NULL);
+  mk_array(&au, 4, 1, 0, 3, ub, NULL, NULL);
+  mk_array(&adict, 2, 0, 0, 3, db, NULL, NULL);
+  mk_array(&ad, 4, 0, 0, 2, cb, NULL, &adict);
+  mk_array(&adt, 4, 0, 0, 2, dtb, NULL, NULL);
+  mk_array(&ats, 4, 0, 0, 2, tb, NULL, NULL);
+  mk_array(&av, 4, 0, 0, 4, vb, NULL, NULL);
+  mk_array(&batch, 4, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 6;
+  const ArrowArray *batches[1] = { &batch };
+
+  size_t total;
+  mizu_arrow_warn warn;
+  mizu_arrow *a;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  mizu_mizs_geom g = mizu_mizs_geometry(4);
+  /* s: the null-free span walk and rebase writer */
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const uint8_t *blk = buf + e.data_offset;
+  const int64_t *offs = (const int64_t *) (blk + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 1 && offs[2] == 3 && offs[3] == 6 &&
+         offs[4] == 7);
+  assert(memcmp(blk + g.data, "abbcccd", 7) == 0);
+  /* u: the per-element str_at gather, the null collapsing to zero span */
+  assert(mizu_mizl_elem(buf, total, 1, &e) == 0);
+  blk = buf + e.data_offset;
+  offs = (const int64_t *) (blk + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 3 && offs[2] == 3 && offs[3] == 5 &&
+         offs[4] == 9);
+  assert(memcmp(blk + g.data, "aaabbdddd", 9) == 0);
+  assert(blk[0] == 0xFD);
+  /* d: the index bounds vet and gather */
+  assert(mizu_mizl_elem(buf, total, 2, &e) == 0);
+  const int32_t *codes = (const int32_t *) (buf + e.data_offset);
+  assert(codes[0] == 1 && codes[1] == 2 && codes[2] == 2 && codes[3] == 1);
+  const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(blob, (size_t) e.attrs_size, "low", 3) != NULL);
+  assert(find_span(blob, (size_t) e.attrs_size, "high", 4) != NULL);
+  /* dt / ts: the date and timestamp element loads */
+  assert(mizu_mizl_elem(buf, total, 3, &e) == 0);
+  const double *ddays = (const double *) (buf + e.data_offset);
+  assert(ddays[0] == 19723.0 && ddays[1] == 0.0 && ddays[2] == -1.0 &&
+         ddays[3] == 18993.0);
+  assert(mizu_mizl_elem(buf, total, 4, &e) == 0);
+  const double *secs = (const double *) (buf + e.data_offset);
+  assert(secs[0] == 1.7e9 && secs[1] == 0.0 && secs[2] == -86400.0 &&
+         secs[3] == 1.0);
+  /* v: the variadic sizes array bounds the spans */
+  assert(mizu_mizl_elem(buf, total, 5, &e) == 0);
+  blk = buf + e.data_offset;
+  offs = (const int64_t *) (blk + g.offsets);
+  assert(offs[0] == 0 && offs[1] == 20 && offs[2] == 40 && offs[3] == 60 &&
+         offs[4] == 80);
+  assert(memcmp(blk + g.data, vdata, 20) == 0);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 static void test_zero_rows(void) {
   ArrowSchema ci, cs, root;
   ArrowSchema *kids[2] = { &ci, &cs };
@@ -2554,6 +2682,7 @@ int main(void) {
   test_intmin();
   test_intmin_unmasked();
   test_masked_unaligned();
+  test_unaligned_buffers();
   test_zero_rows();
   test_chunked_and_offsets();
   test_null_span_collapse();

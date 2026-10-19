@@ -895,6 +895,46 @@ static int arrow_levels_check(mizu_arrow *a, int col) {
   return 0;
 }
 
+/* One dictionary index element: per-element memcpy, the file's alignment
+   discipline (the buffer can be element-misaligned). An unsigned index
+   past int64 reads negative — the bounds check declines it. */
+static int64_t arrow_idx_at(const uint8_t *idx, int64_t i, int w,
+                            int is_signed) {
+  switch (w) {
+  case 1: {
+    if (!is_signed) return idx[i];
+    int8_t v;
+    memcpy(&v, idx + i, 1);
+    return v;
+  }
+  case 2: {
+    if (is_signed) {
+      int16_t v;
+      memcpy(&v, idx + 2 * i, 2);
+      return v;
+    }
+    uint16_t v;
+    memcpy(&v, idx + 2 * i, 2);
+    return v;
+  }
+  case 4: {
+    if (is_signed) {
+      int32_t v;
+      memcpy(&v, idx + 4 * i, 4);
+      return v;
+    }
+    uint32_t v;
+    memcpy(&v, idx + 4 * i, 4);
+    return v;
+  }
+  default: {
+    int64_t v;
+    memcpy(&v, idx + 8 * i, 8);
+    return v;
+  }
+  }
+}
+
 /* A later batch's dictionary must equal batch 0's canonical set. */
 static int arrow_levels_match(mizu_arrow *a, int col,
                               const ArrowArray *dict) {
@@ -942,24 +982,8 @@ static int arrow_validate_dicts(mizu_arrow *a) {
       const uint8_t *idx = (const uint8_t *) ba->buffers[1];
       for (int64_t k = 0; k < ba->length; k++) {
         if (!mizu_arrow_valid(ba, k)) continue;
-        int64_t j = ba->offset + k, c;
-        switch (pc->idx_w) {
-        case 1:
-          c = pc->idx_signed ? (int64_t) ((const int8_t *) idx)[j] :
-            (int64_t) idx[j];
-          break;
-        case 2:
-          c = pc->idx_signed ? (int64_t) ((const int16_t *) idx)[j] :
-            (int64_t) ((const uint16_t *) idx)[j];
-          break;
-        case 4:
-          c = pc->idx_signed ? (int64_t) ((const int32_t *) idx)[j] :
-            (int64_t) ((const uint32_t *) idx)[j];
-          break;
-        default:
-          c = ((const int64_t *) idx)[j];
-          break;
-        }
+        int64_t c = arrow_idx_at(idx, ba->offset + k, pc->idx_w,
+                                 pc->idx_signed);
         if (c < 0 || c >= pc->nlev) {
           mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                               "column '%s': a dictionary index outside the "
@@ -989,25 +1013,31 @@ static int arrow_size_str(mizu_arrow *a, int col) {
          non-monotonic interior (or an i64 span past the int32 element
          bound) would size one way and gather another; walk them */
       if (pc->str_form == 1) {
-        const int32_t *offs = (const int32_t *) ba->buffers[1];
-        int32_t prev = offs[ba->offset];
+        const uint8_t *offs = (const uint8_t *) ba->buffers[1];
+        int32_t first, prev;
+        memcpy(&first, offs + 4 * ba->offset, 4);
+        prev = first;
         if (prev < 0) goto malformed;
         for (int64_t k = 0; k < ba->length; k++) {
-          const int32_t o = offs[ba->offset + k + 1];
+          int32_t o;
+          memcpy(&o, offs + 4 * (ba->offset + k + 1), 4);
           if (o < prev) goto malformed;
           prev = o;
         }
-        bytes += prev - offs[ba->offset];
+        bytes += prev - first;
       } else {
-        const int64_t *offs = (const int64_t *) ba->buffers[1];
-        int64_t prev = offs[ba->offset];
+        const uint8_t *offs = (const uint8_t *) ba->buffers[1];
+        int64_t first, prev;
+        memcpy(&first, offs + 8 * ba->offset, 8);
+        prev = first;
         if (prev < 0) goto malformed;
         for (int64_t k = 0; k < ba->length; k++) {
-          const int64_t o = offs[ba->offset + k + 1];
+          int64_t o;
+          memcpy(&o, offs + 8 * (ba->offset + k + 1), 8);
           if (o < prev || o - prev > INT32_MAX) goto malformed;
           prev = o;
         }
-        bytes += prev - offs[ba->offset];
+        bytes += prev - first;
       }
       continue;
     }
@@ -1148,20 +1178,32 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
       const ArrowArray *ba = a->batches[b]->children[col];
       if (ba->length == 0) continue;
       if (pc->str_form == 1) {
-        const int32_t *so = (const int32_t *) ba->buffers[1];
-        int32_t base0 = so[ba->offset];
-        for (int64_t k = 0; k < ba->length; k++)
-          offs[done + k + 1] = run + (so[ba->offset + k + 1] - base0);
-        int32_t blen = so[ba->offset + ba->length] - base0;
+        const uint8_t *so = (const uint8_t *) ba->buffers[1];
+        int32_t base0;
+        memcpy(&base0, so + 4 * ba->offset, 4);
+        for (int64_t k = 0; k < ba->length; k++) {
+          int32_t o;
+          memcpy(&o, so + 4 * (ba->offset + k + 1), 4);
+          offs[done + k + 1] = run + (o - base0);
+        }
+        int32_t oend;
+        memcpy(&oend, so + 4 * (ba->offset + ba->length), 4);
+        int32_t blen = oend - base0;
         memcpy(data + run, (const uint8_t *) ba->buffers[2] + base0,
                (size_t) blen);
         run += blen;
       } else {
-        const int64_t *so = (const int64_t *) ba->buffers[1];
-        int64_t base0 = so[ba->offset];
-        for (int64_t k = 0; k < ba->length; k++)
-          offs[done + k + 1] = run + (so[ba->offset + k + 1] - base0);
-        int64_t blen = so[ba->offset + ba->length] - base0;
+        const uint8_t *so = (const uint8_t *) ba->buffers[1];
+        int64_t base0;
+        memcpy(&base0, so + 8 * ba->offset, 8);
+        for (int64_t k = 0; k < ba->length; k++) {
+          int64_t o;
+          memcpy(&o, so + 8 * (ba->offset + k + 1), 8);
+          offs[done + k + 1] = run + (o - base0);
+        }
+        int64_t oend;
+        memcpy(&oend, so + 8 * (ba->offset + ba->length), 8);
+        int64_t blen = oend - base0;
         memcpy(data + run, (const uint8_t *) ba->buffers[2] + base0,
                (size_t) blen);
         run += blen;
@@ -1205,24 +1247,8 @@ static void arrow_write_dict(uint8_t *dst, const mizu_arrow *a, int col) {
       if (!mizu_arrow_valid(ba, k)) {
         v = MIZU_NA_INT32;
       } else {
-        int64_t i = ba->offset + k, c;
-        switch (pc->idx_w) {
-        case 1:
-          c = pc->idx_signed ? (int64_t) ((const int8_t *) idx)[i] :
-            (int64_t) idx[i];
-          break;
-        case 2:
-          c = pc->idx_signed ? (int64_t) ((const int16_t *) idx)[i] :
-            (int64_t) ((const uint16_t *) idx)[i];
-          break;
-        case 4:
-          c = pc->idx_signed ? (int64_t) ((const int32_t *) idx)[i] :
-            (int64_t) ((const uint32_t *) idx)[i];
-          break;
-        default:
-          c = ((const int64_t *) idx)[i];
-          break;
-        }
+        int64_t c = arrow_idx_at(idx, ba->offset + k, pc->idx_w,
+                                 pc->idx_signed);
         v = (int32_t) (c + 1);
       }
       memcpy(dst + 4 * (done + k), &v, 4);
@@ -1236,12 +1262,14 @@ static void arrow_write_date(uint8_t *dst, const mizu_arrow *a, int col) {
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
-    const int32_t *days = (const int32_t *) ba->buffers[1];
+    const uint8_t *days = (const uint8_t *) ba->buffers[1];
     for (int64_t k = 0; k < ba->length; k++) {
       if (!mizu_arrow_valid(ba, k)) {
         arrow_store_na_r(dst + 8 * (done + k));
       } else {
-        double v = (double) days[ba->offset + k];
+        int32_t d;
+        memcpy(&d, days + 4 * (ba->offset + k), 4);
+        double v = (double) d;
         memcpy(dst + 8 * (done + k), &v, 8);
       }
     }
@@ -1255,12 +1283,14 @@ static void arrow_write_ts(uint8_t *dst, const mizu_arrow *a, int col) {
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
-    const int64_t *counts = (const int64_t *) ba->buffers[1];
+    const uint8_t *counts = (const uint8_t *) ba->buffers[1];
     for (int64_t k = 0; k < ba->length; k++) {
       if (!mizu_arrow_valid(ba, k)) {
         arrow_store_na_r(dst + 8 * (done + k));
       } else {
-        double v = (double) counts[ba->offset + k] * pc->ts_scale;
+        int64_t ct;
+        memcpy(&ct, counts + 8 * (ba->offset + k), 8);
+        double v = (double) ct * pc->ts_scale;
         memcpy(dst + 8 * (done + k), &v, 8);
       }
     }

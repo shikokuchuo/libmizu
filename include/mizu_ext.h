@@ -2052,17 +2052,22 @@ MIZU_EXT_INLINE int mizu_ext_arrow_str_at_impl(const ArrowArray *arr,
   if (!mizu_ext_arrow_valid_impl(arr, k)) return 0;
   int64_t i = arr->offset + k;
   if (form == 1) {
-    const int32_t *offs = (const int32_t *) arr->buffers[1];
-    if (offs[i] < 0 || offs[i + 1] < offs[i]) return -1;
-    *ptr = (const uint8_t *) arr->buffers[2] + offs[i];
-    *len = offs[i + 1] - offs[i];
+    const uint8_t *offs = (const uint8_t *) arr->buffers[1];
+    int32_t o0, o1;
+    memcpy(&o0, offs + 4 * i, 4);
+    memcpy(&o1, offs + 4 * (i + 1), 4);
+    if (o0 < 0 || o1 < o0) return -1;
+    *ptr = (const uint8_t *) arr->buffers[2] + o0;
+    *len = o1 - o0;
   } else if (form == 2) {
-    const int64_t *offs = (const int64_t *) arr->buffers[1];
-    if (offs[i] < 0 || offs[i + 1] < offs[i] ||
-        offs[i + 1] - offs[i] > INT32_MAX)
+    const uint8_t *offs = (const uint8_t *) arr->buffers[1];
+    int64_t o0, o1;
+    memcpy(&o0, offs + 8 * i, 8);
+    memcpy(&o1, offs + 8 * (i + 1), 8);
+    if (o0 < 0 || o1 < o0 || o1 - o0 > INT32_MAX)
       return -1;
-    *ptr = (const uint8_t *) arr->buffers[2] + offs[i];
-    *len = (int32_t) (offs[i + 1] - offs[i]);
+    *ptr = (const uint8_t *) arr->buffers[2] + o0;
+    *len = (int32_t) (o1 - o0);
   } else {
     const uint8_t *vw = (const uint8_t *) arr->buffers[1] + i * 16;
     int32_t l;
@@ -2084,9 +2089,13 @@ MIZU_EXT_INLINE int mizu_ext_arrow_str_at_impl(const ArrowArray *arr,
       if (bi < 0 || off < 0 || 2 + (int64_t) bi >= arr->n_buffers)
         return -1;
       if (2 + bi < arr->n_buffers - 1) {
-        const int64_t *sizes =
-          (const int64_t *) arr->buffers[arr->n_buffers - 1];
-        if (sizes != NULL && (int64_t) off + l > sizes[bi]) return -1;
+        const uint8_t *sizes =
+          (const uint8_t *) arr->buffers[arr->n_buffers - 1];
+        if (sizes != NULL) {
+          int64_t sz;
+          memcpy(&sz, sizes + 8 * (ptrdiff_t) bi, 8);
+          if ((int64_t) off + l > sz) return -1;
+        }
       }
       *ptr = (const uint8_t *) arr->buffers[2 + bi] + off;
     }
