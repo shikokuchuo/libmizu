@@ -1579,6 +1579,14 @@ mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
     if (arrow_check_batch(a, ba) < 0) goto fail;
     a->rows += ba->length;
   }
+  /* the root dict's automatic row.names are the compact c(NA, -n) int32
+     form — past 2^31 rows the emit would wrap, and the inline 'I' form
+     has no root-blob override to escape it */
+  if (a->rows > INT32_MAX) {
+    mizu_arrow_close(a);
+    return arrow_decline("an Arrow frame past the int32 row range has no "
+                         "portable home");
+  }
   if (arrow_validate_dicts(a) < 0) goto fail;
   /* the string walks: the packed byte totals, and the one malformed-
      record check ahead of any emit */

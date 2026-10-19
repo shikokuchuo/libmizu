@@ -1505,6 +1505,43 @@ static void test_open_declines2(void) {
 }
 
 /* Dictionary index widths: every integer width signs and stages. */
+static void test_rows_bound(void) {
+  /* the automatic row.names are the compact c(NA, -n) int32 form: past
+     2^31 rows the open declines instead of wrapping the emit */
+  ArrowSchema ci, root;
+  ArrowSchema *kids[1] = { &ci };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int32_t x[1] = { 1 };
+  const void *xb[2] = { NULL, x };
+  ArrowArray ax, ax1, b1, b2;
+  ArrowArray *bk[1] = { &ax };
+  ArrowArray *bk1[1] = { &ax1 };
+  mk_array(&ax, (int64_t) INT32_MAX + 1, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&b1, (int64_t) INT32_MAX + 1, 0, 0, 1, NULL, bk, NULL);
+  b1.n_children = 1;
+  const ArrowArray *batches[1] = { &b1 };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "int32 row range") != NULL);
+
+  /* the sum across batches is bounded too */
+  mk_array(&ax, INT32_MAX, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&b1, INT32_MAX, 0, 0, 1, NULL, bk, NULL);
+  b1.n_children = 1;
+  mk_array(&ax1, 1, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&b2, 1, 0, 0, 1, NULL, bk1, NULL);
+  b2.n_children = 1;
+  const ArrowArray *batches2[2] = { &b1, &b2 };
+  assert(mizu_arrow_open(&a, &root, batches2, 2, 0) == MIZU_ERR);
+
+  /* the boundary itself opens (the 8 GiB write stays untested here) */
+  const ArrowArray *batches3[1] = { &b1 };
+  assert(mizu_arrow_open(&a, &root, batches3, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_rows(a) == INT32_MAX);
+  mizu_arrow_close(a);
+}
+
 static void test_dict_widths(void) {
   ArrowSchema lv, cd, root;
   ArrowSchema *kids[1] = { &cd };
@@ -2536,6 +2573,7 @@ int main(void) {
   test_struct_batch_shape();
   test_cvt_kernels();
   test_open_declines2();
+  test_rows_bound();
   test_dict_widths();
   test_dict_edge_shapes();
   test_remote_decline();
