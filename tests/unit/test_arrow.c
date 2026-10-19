@@ -311,6 +311,34 @@ static void test_intmin(void) {
   mizu_arrow_close(a);
 }
 
+static void test_intmin_unmasked(void) {
+  /* the null-free (unmasked) path counts genuine sentinels exactly like
+     the masked one: the value crosses verbatim and reads as NA in R */
+  ArrowSchema ci, root;
+  ArrowSchema *kids[1] = { &ci };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const int32_t x[3] = { 1, INT32_MIN, 7 };
+  const void *xb[2] = { NULL, x };
+  ArrowArray ax, batch;
+  ArrowArray *bk[1] = { &ax };
+  mk_array(&ax, 3, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  size_t total;
+  mizu_arrow_warn warn;
+  mizu_arrow *a;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  assert(warn.n_intmin == 1);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int32_t *v = (const int32_t *) (buf + e.data_offset);
+  assert(v[0] == 1 && v[1] == INT32_MIN && v[2] == 7);
+  free(buf);
+  mizu_arrow_close(a);
+}
+
 static void test_masked_unaligned(void) {
   /* the masked convert's full-word branch scans the written lanes by
      memcpy: the inline 'I' column body lands at an unaligned stream
@@ -1159,8 +1187,8 @@ static void test_uint64_verbatim(void) {
   free(buf);
   mizu_arrow_close(a);
 
-  /* the masked-path scope: a null-free column takes no walk and never
-     counts, a genuine sentinel included */
+  /* the unmasked path counts too: a null-free column's genuine sentinel
+     warns exactly like a masked one's */
   {
     ArrowSchema ci1, root1;
     ArrowSchema *kids1[1] = { &ci1 };
@@ -1175,7 +1203,7 @@ static void test_uint64_verbatim(void) {
     bx.n_children = 1;
     const ArrowArray *b1[1] = { &bx };
     buf = frame_write(&root1, b1, 1, 0, &total, &warn, &a);
-    assert(warn.n_int64 == 0);
+    assert(warn.n_int64 == 1);
     free(buf);
     mizu_arrow_close(a);
   }
@@ -2479,6 +2507,7 @@ int main(void) {
   test_frame_a();
   test_cvt_types();
   test_intmin();
+  test_intmin_unmasked();
   test_masked_unaligned();
   test_zero_rows();
   test_chunked_and_offsets();

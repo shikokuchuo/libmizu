@@ -225,6 +225,35 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
    lanes exactly, so an INT64_MIN pattern there is a genuine value). */
 static const mizu_cvt_row CVT_ROW_I64_V;
 
+/* The genuine-sentinel count over n already-written dst lanes: the
+   identity int32/int64 rows only (they read as NA_integer_ /
+   NA_integer64_ in R — the other rows cannot produce a sentinel, and
+   the verbatim i64 row's lanes are the peer's agreed values). Per-lane
+   memcpy: the inline 'I' form's column bodies are unaligned (a vec
+   header precedes them), so no typed dst scan. The count rides a local
+   — a warn-> store per lane would alias-block vectorization. */
+static void cvt_count_min(const uint8_t *dst, size_t n,
+                          const mizu_cvt_row *row, mizu_arrow_warn *warn) {
+  if (row->wire == MIZU_TYPE_INT && row->cvt == MIZU_CVT_COPY) {
+    uint64_t cnt = 0;
+    for (size_t i = 0; i < n; i++) {
+      int32_t v;
+      memcpy(&v, dst + 4 * i, 4);
+      cnt += v == INT32_MIN;
+    }
+    warn->n_intmin += cnt;
+  } else if (row->wire == MIZU_TYPE_INT64 && row->cvt == MIZU_CVT_COPY &&
+             row != &CVT_ROW_I64_V) {
+    uint64_t cnt = 0;
+    for (size_t i = 0; i < n; i++) {
+      int64_t v;
+      memcpy(&v, dst + 8 * i, 8);
+      cnt += v == INT64_MIN;
+    }
+    warn->n_int64 += cnt;
+  }
+}
+
 /* The masked variant (Arrow nulls): word-wise over the validity bitmap —
    an all-ones word a 64-lane convert, a zero word a 64-sentinel fill,
    mixed the per-lane select. off is the element offset: a bit offset
@@ -235,54 +264,21 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
                            const uint8_t *valid, uint64_t off, size_t n,
                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   const size_t wo = row->w_out, wi = row->w_in;
-  const int count_min = row->wire == MIZU_TYPE_INT &&
-    row->cvt == MIZU_CVT_COPY;
-  const int count_min64 = row->wire == MIZU_TYPE_INT64 &&
-    row->cvt == MIZU_CVT_COPY && row != &CVT_ROW_I64_V;
   size_t i = 0;
   while (i < n) {
     size_t lanes = n - i < 64 ? n - i : 64;
     uint64_t w = bitmap_word(valid, off + i, lanes);
     uint64_t full = lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1;
     if (w == full) {
-      /* copy, then count the genuine sentinels off the written lanes via
-         per-lane memcpy: the inline 'I' form's column bodies are
-         unaligned (a vec header precedes them), so no typed dst scan.
-         The count rides a local — a warn-> store per lane would
-         alias-block vectorization */
       cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
-      if (count_min) {
-        uint64_t cnt = 0;
-        for (size_t j = 0; j < lanes; j++) {
-          int32_t v;
-          memcpy(&v, dst + (i + j) * wo, 4);
-          cnt += v == INT32_MIN;
-        }
-        warn->n_intmin += cnt;
-      } else if (count_min64) {
-        uint64_t cnt = 0;
-        for (size_t j = 0; j < lanes; j++) {
-          int64_t v;
-          memcpy(&v, dst + (i + j) * wo, 8);
-          cnt += v == INT64_MIN;
-        }
-        warn->n_int64 += cnt;
-      }
+      cvt_count_min(dst + i * wo, lanes, row, warn);
     } else if (w == 0) {
       cvt_fill_na(dst + i * wo, lanes, row->wire);
     } else {
       for (size_t j = 0; j < lanes; j++) {
         if ((w >> j) & 1) {
           cvt_run(dst + (i + j) * wo, src + (i + j) * wi, 1, row, warn);
-          if (count_min) {
-            int32_t v;
-            memcpy(&v, dst + (i + j) * wo, 4);
-            warn->n_intmin += v == INT32_MIN;
-          } else if (count_min64) {
-            int64_t v;
-            memcpy(&v, dst + (i + j) * wo, 8);
-            warn->n_int64 += v == INT64_MIN;
-          }
+          cvt_count_min(dst + (i + j) * wo, 1, row, warn);
         } else {
           cvt_fill_na(dst + (i + j) * wo, 1, row->wire);
         }
@@ -356,6 +352,9 @@ void mizu_cvt_convert(uint8_t *dst, const uint8_t *src,
     convert_masked(dst, src, valid, off, n, row, warn);
   } else {
     cvt_run(dst, src, n, row, warn);
+    /* the null-free path counts too: a genuine sentinel there reads as NA
+       in R exactly like a masked one's */
+    cvt_count_min(dst, n, row, warn);
   }
 }
 
