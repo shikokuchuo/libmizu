@@ -1764,6 +1764,57 @@ static void test_dict_edge_shapes(void) {
   mizu_arrow_close(a);
 }
 
+static void test_dict_strview_inline(void) {
+  /* a string_view dictionary whose levels are all inline (<= 12 bytes)
+     legally carries no variadic data buffer (n_buffers == 2) */
+  ArrowSchema lv, cd, root;
+  ArrowSchema *kids[1] = { &cd };
+  mk_schema(&lv, "vu", NULL, NULL, 0, NULL, 0);
+  mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  uint8_t views[32];
+  memset(views, 0, sizeof views);
+  int32_t l0 = 3, l1 = 4;
+  memcpy(views, &l0, 4);
+  memcpy(views + 4, "low", 3);
+  memcpy(views + 16, &l1, 4);
+  memcpy(views + 20, "high", 4);
+  const void *db[2] = { NULL, views };
+  ArrowArray dict, ai, batch;
+  mk_array(&dict, 2, 0, 0, 2, db, NULL, NULL);
+  const int8_t codes[4] = { 0, 1, 1, 0 };
+  const void *cb[2] = { NULL, codes };
+  ArrowArray *bk[1] = { &ai };
+  mk_array(&ai, 4, 0, 0, 2, cb, NULL, &dict);
+  mk_array(&batch, 4, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *batches[1] = { &batch };
+  size_t total;
+  mizu_arrow_warn warn;
+  mizu_arrow *a;
+  uint8_t *buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
+  mizu_mizl_entry e;
+  assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+  const int32_t *v = (const int32_t *) (buf + e.data_offset);
+  assert(v[0] == 1 && v[1] == 2 && v[2] == 2 && v[3] == 1);
+  const uint8_t *blob = buf + e.data_offset + e.data_size - e.attrs_size;
+  assert(find_span(blob, (size_t) e.attrs_size, "low", 3) != NULL);
+  assert(find_span(blob, (size_t) e.attrs_size, "high", 4) != NULL);
+  blob_check(blob, (size_t) e.attrs_size);
+  free(buf);
+  mizu_arrow_close(a);
+
+  /* a >12-byte level with no data buffer to name declines at the open's
+     levels walk */
+  int32_t l2 = 13, bi = 0, bo = 0;
+  memcpy(views, &l2, 4);
+  memcpy(views + 8, &bi, 4);
+  memcpy(views + 12, &bo, 4);
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow dictionary") != NULL);
+}
+
 /* A referenced one-column int32 frame of the given length (defined with
    the remote-leaf tests below). */
 static uint8_t *ref_region(int with_nulls, int64_t rows, size_t *total_out);
@@ -2705,6 +2756,7 @@ int main(void) {
   test_rows_bound();
   test_dict_widths();
   test_dict_edge_shapes();
+  test_dict_strview_inline();
   test_remote_decline();
   test_remote();
   test_root_blob_override();

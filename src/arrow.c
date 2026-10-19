@@ -782,11 +782,18 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
 }
 
 /* A dictionary array's buffer shape: the levels vet, applied to every
-   batch's dictionary ahead of the level match's reads. */
-static int arrow_dict_shape_ok(const ArrowArray *dict) {
-  return dict != NULL && dict->n_buffers >= 3 && dict->buffers != NULL &&
-    (dict->length <= 0 ||
-     (dict->buffers[1] != NULL && dict->buffers[2] != NULL));
+   batch's dictionary ahead of the level match's reads. A string_view
+   (form 3) dictionary with every level inline (<= 12 bytes) legally has
+   no variadic data buffer — n_buffers == 2; a level past 12 bytes then
+   fails the open's per-level resolve, so the form is vetted here and the
+   spans there. */
+static int arrow_dict_shape_ok(const ArrowArray *dict, int str_form) {
+  if (dict == NULL || dict->buffers == NULL) return 0;
+  const int64_t need = str_form == 3 ? 2 : 3;
+  if (dict->n_buffers < need) return 0;
+  if (dict->length <= 0) return 1;
+  return dict->buffers[1] != NULL &&
+    (dict->n_buffers == 2 || dict->buffers[2] != NULL);
 }
 
 /* One batch's shape checks. 0 vetted, -1 with the decline in the
@@ -831,7 +838,8 @@ static int arrow_check_batch(mizu_arrow *a, const ArrowArray *b) {
                           "an invalid Arrow C Data Interface batch");
       return -1;
     }
-    if (pc->kind == MIZU_ARROW_DICT && !arrow_dict_shape_ok(c->dictionary)) {
+    if (pc->kind == MIZU_ARROW_DICT &&
+        !arrow_dict_shape_ok(c->dictionary, pc->str_form)) {
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "an invalid Arrow C Data Interface batch");
       return -1;
