@@ -530,3 +530,16 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   `attrs_size` range declines at open (each level costs framing bytes
   beyond the already-bounded packed bytes, so a level count past
   ~2^29 wrapped the cast at write).
+- `mizu_pool_create` now caps `result_slots` at 2^24 *after* the
+  per-submitter partition rounding, rounding down when the carry
+  crosses: a value at the documented cap whose submitter count did not
+  divide it rounded *up* past the task handle's 24-bit `rs_index`,
+  wrapping high indices into the sequence bits.
+  `mizu_pool_hdr_validate` gains the matching bound.
+- The Linux death listener no longer goes deaf when its epoll thread
+  dies: the thread's abnormal exit fires every active watch
+  conservatively (a wake trigger only — the liveness lock stays the
+  verdict), unlists the set so `mizu_death_watch_stop` frees directly,
+  and resets the shared state so the next registration starts a fresh
+  listener. Previously `mizu_dl_running` stayed set, so no watch ever
+  fired or restarted again.
