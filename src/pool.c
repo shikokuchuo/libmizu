@@ -297,6 +297,7 @@ static void pool_unpark_one_worker(mizu_pool *p);
 static void pool_fail_in_flight(mizu_pool *p, mizu_wk_slot *w);
 static void pool_fail_executing(mizu_pool *p, uint32_t slot);
 static int pool_reaping_free(mizu_wk_slot *w);
+static void pool_reaping_sweep(mizu_pool *p);
 static int pool_probe_worker(mizu_pool *p, uint32_t slot);
 static void pool_reap_submitter(mizu_pool *p, uint32_t j);
 static void pool_probe_submitter(mizu_pool *p, uint32_t j);
@@ -1251,6 +1252,9 @@ mizu_status mizu_pool_leave(mizu_pool *p) {
         pool_unpark_one_worker(p);
     }
   }
+  /* our slot reads FREE or REAPING now, never LIVE — so this exit runs
+     the drainer-free finalize whenever no other worker stays behind */
+  pool_reaping_sweep(p);
   /* the slot's own lock releases now, so the slot reads properly departed
      to any prober; the full release is deferred while kept results anchor
      region lifetimes — the retiree's lame-duck loop drives it. The sweep
@@ -2355,6 +2359,67 @@ static void pool_orphan_and_finalize(mizu_pool *p, mizu_wk_slot *w,
   }
 }
 
+/* The drainer-free finalize: a REAPING slot's queued entries can never be
+   claimed when no live worker remains to steal them, so the drain design's
+   "the observer of the drained deque frees the slot" never fires — the
+   tasks hang in collect and the slot can never be respawned. Fail the
+   entries (the death verdict, as at any leave/reap) and return the slot
+   to FREE. Runs after every LIVE exit (a leave, or a reap once the dead
+   slot is finalized): the scan defers to any LIVE/LEAVING/CLAIMING slot,
+   so the last exit finalizes. A worker mid-join (its lock held ahead of
+   the CLAIMING store) is invisible to the scan — a spurious DIED the
+   submitter can retry, never the wedge this prevents. Concurrent
+   finalizers converge: the DIED/FREE CASes are idempotent, and bottom is
+   static with the owner gone. */
+static void pool_reaping_sweep(mizu_pool *p) {
+  uint32_t mw = p->hdr.max_workers;
+  for (uint32_t i = 0; i < mw; i++) {
+    int32_t st = atomic_load_explicit(&p->wk[i].status,
+                                      memory_order_acquire);
+    if (st == MIZU_WK_LIVE || st == MIZU_WK_LEAVING ||
+        st == MIZU_WK_CLAIMING)
+      return;
+  }
+  for (uint32_t i = 0; i < mw; i++) {
+    mizu_wk_slot *w = &p->wk[i];
+    if (atomic_load_explicit(&w->status, memory_order_acquire) !=
+        MIZU_WK_REAPING)
+      continue;
+    int64_t b = atomic_load_explicit(&w->deque_bottom,
+                                     memory_order_acquire);
+    for (int64_t k = atomic_load_explicit(&w->deque_top,
+                                          memory_order_acquire);
+         k < b; k++) {
+      mizu_entry_hdr *eh = (mizu_entry_hdr *) deque_entry_at(p, w, k);
+      if (eh->rs_index >= p->hdr.result_slots) continue;
+      mizu_rs_hdr *rs = pool_rs(p, eh->rs_index);
+      if (eh->rs_seq != atomic_load_explicit(&rs->sequence,
+                                             memory_order_acquire))
+        continue;   /* a stale entry: the slot moved on (the claim's
+                       zombie-guard discipline) */
+      int32_t expected = MIZU_RS_PENDING;
+      if (atomic_compare_exchange_strong_explicit(&rs->status, &expected,
+                                                  MIZU_RS_DIED,
+                                                  memory_order_seq_cst,
+                                                  memory_order_relaxed)) {
+        pool_unpark_result_waiter(p, rs);
+      } else if (expected == MIZU_RS_CANCEL) {
+        /* the drain owed the CANCEL consume, as at any dead claim */
+        atomic_compare_exchange_strong_explicit(&rs->status, &expected,
+                                                MIZU_RS_FREE,
+                                                memory_order_seq_cst,
+                                                memory_order_relaxed);
+      }
+    }
+    atomic_store_explicit(&w->deque_top, b, memory_order_release);
+    int32_t expected = MIZU_WK_REAPING;
+    atomic_compare_exchange_strong_explicit(&w->status, &expected,
+                                            MIZU_WK_FREE,
+                                            memory_order_seq_cst,
+                                            memory_order_relaxed);
+  }
+}
+
 /* Precondition: the caller holds the slot's liveness lock. */
 static void pool_reap_worker(mizu_pool *p, uint32_t slot) {
   mizu_wk_slot *w = &p->wk[slot];
@@ -2381,6 +2446,9 @@ static void pool_reap_worker(mizu_pool *p, uint32_t slot) {
                                                    memory_order_relaxed))
         continue;
     }
+    /* the dead slot is FREE or finalized REAPING: this exit runs the
+       drainer-free finalize whenever no other worker stays behind */
+    pool_reaping_sweep(p);
     return;   /* FREE: predecessor reap complete */
   }
 }

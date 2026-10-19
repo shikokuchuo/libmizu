@@ -729,6 +729,42 @@ static void test_orphan_drain(void) {
   puts("ok orphan_drain");
 }
 
+/* No live worker remains to drain an orphaned deque: the leave itself
+   finalizes — the queued tasks fail DIED and the slot returns to FREE
+   instead of wedging REAPING forever. */
+static void test_orphan_finalize(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_bytes b = { (void *) "q", 1 };
+  mizu_task t1, t2;
+  assert(mizu_pool_submit(ctrl, &b, &t1, 0) == MIZU_OK);   /* injection */
+  assert(mizu_pool_submit(ctrl, &b, &t2, 0) == MIZU_OK);
+  assert(mizu_pool_deque_pull(wk, 2) == 2);   /* wk's deque, unclaimed */
+  assert(mizu_pool_leave(wk) == MIZU_OK);   /* the last live worker */
+
+  assert(mizu_pool_task_state(ctrl, &t1) == MIZU_RS_DIED);
+  assert(mizu_pool_task_state(ctrl, &t2) == MIZU_RS_DIED);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+  assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_ERR);
+  mizu_pool_status ps;
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[0] == MIZU_WK_FREE);
+
+  /* the freed slot respawns */
+  mizu_pool *wk3;
+  mizu_binding wb;
+  make_binding(&wb, 1);
+  assert(mizu_pool_worker_join(&wk3, token, 0, &wb) == MIZU_OK);
+  assert(mizu_pool_leave(wk3) == MIZU_OK);
+  mizu_pool_destroy(wk3);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  pool_end();
+  puts("ok orphan_finalize");
+}
+
 /* The fairness tick's orphan-deque scan: the route that bounds
    ownerless-work latency when the ordinary steal tier never falls to it.
    Deterministic: the tick fires on a handle's 61st claim, so the orphan
@@ -3854,6 +3890,7 @@ int main(void) {
   test_retire_lame_duck();
   test_lame_duck_role_guard();
   test_orphan_drain();
+  test_orphan_finalize();
   test_fairness_orphan();
   test_probe_streak();
   test_submitter_reap();
