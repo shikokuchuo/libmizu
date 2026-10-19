@@ -230,8 +230,10 @@ const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
       (h.deque_cap & (h.deque_cap - 1)) != 0 || h.deque_cap < 2 ||
       (h.slot & (h.slot - 1)) != 0 || h.slot < 128 || h.slot > (1u << 20))
     return "queue capacities or slot size are not valid powers of two";
-  if (h.result_slots == 0 || h.result_slots % h.max_submitters != 0)
-    return "result slots are not a multiple of the submitter capacity";
+  if (h.result_slots == 0 || h.result_slots > (1u << 24) ||
+      h.result_slots % h.max_submitters != 0)
+    return "result slots are out of range or not a multiple of the "
+           "submitter capacity";
   if (pool_fixed_size(&h) > region_size)
     return "pool sections exceed the mapped region";
   if (h.livedir_offset > region_size ||
@@ -560,6 +562,10 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
     return MIZU_ERR;
   }
   rslots = (rslots + maxs - 1) / maxs * maxs;   /* per-submitter partition */
+  /* the task handle's 24-bit rs_index bounds the rounded count too: a
+     partition carry past 2^24 rounds down (maxs <= 64 keeps the floor a
+     positive multiple) */
+  if (rslots > ((uint64_t) 1 << 24)) rslots = ((uint64_t) 1 << 24) / maxs * maxs;
   const char *livedir = mizu_live_dir();
   if (livedir == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,

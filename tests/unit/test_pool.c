@@ -1743,6 +1743,16 @@ static void test_hdr_validate(void) {
   bad.result_slots = 7;   /* not a multiple of max_submitters */
   assert(mizu_pool_hdr_validate(&bad, region_size, NULL) != NULL);
   bad = h;
+  /* a multiple of max_submitters past the 2^24 rs_index cap: the reject
+     must be the range check, not the region-size check */
+  bad.result_slots = (1u << 24) + 8;
+  const char *msg = mizu_pool_hdr_validate(&bad, region_size, NULL);
+  assert(msg != NULL && strstr(msg, "result slots") != NULL);
+  bad = h;
+  bad.result_slots = 1u << 24;   /* the cap itself stays admissible */
+  msg = mizu_pool_hdr_validate(&bad, region_size, NULL);
+  assert(msg == NULL || strstr(msg, "result slots") == NULL);
+  bad = h;
   assert(mizu_pool_hdr_validate(&bad, 128, NULL) != NULL);   /* too small */
   bad = h;
   bad.livedir_offset = region_size + 64;
