@@ -397,6 +397,14 @@ static void pool_release(mizu_pool *p) {
   if (p->shm.addr != NULL) mizu_shm_close_stack(&p->shm, 0);
   p->base = NULL;
   if (p->live_self != 0) {
+    /* the controller's live_self aliases a live_all entry (its submitter
+       slot's kept probe fd): clear the alias so the sweep below cannot
+       close the same fd twice */
+    if (p->live_all != NULL) {
+      uint32_t n = p->hdr.max_workers + p->hdr.max_submitters;
+      for (uint32_t i = 0; i < n; i++)
+        if (p->live_all[i] == p->live_self) p->live_all[i] = 0;
+    }
     mizu_live_close(p->live_self);
     p->live_self = 0;
   }
