@@ -1368,8 +1368,15 @@ static int pool_unpark_worker_from(mizu_pool *p, uint32_t start) {
       mizu_unpark(pool_wk_pk(p, i));
       return 1;
     }
-    /* RUNNING or WAKING: the worker transitioned away or another pusher
-       claimed the wake; try the next set bit */
+    if (expected == MIZU_WPK_WAKING) {
+      /* a pusher that died between the CAS and the unpark leaves WAKING
+         sticky: treated as "another pusher claimed the wake" it would
+         wedge the worker for its full sleep bound. Complete the wake — a
+         redundant unpark is a spurious wake, absorbed by the re-check. */
+      mizu_unpark(pool_wk_pk(p, i));
+      return 1;
+    }
+    /* RUNNING: the worker transitioned away; try the next set bit */
   }
   return 1;   /* someone was mid-transition: no doorbell, as ever */
 }

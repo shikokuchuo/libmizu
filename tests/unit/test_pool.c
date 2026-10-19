@@ -3667,6 +3667,45 @@ static void test_unpark_idle(void) {
   puts("ok unpark_idle");
 }
 
+/* A sticky WAKING — the state a pusher dying between the park_state CAS
+   and the unpark leaves — must not wedge the worker: the next pusher
+   completes the wake. Poked through a fresh mapping, test_unpark_idle's
+   discipline. */
+static void test_unpark_waking(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  char name[80];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = NULL;
+  assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+  unsigned char *base = mizu_shm_addr(shm);
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
+  mizu_pool_hdr h;
+  memcpy(&h, base, sizeof(h));
+  size_t ctrl_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+    (size_t) h.max_submitters *
+      (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
+    (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot) +
+    (size_t) h.result_slots * h.slot;
+  _Atomic uint64_t *parked =
+    (_Atomic uint64_t *) (base + ctrl_off + MIZU_CTRL_PARKED_OFF);
+
+  atomic_store(&w0->park_state, MIZU_WPK_WAKING);
+  uint32_t epoch_before = atomic_load(&w0->park_epoch);
+  atomic_fetch_or(parked, 1ull);
+  mizu_task t = submit_bytes(ctrl, "x", 1);   /* completes the dead wake */
+  assert(atomic_load(&w0->park_epoch) > epoch_before);
+  /* restore: the step must see a clean, running slot */
+  atomic_fetch_and(parked, ~1ull);
+  atomic_store(&w0->park_state, MIZU_WPK_RUNNING);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "x", 1);
+  mizu_shm_close(shm, 0);
+  pool_end();
+  puts("ok unpark_waking");
+}
+
 /* owner_dead gates: every verb past the verdict fails STOPPED after an
    orphan-teardown attempt — refused here, because the join handle's
    liveness fd is a fresh open file description: the in-process owner
@@ -3797,6 +3836,7 @@ int main(void) {
   test_abandon_fork();
 #endif
   test_unpark_idle();
+  test_unpark_waking();
   test_round_trip();
   test_spill();
   test_batch();
