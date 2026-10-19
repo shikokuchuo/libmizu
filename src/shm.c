@@ -182,6 +182,8 @@ static int mizu_err_classify(long code) {
 
 #ifdef __linux__
 
+#include <sys/statvfs.h>
+
 static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
@@ -565,6 +567,45 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
     return mizu_create_fail(fd, shm->name, errno);
 
 #ifdef __linux__
+  /* Fail fast when the region cannot fit in tmpfs: the reservation paths
+     below (posix_fallocate, MADV_POPULATE_WRITE) grind page-by-page
+     through every available byte before reporting ENOSPC/ENOMEM, so a
+     create that cannot fit — a boundary probe, a corrupt size — would
+     otherwise fill /dev/shm over seconds-to-minutes and leak the partial
+     allocation if the process dies mid-grind. statvfs is not a
+     reservation; the populate below still enforces it. */
+  struct statvfs sv;
+  if (fstatvfs(fd, &sv) == 0 &&
+      (uint64_t) size > (uint64_t) sv.f_bavail * sv.f_frsize)
+    return mizu_create_fail(fd, shm->name, ENOSPC);
+#endif
+
+#if defined(__linux__) && defined(MADV_POPULATE_WRITE)
+  /* One reservation pass: MADV_POPULATE_WRITE faults the range writable,
+     allocating the tmpfs folios and installing the PTEs together — the
+     fallocate + MAP_POPULATE pair below walks the range twice. A full
+     tmpfs still fails here with ENOMEM at create: no write fault can
+     SIGBUS later. EINVAL means an old kernel (< 5.14): fall back. */
+  void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (addr == MAP_FAILED)
+    return mizu_create_fail(fd, shm->name, errno);
+  if (madvise(addr, size, MADV_POPULATE_WRITE) != 0) {
+    int perr = errno;
+    munmap(addr, size);
+    if (perr != EINVAL)             /* tmpfs full: fail, do not retry */
+      return mizu_create_fail(fd, shm->name, perr);
+    /* kernel < 5.14: the two-pass reservation */
+    int ferr = posix_fallocate(fd, 0, (off_t) size);
+    if (ferr != 0)
+      return mizu_create_fail(fd, shm->name, ferr);
+    addr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                MAP_SHARED | MAP_POPULATE, fd, 0);
+    if (addr == MAP_FAILED)
+      return mizu_create_fail(fd, shm->name, errno);
+  }
+  close(fd);
+#else
+#ifdef __linux__
   /* Reserve tmpfs pages now: ftruncate leaves the file sparse and tmpfs
      allocates only on write fault — SIGBUS if /dev/shm is full.
      MAP_POPULATE alone won't help: read prefault of a hole resolves to
@@ -581,6 +622,7 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
     return mizu_create_fail(fd, shm->name, errno);
 
   close(fd);
+#endif
 
 #ifdef MADV_HUGEPAGE
   if (size >= 2 * 1024 * 1024)

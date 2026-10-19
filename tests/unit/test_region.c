@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -146,6 +147,45 @@ int main(void) {
 #else
     assert(shm_unlink(zname) == 0);
 #endif
+  }
+#endif
+
+  /* a create reserves every page up front: write a pattern across the
+     whole region, read it back through a second mapping */
+  {
+    const size_t n = 8 * 1024 * 1024;
+    mizu_shm *w = NULL;
+    assert(mizu_shm_create(&w, n) == MIZU_OK);
+    unsigned char *wp = mizu_shm_addr(w);
+    for (size_t i = 0; i < n; i += 4096) wp[i] = (unsigned char) (i >> 12);
+    mizu_shm *r = NULL;
+    assert(mizu_shm_open(&r, mizu_shm_name(w)) == MIZU_OK);
+    const unsigned char *rp = mizu_shm_addr(r);
+    for (size_t i = 0; i < n; i += 4096)
+      assert(rp[i] == (unsigned char) (i >> 12));
+    mizu_shm_close(r, 0);
+    mizu_shm_close(w, 1);
+  }
+
+#ifdef __linux__
+  /* an oversize create fails fast with NOSPACE and materializes nothing:
+     the statvfs availability probe rejects ahead of the reservation,
+     which would otherwise grind page-by-page through all of /dev/shm
+     (minutes on a large tmpfs — the generous bound below catches a
+     regression to the grind; the probe itself is microseconds) */
+  {
+    struct statvfs sv;
+    assert(statvfs("/dev/shm", &sv) == 0);
+    uint64_t avail = (uint64_t) sv.f_bavail * sv.f_frsize;
+    struct timespec t0, t1;
+    assert(clock_gettime(CLOCK_MONOTONIC, &t0) == 0);
+    mizu_shm big;
+    assert(mizu_shm_create_stack(&big, (size_t) 1 << 52) ==
+           MIZU_ERRCAT_NOSPACE);
+    assert(clock_gettime(CLOCK_MONOTONIC, &t1) == 0);
+    assert(t1.tv_sec - t0.tv_sec < 10);
+    assert(statvfs("/dev/shm", &sv) == 0);
+    assert((uint64_t) sv.f_bavail * sv.f_frsize == avail);
   }
 #endif
 

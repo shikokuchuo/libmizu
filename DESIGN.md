@@ -661,6 +661,7 @@ A worker announces its claim (`in_flight_rs`) before it CASes.
 The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current.
 An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
 On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper — the flock re-acquire on one OFD is not a mutual exclusion.
+On Linux a region create fails fast when a statvfs probe shows the region cannot fit in tmpfs; the reservation itself (`MADV_POPULATE_WRITE`, `posix_fallocate` on kernels < 5.14) remains the enforcement point, so no later write fault can SIGBUS.
 
 ## Pool mechanics
 
