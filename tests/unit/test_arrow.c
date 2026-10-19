@@ -1332,6 +1332,14 @@ static void test_struct_batch_shape(void) {
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "null struct rows") != NULL);
 
+  /* a NULL child ArrowArray pointer declines, never dereferences */
+  ArrowArray *bkn[1] = { NULL };
+  mk_array(&batch, 3, 0, 0, 1, NULL, bkn, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "invalid Arrow C Data Interface") != NULL);
+
   /* null_count -1 with no bitmap: the slot values are the rows */
   mk_array(&batch, 3, -1, 0, 1, NULL, bk, NULL);
   batch.n_children = 1;

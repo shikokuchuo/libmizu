@@ -804,6 +804,11 @@ static int arrow_check_batch(mizu_arrow *a, const ArrowArray *b) {
   for (int i = 0; i < a->ncols; i++) {
     const ArrowArray *c = b->children[i];
     arrow_pcol *pc = &a->cols[i];
+    if (c == NULL) {
+      mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                          "an invalid Arrow C Data Interface batch");
+      return -1;
+    }
     if (c->length != b->length) {
       mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                           "an Arrow batch whose columns differ in length");
