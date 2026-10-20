@@ -241,6 +241,13 @@ int main(int argc, char **argv) {
 #endif
   mizu_binding_bytes(&bytesb);
 
+  /* mizu_wait_ms: a huge or non-finite remainder clamps to the interrupt
+     bound instead of an out-of-range (long) cast */
+  assert(mizu_wait_ms(-1) == MIZU_INTERRUPT_BOUND_MS);
+  assert(mizu_wait_ms(mizu_now() + 1e300) == MIZU_INTERRUPT_BOUND_MS);
+  assert(mizu_wait_ms(mizu_now() - 1) == -1);
+  assert(mizu_wait_ms(mizu_now() + 0.001) >= 1);
+
   mizu_channel_opts opts;
   mizu_channel_opts_init(&opts);
   opts.capacity = 8;                 /* small ring: the full path is cheap */
@@ -289,6 +296,9 @@ int main(int argc, char **argv) {
     o2.slot_size = 256;
     o2.arena_size = 32;
     assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    o2.arena_size = (uint64_t) 1.1e12 + 64;   /* past the cap: named */
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "1.1e12") != NULL);
     o2.arena_size = opts.arena_size;
     o2.drop = NULL;                    /* drop_size without its bytes */
     assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);

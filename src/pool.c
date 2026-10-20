@@ -393,7 +393,7 @@ static void pool_release(mizu_pool *p) {
   mizu_stage_rollback(&p->h);
   mizu_keepers_teardown(&p->h, p->keepers, p->keepers_n);
   mizu_keepers_teardown(&p->h, p->sub_keepers, p->sub_keepers_n);
-  mizu_spill_fl_teardown(&p->h.fl);
+  mizu_spill_fl_teardown(&p->h, &p->h.fl);
   mizu_oc_teardown(&p->h.oc);
   if (p->shm.addr != NULL) mizu_shm_close_stack(&p->shm, 0);
   p->base = NULL;
@@ -866,7 +866,7 @@ void mizu_pool_abandon(mizu_pool *p) {
     mizu_stage_rollback(&p->h);
     mizu_keepers_teardown(&p->h, p->keepers, p->keepers_n);
     mizu_keepers_teardown(&p->h, p->sub_keepers, p->sub_keepers_n);
-    mizu_spill_fl_teardown(&p->h.fl);
+    mizu_spill_fl_teardown(&p->h, &p->h.fl);
     mizu_oc_teardown(&p->h.oc);
     if (p->shm.addr != NULL) mizu_shm_close_stack(&p->shm, 0);
     p->base = NULL;
@@ -1023,6 +1023,15 @@ static mizu_status pool_claim_sub_slot(mizu_pool *p, intptr_t *lock_out) {
         mizu_live_close(h);
         continue;                  /* another claimant beat us */
       }
+      /* as at the worker join: a set shutdown word means this open
+         re-created a liveness file teardown had already unlinked */
+      if (atomic_load_explicit(p->shutdown, memory_order_acquire) != 0) {
+        mizu_live_close(h);
+        (void) remove(path);
+        mizu_err_record(&p->h, MIZU_ERRCAT_STOPPED,
+                       "pool stopped or owner dead");
+        return MIZU_ERR;
+      }
       int32_t expected = MIZU_SUB_FREE;
       if (!atomic_compare_exchange_strong_explicit(&p->sub[j].status,
                                                    &expected, MIZU_SUB_LIVE,
@@ -1104,6 +1113,17 @@ mizu_status mizu_pool_worker_join(mizu_pool **out, const char *token,
       mizu_live_try(p->live_self) != MIZU_LIVE_ACQUIRED) {
     mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
                    "worker slot %u already held — stale spawn?", slot);
+    pool_failed(p, 0);
+    return MIZU_ERR;
+  }
+  /* Teardown sets the shutdown word ahead of unlinking the liveness
+     files (pool_shutdown_broadcast), so a set word here means the open
+     above re-created a file the controller had already removed (it
+     carries O_CREAT / OPEN_ALWAYS): remove the residue and refuse. */
+  if (atomic_load_explicit(p->shutdown, memory_order_acquire) != 0) {
+    (void) remove(path);
+    mizu_err_record(&p->h, MIZU_ERRCAT_STOPPED,
+                   "pool stopped or owner dead");
     pool_failed(p, 0);
     return MIZU_ERR;
   }
@@ -3101,7 +3121,11 @@ static int pool_step_impl(mizu_pool *p, double timeout_ms, int single) {
       long ms = -1;
       if (deadline >= 0) {
         double rem = deadline - mizu_now();
-        ms = rem <= 0 ? 0 : (long) (rem * 1000) + 1;
+        /* 0x1p63 keeps the (long) cast in range; past it the nominal
+           bound serves, with the deadline re-check below disposing */
+        ms = rem <= 0 ? 0
+           : rem * 1000 < 0x1p63 ? (long) (rem * 1000) + 1
+           : MIZU_PARK_NOMINAL_MS;
       }
       mizu_park_bracket(&p->h.binding, 1);
       mizu_park(pool_wk_pk(p, (uint32_t) p->wk_slot), e, ms);

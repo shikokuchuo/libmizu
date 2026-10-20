@@ -253,7 +253,7 @@ static void chan_release(mizu_channel *c, int unlink_names) {
   }
   mizu_stage_rollback(&c->h);
   mizu_keepers_teardown(&c->h, c->keepers, c->pre.cap);
-  mizu_spill_fl_teardown(&c->h.fl);
+  mizu_spill_fl_teardown(&c->h, &c->h.fl);
   mizu_oc_teardown(&c->h.oc);
   if (c->shm.addr != NULL) mizu_shm_close_stack(&c->shm, 0);
   c->base = NULL;
@@ -702,7 +702,8 @@ mizu_status mizu_channel_create(mizu_channel **out,
   }
   if (arena % 64 != 0 || arena > ((uint64_t) 1.1e12)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "arena_size must be a non-negative multiple of 64");
+                       "arena_size must be a non-negative multiple of 64 "
+                       "and at most 1.1e12");
     return MIZU_ERR;
   }
   if (opts->drop_size != 0 && opts->drop == NULL) {
@@ -1333,7 +1334,7 @@ void mizu_channel_abandon(mizu_channel *c) {
     }
     mizu_stage_rollback(&c->h);
     mizu_keepers_teardown(&c->h, c->keepers, c->pre.cap);
-    mizu_spill_fl_teardown(&c->h.fl);
+    mizu_spill_fl_teardown(&c->h, &c->h.fl);
     mizu_oc_teardown(&c->h.oc);
     if (c->shm.addr != NULL) mizu_shm_close_stack(&c->shm, 0);
     c->base = NULL;

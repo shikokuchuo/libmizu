@@ -72,6 +72,7 @@ struct mizu_death_watch_s {
   dispatch_queue_t queue;            /* per-watch serial queue: the stop sync */
   dispatch_source_t source;
   _Atomic int *flag;
+  _Atomic int fired;                 /* once-only: ESRCH probe vs source event */
   mizu_parker pk;
   int has_pk;
   void (*cb)(void *);                /* pure-C death callback (may be NULL) */
@@ -80,6 +81,14 @@ struct mizu_death_watch_s {
 
 static void mizu_dw_fire(void *ctx) {
   struct mizu_death_watch_s *w = ctx;
+  /* Once per watch: a pid exiting mid-arm is seen by both the source
+     and the ESRCH probe below, and the callback is not idempotent by
+     contract */
+  int expected = 0;
+  if (!atomic_compare_exchange_strong_explicit(&w->fired, &expected, 1,
+                                               memory_order_acq_rel,
+                                               memory_order_acquire))
+    return;
   atomic_store_explicit(w->flag, 1, memory_order_release);
   if (w->has_pk) mizu_unpark(&w->pk);
   if (w->cb != NULL) w->cb(w->cb_arg);
@@ -126,8 +135,8 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
   dispatch_resume(w->source);
 
   /* Close the create/exit race: a source armed for an already-dead pid never
-     fires. Firing here can race the source's own event — both paths are
-     idempotent (flag store; one spurious unpark, absorbed by re-check). */
+     fires. Firing here can race the source's own event — the fired word
+     in mizu_dw_fire admits exactly one of them. */
   if (kill((pid_t) pid, 0) != 0 && errno == ESRCH) mizu_dw_fire(w);
 
   return w;

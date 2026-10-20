@@ -37,9 +37,17 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   }
 
   MEMORY_BASIC_INFORMATION mbi;
-  VirtualQuery(addr, &mbi, sizeof(mbi));
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0) {
+    UnmapViewOfFile(addr);
+    CloseHandle(h);
+    return -1;
+  }
 
-  /* No mapping-time flag on Windows: read-touch to populate. Reads only —
+  /* RegionSize is the view's page-rounded span (a section's created
+     size is not recoverable through a documented API); the excess is a
+     bounded run of zero-filled mapped pages, and consumers validate the
+     region's inner geometry against creator-stamped sizes. No
+     mapping-time flag on Windows: read-touch to populate. Reads only —
      the region is live, creator-initialized state. */
   if (populate)
     for (size_t off = 0; off < mbi.RegionSize; off += 4096)
@@ -68,11 +76,18 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 static int mizu_shm_os_open_rw(const char *name) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
-  return open(path, O_RDWR, 0);
+  /* O_CLOEXEC as in shm.c: no region fd outlives its mmap in a child */
+  return open(path, O_RDWR | O_CLOEXEC, 0);
 }
 #else
 static int mizu_shm_os_open_rw(const char *name) {
-  return shm_open(name, O_RDWR, 0);
+  /* macOS shm_open rejects O_CLOEXEC: set it by fcntl (as in shm.c) */
+  int fd = shm_open(name, O_RDWR, 0);
+  if (fd >= 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
 }
 #endif
 
@@ -144,7 +159,7 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
 
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
-  int fd = open(path, O_RDONLY, 0);
+  int fd = open(path, O_RDONLY | O_CLOEXEC, 0);
   if (fd < 0) {
     free(shm);
     return NULL;

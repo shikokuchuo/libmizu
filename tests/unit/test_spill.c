@@ -213,7 +213,7 @@ int main(void) {
     mizu_shm_close(keep[i], 1);
 
   /* mizu_read_region: a hit through the cache, and the gone verdict */
-  mizu_spill_fl_teardown(&h.fl);        /* retire the regions held so far */
+  mizu_spill_fl_teardown(&h, &h.fl);        /* retire the regions held so far */
   handle_reset();
   mizu_shm *target = NULL;
   assert(mizu_shm_create_heap(&target, 4096) == MIZU_ERRCAT_NONE);
@@ -258,7 +258,7 @@ int main(void) {
   mizu_keeper_release(&h, tab, 1);      /* one in the free list */
   mizu_keepers_teardown(&h, tab, 8);
   assert(drops == 1);
-  mizu_spill_fl_teardown(&h.fl);
+  mizu_spill_fl_teardown(&h, &h.fl);
   assert(h.fl.n == 0 && h.fl.total == 0 && h.fl.staging == NULL);
 
   /* free-list caps: two entries per size class — the third is
@@ -274,7 +274,7 @@ int main(void) {
   assert(mizu_shm_create_heap(&q3, 4096) == MIZU_ERRCAT_NONE);
   mizu_spill_fl_insert(&h.fl, q3);
   assert(h.fl.n == 2);              /* class full: destroyed */
-  mizu_spill_fl_teardown(&h.fl);
+  mizu_spill_fl_teardown(&h, &h.fl);
 
   /* the byte cap evicts largest-oldest until the insert fits */
   handle_reset();
@@ -292,7 +292,7 @@ int main(void) {
   assert(h.fl.n == 3 && h.fl.total == ((size_t) 32 << 20));
   assert(h.fl.regions[0] == NULL ||
          h.fl.regions[0] != e1);      /* e1's slot was reused */
-  mizu_spill_fl_teardown(&h.fl);
+  mizu_spill_fl_teardown(&h, &h.fl);
 
   /* every slot occupied (two per class, eight classes): an insert of a
      fresh class destroys outright */
@@ -309,7 +309,7 @@ int main(void) {
   assert(mizu_shm_create_heap(&o17, 1 << 20) == MIZU_ERRCAT_NONE);
   mizu_spill_fl_insert(&h.fl, o17);
   assert(h.fl.n == MIZU_SPILL_FL_MAX);   /* no room: destroyed */
-  mizu_spill_fl_teardown(&h.fl);
+  mizu_spill_fl_teardown(&h, &h.fl);
 
   /* a free-list miss sweeps the ledger once and retries: a lent region
      whose last view released rejoins and serves the checkout */
@@ -324,7 +324,7 @@ int main(void) {
   mizu_shm *lz2 = mizu_spill_region_get(&h.fl, 100);
   assert(lz2 == lz && h.fl.last_reused);   /* swept + popped */
   assert(h.fl.led_n == 0 && h.fl.n == 0);
-  mizu_spill_fl_teardown(&h.fl);
+  mizu_spill_fl_teardown(&h, &h.fl);
 
   /* a full ledger overflows: the region's mapping closes but its name
      is deferred to the teardown (a REF in flight can still resolve) */
@@ -344,7 +344,7 @@ int main(void) {
   mizu_keeper_release(&h, tab, 0);
   assert(h.fl.led_n == MIZU_LEDGER_MAX);   /* overflowed, not ledgered */
   assert(h.fl.dropped_n == 1 && h.fl.dropped[0] == g64);
-  mizu_spill_fl_teardown(&h.fl);           /* the deferred name dies here */
+  mizu_spill_fl_teardown(&h, &h.fl);           /* the deferred name dies here */
   assert(h.fl.dropped_n == 0 && h.fl.dropped == NULL);
 
   /* a zero-length region name is gone, never opened */

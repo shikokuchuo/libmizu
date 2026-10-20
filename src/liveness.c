@@ -91,7 +91,10 @@ static int mizu_live_dir_default(char *buf, size_t size) {
    freopen onto it would release the flock — a manufactured false DEAD. */
 static int mizu_live_fd_bounce(int fd) {
   if (fd > 2) return fd;
-  int nfd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+  int nfd;
+  do {
+    nfd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+  } while (nfd < 0 && errno == EINTR);
   close(fd);
   return nfd;
 }
@@ -166,7 +169,10 @@ int mizu_live_open(const char *path, intptr_t *out) {
      description, so an inherited fd would keep the lock alive past the
      holder's death — a manufactured false ALIVE. */
   mizu_live_registry_lock();
-  int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+  int fd;
+  do {
+    fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+  } while (fd < 0 && errno == EINTR);
   if (fd >= 0) {
     /* Lock-file names are derivable and the default dir can be
        world-writable (/dev/shm), so refuse a file another user pre-created:
@@ -192,7 +198,10 @@ int mizu_live_open(const char *path, intptr_t *out) {
 
 int mizu_live_open_existing(const char *path, intptr_t *out) {
   mizu_live_registry_lock();
-  int fd = open(path, O_RDWR | O_CLOEXEC);
+  int fd;
+  do {
+    fd = open(path, O_RDWR | O_CLOEXEC);
+  } while (fd < 0 && errno == EINTR);
   if (fd >= 0) {
     fd = mizu_live_fd_bounce(fd);
     if (fd >= 0 && mizu_live_registry_add((intptr_t) fd) != 0) {

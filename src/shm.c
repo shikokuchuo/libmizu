@@ -121,8 +121,17 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
   }
 
   MEMORY_BASIC_INFORMATION mbi;
-  VirtualQuery(addr, &mbi, sizeof(mbi));
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0) {
+    UnmapViewOfFile(addr);
+    CloseHandle(h);
+    return -1;
+  }
 
+  /* RegionSize is the view's page-rounded span: a section's created
+     size is not recoverable from the handle through a documented API.
+     The excess is bounded by a page of zero-filled mapped memory, and
+     every consumer validates the region's inner geometry against sizes
+     the creator stamped inside the region itself. */
   shm->addr = addr;
   shm->size = mbi.RegionSize;
   shm->handle = h;
@@ -187,7 +196,9 @@ static int mizu_err_classify(long code) {
 static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
-  return open(path, flags, mode);
+  /* O_CLOEXEC: the fd lives only until the mmap below, but a concurrent
+     thread's fork+exec in that window would otherwise inherit it */
+  return open(path, flags | O_CLOEXEC, mode);
 }
 
 static int mizu_shm_os_unlink(const char *name) {
@@ -199,7 +210,15 @@ static int mizu_shm_os_unlink(const char *name) {
 #else /* macOS / other POSIX */
 
 static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
-  return shm_open(name, flags, mode);
+  /* macOS shm_open rejects O_CLOEXEC: set it by fcntl. The fd lives
+     only until the mmap below, but a concurrent thread's fork+exec in
+     that window would otherwise inherit it. */
+  int fd = shm_open(name, flags, mode);
+  if (fd >= 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
 }
 
 #ifdef __APPLE__
@@ -243,13 +262,14 @@ static int mizu_log_dir(char *out, size_t size) {
 
 /* This process's log fd, opened on first append and cached for the
    process's lifetime — never closed, so a thread using a loaded value
-   can never write to a reused fd. A forked child sees the pid mismatch
-   and opens its own log, leaking the inherited fd (closing it could
-   race a sibling thread's write). The release/acquire pairing on
-   mizu_log_pid orders the fd reset before the pid change becomes
-   visible. */
-static _Atomic int   mizu_log_fd  = -1;
-static _Atomic pid_t mizu_log_pid = 0;        /* pid that opened mizu_log_fd */
+   can never write to a reused fd. pid and fd pack into one atomic word
+   so the post-fork reset is a single CAS: a blind fd store could
+   clobber an fd a racing thread had just installed for the same pid.
+   A forked child sees the pid mismatch and opens its own log, leaking
+   the inherited fd (closing it could race a sibling thread's write). */
+#define MIZU_LOG_PID_MASK 0xffffffff00000000ull
+#define MIZU_LOG_NO_FD    0xffffffffu          /* low word: no fd yet */
+static _Atomic uint64_t mizu_log_state = MIZU_LOG_NO_FD;  /* pid << 32 | fd */
 
 /* Truncate the log at a zero crossing only once it holds this many
    records: below the floor the file is at most 1 KB and the ftruncate
@@ -277,19 +297,23 @@ static void mizu_log_append(const char *name) {
   if (us == NULL) return;
   uint32_t rec = (uint32_t) strtoul(us + 1, NULL, 16);
 
-  pid_t pid = getpid();
-  int fd = -1;
-  if (atomic_load_explicit(&mizu_log_pid, memory_order_acquire) == pid)
-    fd = atomic_load_explicit(&mizu_log_fd, memory_order_relaxed);
-  else {                                     /* first append, or post-fork */
-    atomic_store_explicit(&mizu_log_fd, -1, memory_order_relaxed);
-    atomic_store_explicit(&mizu_log_pid, pid, memory_order_release);
+  const uint64_t mine = (uint64_t) (uint32_t) getpid() << 32;
+  uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
+  if ((cur & MIZU_LOG_PID_MASK) != mine) {
+    /* first append, or post-fork: a lost reset CAS just means a
+       sibling's reset or install won — cur holds the winning state */
+    uint64_t want = mine | MIZU_LOG_NO_FD;
+    if (atomic_compare_exchange_strong_explicit(&mizu_log_state, &cur, want,
+                                                memory_order_acq_rel,
+                                                memory_order_acquire))
+      cur = want;
   }
+  int fd = (int32_t) (uint32_t) cur;
   if (fd < 0) {
     char dir[PATH_MAX], path[PATH_MAX];
     if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
     int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
-                     &MIZU_PREFIX_LITERAL[1], (unsigned) pid);
+                     &MIZU_PREFIX_LITERAL[1], (unsigned) getpid());
     if (n <= 0 || (size_t) n >= sizeof(path)) return;
     int nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
     if (nfd < 0 && errno == ENOENT) {   /* dir absent: create it and retry */
@@ -297,14 +321,21 @@ static void mizu_log_append(const char *name) {
       nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
     }
     if (nfd < 0) return;
-    int expect = -1;
-    if (atomic_compare_exchange_strong_explicit(&mizu_log_fd, &expect, nfd,
-                                                memory_order_relaxed,
-                                                memory_order_relaxed)) {
+    /* install only while the pair still reads (this pid, no fd) — the
+       pid halves match by construction, so a changed word is always a
+       sibling's installed fd */
+    const uint64_t want = mine | MIZU_LOG_NO_FD;
+    while (cur == want &&
+           !atomic_compare_exchange_weak_explicit(&mizu_log_state, &cur,
+                                                  mine | (uint32_t) nfd,
+                                                  memory_order_acq_rel,
+                                                  memory_order_acquire))
+      ;
+    if (cur == want) {
       fd = nfd;
     } else {
       close(nfd);                          /* another thread's open won */
-      fd = expect;
+      fd = (int32_t) (uint32_t) cur;
     }
   }
   ssize_t w = write(fd, &rec, sizeof(rec));   /* O_APPEND: whole records */
@@ -319,9 +350,10 @@ static void mizu_log_append(const char *name) {
 static void mizu_log_release(void) {
   if (atomic_fetch_sub_explicit(&mizu_log_live, 1, memory_order_relaxed) != 1)
     return;
-  if (atomic_load_explicit(&mizu_log_pid, memory_order_relaxed) != getpid())
+  uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
+  if ((cur & MIZU_LOG_PID_MASK) != ((uint64_t) (uint32_t) getpid() << 32))
     return;                                  /* pre-fork state: not our log */
-  int fd = atomic_load_explicit(&mizu_log_fd, memory_order_relaxed);
+  int fd = (int32_t) (uint32_t) cur;
   if (fd < 0) return;
   if (atomic_load_explicit(&mizu_log_dirty, memory_order_relaxed) <
       MIZU_LOG_TRUNC_MIN)
@@ -344,7 +376,8 @@ static void mizu_log_release(void) {
 __attribute__((destructor)) void mizu_log_teardown(void) {
   if (atomic_load_explicit(&mizu_log_live, memory_order_relaxed) != 0)
     return;
-  if (atomic_load_explicit(&mizu_log_pid, memory_order_relaxed) != getpid())
+  uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
+  if ((cur & MIZU_LOG_PID_MASK) != ((uint64_t) (uint32_t) getpid() << 32))
     return;
   char dir[PATH_MAX], path[PATH_MAX];
   if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
@@ -353,7 +386,9 @@ __attribute__((destructor)) void mizu_log_teardown(void) {
   if (n <= 0 || (size_t) n >= sizeof(path)) return;
   unlink(path);
   rmdir(dir);            /* succeeds once the last process's log is gone */
-  atomic_store_explicit(&mizu_log_fd, -1, memory_order_relaxed);
+  atomic_store_explicit(&mizu_log_state,
+                        ((uint64_t) (uint32_t) getpid() << 32) |
+                        MIZU_LOG_NO_FD, memory_order_relaxed);
 }
 
 #endif /* __APPLE__ */

@@ -79,6 +79,10 @@ uint64_t mizu_morsel_layout(mizu_morsel_hdr *h, uint64_t n,
      generation 0 */
   h->state_off = off;
   off = MIZU_ALIGN64(off + MIZU_MORSEL_CLAIM_OFF + (uint64_t) claim_n * 4);
+  /* the out-area guard subtracts off from the 2^46 cap: reject past it
+     first — a huge x section puts off over the cap while every input
+     stays in range, and the subtraction would underflow */
+  if (off > ((uint64_t) 1 << 46)) return 0;
   if (out_type != 0) {
     size_t elt = mizu_type_elt_size((int) out_type);
     if (elt == 0 || out_m < 1 || out_m > ((uint64_t) 1 << 32)) return 0;

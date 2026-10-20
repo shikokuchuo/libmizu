@@ -311,7 +311,14 @@ void mizu_keepers_teardown(mizu_handle *h, mizu_keeper *tab, uint32_t n) {
   }
 }
 
-void mizu_spill_fl_teardown(mizu_spill_fl *fl) {
+void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl) {
+  /* mizu_stage_rollback normally retires the checkout first; a live one
+     here drops its pin through the binding's hook like any keeper entry
+     (the contract mizu_keepers_teardown keeps for the tables) */
+  if (fl->staging_pin != NULL && h->binding.drop != NULL)
+    h->binding.drop(h->binding.ctx, fl->staging_pin);
+  fl->staging_pin = NULL;
+  fl->staging_kind = MIZU_KEEP_FREE;
   mizu_region_destroy(fl->staging);
   fl->staging = NULL;
   for (int i = 0; i < MIZU_SPILL_FL_MAX; i++) {

@@ -187,8 +187,11 @@ static inline MIZU_MAYBE_UNUSED long mizu_wait_ms(double deadline) {
   if (deadline < 0) return MIZU_INTERRUPT_BOUND_MS;
   double rem = deadline - mizu_now();
   if (rem <= 0) return -1;
-  long rem_ms = (long) (rem * 1000) + 1;
-  return rem_ms < MIZU_INTERRUPT_BOUND_MS ? rem_ms : MIZU_INTERRUPT_BOUND_MS;
+  /* clamp ahead of the cast: a huge or non-finite remainder makes
+     (long)(rem * 1000) undefined, and the bound is the answer anyway */
+  if (!(rem < (double) MIZU_INTERRUPT_BOUND_MS / 1000))
+    return MIZU_INTERRUPT_BOUND_MS;
+  return (long) (rem * 1000) + 1;
 }
 
 // Death listener internals ---------------------------------------------------------
@@ -340,7 +343,7 @@ void mizu_keeper_release(mizu_handle *h, mizu_keeper *tab, uint32_t at);
 void mizu_keeper_discard(mizu_handle *h);
 /* mizu_stage_rollback is the ext tier's (mizu_ext.h) */
 void mizu_keepers_teardown(mizu_handle *h, mizu_keeper *tab, uint32_t n);
-void mizu_spill_fl_teardown(mizu_spill_fl *fl);
+void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl);
 
 /* Pop the smallest fitting free-list region (a full ledger sweep first on
    a miss) or create one fresh — at the pow2 size class when a free list

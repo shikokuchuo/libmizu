@@ -22,6 +22,10 @@ int main(void) {
   assert(mizu_timeout_ms(1) == 1000);
   assert(mizu_timeout_ms(0.001) == 1);
   assert(mizu_timeout_ms(1e-6) == 0.001);   /* sub-ms stays fractional */
+  /* a finite seconds whose ms product overflows reports indefinite (the
+     wait is unbounded either way) — no Inf escapes into the verbs */
+  assert(mizu_timeout_ms(1e306) == -1);
+  assert(mizu_timeout_ms(1e305) == 1e308);
 
   /* The NA stores and constants. */
   assert(MIZU_NA_INT32 == INT32_MIN);
@@ -150,6 +154,71 @@ int main(void) {
   memcpy(mizl + MIZU_HDR_VALID_OFF, &voff, 8);
   mizu_mizl_entry ent;
   assert(mizu_mizl_elem(mizl, 128, 0, &ent) == -1);
+
+  /* STR / VEC / serialized leaves carry no validity-table bitmap (the
+     string block, the nested header and the blob speak for themselves;
+     the writers stamp those rows {0,0}): a bitmap row on one rejects,
+     while the same row on an atomic leaf passes. */
+  unsigned char ml2[512];
+  memset(ml2, 0, sizeof ml2);
+  memcpy(ml2, &magic, 4);               /* MIZU_MAGIC_LIST, 1 entry */
+  memcpy(ml2 + 4, &n32, 4);
+  int64_t tab = 256, tbmp = 64, tcnt = 1;
+  memcpy(ml2 + MIZU_HDR_VALID_OFF, &tab, 8);
+  memcpy(ml2 + 256, &tbmp, 8);
+  memcpy(ml2 + 264, &tcnt, 8);
+  unsigned char *d2 = ml2 + MIZU_HEADER_SIZE;
+  int64_t eoff2 = 64, elen2 = 1;
+  int64_t esz2 = mizu_mizs_geometry(1).data;
+  int32_t etag2 = MIZU_TYPE_STR, eattrs2 = 0;
+  memcpy(d2, &eoff2, 8);
+  memcpy(d2 + 8, &esz2, 8);
+  memcpy(d2 + 16, &etag2, 4);
+  memcpy(d2 + 20, &eattrs2, 4);
+  memcpy(d2 + 24, &elen2, 8);
+  assert(mizu_mizl_elem(ml2, sizeof ml2, 0, &ent) == -1);   /* STR */
+  etag2 = MIZU_TYPE_VEC;
+  esz2 = 64;
+  memcpy(d2 + 8, &esz2, 8);
+  memcpy(d2 + 16, &etag2, 4);
+  assert(mizu_mizl_elem(ml2, sizeof ml2, 0, &ent) == -1);   /* VEC */
+  etag2 = 0;
+  memcpy(d2 + 16, &etag2, 4);
+  assert(mizu_mizl_elem(ml2, sizeof ml2, 0, &ent) == -1);   /* serialized */
+  etag2 = MIZU_TYPE_REAL;
+  esz2 = 8;
+  memcpy(d2 + 8, &esz2, 8);
+  memcpy(d2 + 16, &etag2, 4);
+  assert(mizu_mizl_elem(ml2, sizeof ml2, 0, &ent) == 0);    /* atomic passes */
+
+  /* mizu_mizl_check: the leaf-length sum bounding the header validity
+     count saturates instead of wrapping — a crafted region whose
+     overlapping leaves sum past 2^64 must not over-reject a count the
+     true sum admits. */
+  unsigned char big[4096];
+  memset(big, 0, sizeof big);
+  memcpy(big, &magic, 4);
+  int32_t bn = 100;
+  memcpy(big + 4, &bn, 4);
+  int64_t boff = 0, blen = (int64_t) 1 << 59;
+  int64_t bsz = (int64_t) 1 << 62;
+  int32_t btag = MIZU_TYPE_REAL, battrs = 0;
+  for (int i = 0; i < bn; i++) {
+    unsigned char *d = big + MIZU_HEADER_SIZE + 32 * i;
+    memcpy(d, &boff, 8);
+    memcpy(d + 8, &bsz, 8);
+    memcpy(d + 16, &btag, 4);
+    memcpy(d + 20, &battrs, 4);
+    memcpy(d + 24, &blen, 8);
+  }
+  int64_t bvoff = 4096, bvc = INT64_MAX;
+  memcpy(big + MIZU_HDR_VALID_OFF, &bvoff, 8);
+  memcpy(big + MIZU_HDR_VALID_COUNT, &bvc, 8);
+  {
+    int64_t rn = 0, raoff = 0, rasz = 0, rv[2];
+    assert(mizu_mizl_check(big, (size_t) ((uint64_t) 1 << 63), &rn, &raoff,
+                           &rasz, rv) == 0);
+  }
 
   /* mizu_arrow_str_at form 2 (large_utf8): 64-bit offsets, with the
      negative-offset rejection. */

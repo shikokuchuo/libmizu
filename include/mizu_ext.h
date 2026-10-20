@@ -1130,7 +1130,14 @@ MIZU_EXT_INLINE int mizu_ext_mizl_check_impl(const void *base, size_t size,
     mizu_mizl_entry e;
     if (mizu_ext_mizl_ent(base, size, i, &e) != 0) return -1;
     const int32_t tag = e.sexptype & ~(int32_t) MIZU_MIZL_S4;
-    if (mizu_type_elt_size(tag) != 0) sum += (uint64_t) e.length;
+    /* vcount is an int64, so the bound needs the sum only up to
+       INT64_MAX: saturate. Overlapping crafted leaves in a huge region
+       can otherwise wrap the accumulation and over-reject. */
+    if (mizu_type_elt_size(tag) != 0 && sum < (uint64_t) INT64_MAX) {
+      const uint64_t len = (uint64_t) e.length;
+      sum = len > (uint64_t) INT64_MAX - sum ? (uint64_t) INT64_MAX
+                                             : sum + len;
+    }
   }
   if (voff == 0) {
     if (vcount != 0 && vcount != -1) return -1;
@@ -1183,8 +1190,12 @@ MIZU_EXT_INLINE int mizu_ext_mizl_elem_impl(const void *base, size_t size,
   memcpy(&loff, tab + 16 * (size_t) i, 8);
   memcpy(&lcount, tab + 16 * (size_t) i + 8, 8);
   /* a remote leaf (tag 33) carries a {0,0} / {0,-1} claim alone — a
-     bitmap offset is region-local and cannot describe a remote column */
-  if ((elem->sexptype & ~(int32_t) MIZU_MIZL_S4) == 33 && loff != 0)
+     bitmap offset is region-local and cannot describe a remote column.
+     STR / VEC / serialized leaves carry no table bitmap either: the
+     string block, the nested header, and the blob each speak for
+     themselves, and the writers stamp those rows {0,0} */
+  const int32_t ltag = elem->sexptype & ~(int32_t) MIZU_MIZL_S4;
+  if ((ltag == 33 || mizu_type_elt_size(ltag) == 0) && loff != 0)
     return -1;
   if (!mizu_ext_valid_ok(loff, lcount, (uint64_t) elem->length, size))
     return -1;
@@ -1251,10 +1262,15 @@ MIZU_API uint64_t mizu_na_apply(int type, void *dst, const void *src,
                               const uint8_t *bitmap, uint64_t n);
 #else
 /** seconds (a binding's convention; <= 0 polls, non-finite waits
-   indefinitely) to the core's timeout_ms (0 polls, < 0 indefinite). */
+   indefinitely) to the core's timeout_ms (0 polls, < 0 indefinite). A
+   finite seconds whose product would overflow reports indefinite: the
+   wait is unbounded either way, and downstream deadline arithmetic
+   stays in double range. */
 MIZU_EXT_INLINE double mizu_timeout_ms(double seconds) {
   if (!isfinite(seconds)) return -1;
-  return seconds <= 0 ? 0 : seconds * 1000;
+  if (seconds <= 0) return 0;
+  const double ms = seconds * 1000;
+  return isfinite(ms) ? ms : -1;
 }
 MIZU_EXT_INLINE void mizu_store_na_real(void *dst) {
   const uint64_t bits = MIZU_NA_REAL_BITS;
