@@ -781,9 +781,8 @@ static uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_n
 <tr class="memitem:a24c29b0d57e26f98fe970b19a04de8fd" id="r_a24c29b0d57e26f98fe970b19a04de8fd"><td class="memItemLeft" align="right" valign="top"><a id="a24c29b0d57e26f98fe970b19a04de8fd" name="a24c29b0d57e26f98fe970b19a04de8fd"></a>
 static uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_na_apply_impl</b> (int type, void *dst, const void *src, const uint8_t *bitmap, uint64_t n)</td></tr>
 <tr class="separator:a24c29b0d57e26f98fe970b19a04de8fd"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a5b31365b0062df10b913cfa54e14dab6" id="r_a5b31365b0062df10b913cfa54e14dab6"><td class="memItemLeft" align="right" valign="top"><a id="a5b31365b0062df10b913cfa54e14dab6" name="a5b31365b0062df10b913cfa54e14dab6"></a>
-static double&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_timeout_ms</b> (double seconds)</td></tr>
-<tr class="memdesc:a5b31365b0062df10b913cfa54e14dab6"><td class="mdescLeft">&#160;</td><td class="mdescRight">seconds (a binding's convention; &lt;= 0 polls, non-finite waits indefinitely) to the core's timeout_ms (0 polls, &lt; 0 indefinite). <br /></td></tr>
+<tr class="memitem:a5b31365b0062df10b913cfa54e14dab6" id="r_a5b31365b0062df10b913cfa54e14dab6"><td class="memItemLeft" align="right" valign="top">static double&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a5b31365b0062df10b913cfa54e14dab6">mizu_timeout_ms</a> (double seconds)</td></tr>
+<tr class="memdesc:a5b31365b0062df10b913cfa54e14dab6"><td class="mdescLeft">&#160;</td><td class="mdescRight">seconds (a binding's convention; &lt;= 0 polls, non-finite waits indefinitely) to the core's timeout_ms (0 polls, &lt; 0 indefinite).  <br /></td></tr>
 <tr class="separator:a5b31365b0062df10b913cfa54e14dab6"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a15fa215212456db3b7b5ab0e294b66b0" id="r_a15fa215212456db3b7b5ab0e294b66b0"><td class="memItemLeft" align="right" valign="top"><a id="a15fa215212456db3b7b5ab0e294b66b0" name="a15fa215212456db3b7b5ab0e294b66b0"></a>
 static void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_store_na_real</b> (void *dst)</td></tr>
@@ -2775,6 +2774,35 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 
 <p>One MIZL directory entry's checks, shared by mizu_mizl_check's pass and mizu_mizl_elem: alignment and extent, the attrs tail, the listed tag, and the length against the leaf kind — the string block's fixed sections for STR, the element extent for an atomic leaf. </p>
 <p>A remote leaf (tag 33) skips the attrs-tail and body checks: the span is the identifier (1–255 bytes), and length / attrs_size describe the referenced column as resolved; the S4 bit rejects. Fills *e except the valid pair. </p>
+
+</div>
+</div>
+<a id="a5b31365b0062df10b913cfa54e14dab6" name="a5b31365b0062df10b913cfa54e14dab6"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a5b31365b0062df10b913cfa54e14dab6">&#9670;&#160;</a></span>mizu_timeout_ms()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">static double mizu_timeout_ms </td>
+          <td>(</td>
+          <td class="paramtype">double&#160;</td>
+          <td class="paramname"><em>seconds</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+<p>seconds (a binding's convention; &lt;= 0 polls, non-finite waits indefinitely) to the core's timeout_ms (0 polls, &lt; 0 indefinite). </p>
+<p>A finite seconds whose product would overflow reports indefinite: the wait is unbounded either way, and downstream deadline arithmetic stays in double range. </p>
 
 </div>
 </div>
