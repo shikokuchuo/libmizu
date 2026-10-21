@@ -108,11 +108,13 @@ int main(void) {
   assert(mizu_zc_refcount(z) == 2);
   mizu_keeper_release(&h, tab, 6);      /* consumer-done: loan drops */
   assert(h.fl.led_n == 1 && h.fl.n == 0);   /* views outstanding: lent */
+  assert(h.fl.lent_bytes == z->size);       /* counted on the ledger */
   mizu_ledger_sweep(&h.fl, MIZU_LEDGER_MAX);
   assert(h.fl.led_n == 1);             /* count still 1: stays */
   mizu_zc_unref(z);                     /* the view releases */
   mizu_ledger_sweep(&h.fl, MIZU_LEDGER_MAX);
   assert(h.fl.led_n == 0 && h.fl.n == 1);   /* back to the free list */
+  assert(h.fl.lent_bytes == 0);
 
   /* ZC with no view outstanding: straight to the free list (z was
      popped for this checkout, so only z2 returns) */
@@ -326,6 +328,48 @@ int main(void) {
   assert(h.fl.led_n == 0 && h.fl.n == 0);
   mizu_spill_fl_teardown(&h, &h.fl);
 
+  /* the churn budget (a Linux-only signal): a miss with lent regions
+     under the budget creates fresh and never engages the fallback; past
+     the budget the same miss sets churn, and a reclaim that brings the
+     total back under clears it. The past-budget state is
+     field-simulated — 256 MB of real regions has no place in a unit
+     test */
+#ifdef __linux__
+  handle_reset();
+  mizu_shm *bz = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, bz);
+  mizu_keeper_commit(&h, tab, 0);
+  mizu_zc_ref(bz);
+  mizu_keeper_release(&h, tab, 0);         /* lent: rc 1 on the ledger */
+  assert(h.fl.led_n == 1 && h.fl.lent_bytes == bz->size);
+  /* under the budget the same miss creates fresh: no churn */
+  mizu_shm *bz2 = mizu_spill_region_get(&h.fl, 100);
+  assert(bz2 != NULL && !h.fl.last_reused && h.fl.churn == 0);
+  mizu_stage_rollback(&h);
+  assert(h.fl.n == 1);
+  mizu_shm *bz2r = mizu_spill_region_get(&h.fl, 100);
+  assert(bz2r == bz2);                     /* the free-list gain pops it */
+  mizu_stage_retain(&h, bz2);
+  mizu_keeper_commit(&h, tab, 1);      /* checked out: the list is empty */
+  /* past the budget the miss engages the fallback */
+  h.fl.lent_bytes = MIZU_ZC_LENT_BUDGET + bz->size;
+  mizu_shm *bz3 = mizu_spill_region_get(&h.fl, 100);
+  assert(bz3 != NULL && !h.fl.last_reused && h.fl.churn == 1);
+  mizu_stage_retain(&h, bz3);
+  mizu_keeper_commit(&h, tab, 2);
+  /* a sweep that reclaims nothing keeps it (the volume is unmoved) */
+  mizu_ledger_sweep(&h.fl, MIZU_LEDGER_MAX);
+  assert(h.fl.churn == 1 && h.fl.led_n == 1);
+  /* a reclaim that brings the total back under clears it */
+  mizu_zc_unref(bz);
+  mizu_ledger_sweep(&h.fl, MIZU_LEDGER_MAX);
+  assert(h.fl.led_n == 0 && h.fl.lent_bytes == MIZU_ZC_LENT_BUDGET);
+  assert(h.fl.churn == 0 && h.fl.n == 1);
+  mizu_keepers_teardown(&h, tab, 8);
+  mizu_spill_fl_teardown(&h, &h.fl);
+  assert(h.fl.lent_bytes == 0);
+#endif
+
   /* a full ledger overflows: the region's mapping closes but its name
      is deferred to the teardown (a REF in flight can still resolve) */
   handle_reset();
@@ -344,6 +388,9 @@ int main(void) {
   mizu_keeper_release(&h, tab, 0);
   assert(h.fl.led_n == MIZU_LEDGER_MAX);   /* overflowed, not ledgered */
   assert(h.fl.dropped_n == 1 && h.fl.dropped[0] == g64);
+  /* the drop keeps its bytes counted (the file persists until
+     teardown): the 64 ledger entries plus the dropped one */
+  assert(h.fl.lent_bytes == (MIZU_LEDGER_MAX + 1) * MIZU_SPILL_FL_FLOOR);
   mizu_spill_fl_teardown(&h, &h.fl);           /* the deferred name dies here */
   assert(h.fl.dropped_n == 0 && h.fl.dropped == NULL);
 

@@ -151,16 +151,17 @@ static mizu_shm *spill_fl_pop(mizu_spill_fl *fl, size_t n) {
     mizu_ledger_sweep(fl, MIZU_LEDGER_MAX);
   }
 #ifdef __linux__
-  /* A miss with lent regions still outstanding: the sweep just proved
-     consumer-side views outlive their traffic. The signal is Linux-only
-     because only there is a fresh region dear: the create pre-faults
-     every page (posix_fallocate + MAP_POPULATE, SIGBUS-proofing tmpfs),
-     so a fresh region per SHM_VEC payload pays a full extra pass over
-     the bytes and the copy tiers' deterministic reuse wins. macOS and
-     Windows creates are lazy — the layout write faults the pages it
-     touches anyway — so SHM_VEC (one layout write, no receive copy)
-     beats the fallback even under churn. */
-  if (fl->led_n > 0) fl->churn = 1;
+  /* A miss with lent bytes past the budget: the sweep just proved
+     consumer-side views outlive their traffic, past the volume a fresh
+     create per payload tolerates (below the budget the create beats the
+     copy floor — it pre-faults every page, SIGBUS-proofing tmpfs, and
+     the copy tiers pay more passes over the bytes; past it their
+     deterministic reuse caps tmpfs growth). The signal is Linux-only
+     because only there is a fresh region dear: macOS and Windows
+     creates are lazy — the layout write faults the pages it touches
+     anyway — so SHM_VEC (one layout write, no receive copy) beats the
+     fallback even under churn. */
+  if (fl->lent_bytes > MIZU_ZC_LENT_BUDGET) fl->churn = 1;
 #endif
   return NULL;
 }
@@ -342,6 +343,9 @@ void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl) {
     fl->led_regions[i] = NULL;
   }
   fl->led_n = 0;
+  fl->lent_bytes = 0;   /* cosmetic at handle death: keeps the invariant
+                           "lent_bytes counts exactly the outstanding
+                           regions" greppable */
   for (uint32_t i = 0; i < fl->dropped_n; i++) {
     mizu_region_destroy(fl->dropped[i]);
   }
@@ -448,6 +452,11 @@ static void mizu_overflow_drop(mizu_spill_fl *fl, mizu_shm *shm) {
     fl->dropped = next;
     fl->dropped_cap = cap;
   }
+  /* stays counted: the dropped file's pages persist until teardown, so
+     its bytes remain outstanding (the alloc-failure destroy above frees
+     them — never counted). A runaway producer then degrades
+     permanently, the same terminal state as the name retention. */
+  fl->lent_bytes += shm->size;
   mizu_shm_close_stack(shm, 0);   /* keep name + pid; drop only the mapping */
   fl->dropped[fl->dropped_n++] = shm;
 }
@@ -466,12 +475,16 @@ void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key) {
     mizu_overflow_drop(fl, shm);
     return;
   }
+  fl->lent_bytes += shm->size;
   fl->led_regions[fl->led_n] = shm;
   fl->led_key[fl->led_n] = key;
   fl->led_n++;
 }
 
+/* Runs before the reclaim's insert/destroy: those can free the region
+   (the free-list caps), so the uncount reads ->size here. */
 static void mizu_ledger_drop(mizu_spill_fl *fl, uint32_t i) {
+  fl->lent_bytes -= fl->led_regions[i]->size;
   fl->led_n--;
   fl->led_regions[i] = fl->led_regions[fl->led_n];
   fl->led_regions[fl->led_n] = NULL;
@@ -497,9 +510,12 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
     uint32_t count =
       atomic_load_explicit(mizu_zc_rc(shm->addr), memory_order_acquire);
     if (count == 0) {
-      mizu_spill_fl_insert(fl, shm);
       mizu_ledger_drop(fl, i);
-      fl->churn = 0;   /* releases are landing: zero-copy reuse is viable */
+      mizu_spill_fl_insert(fl, shm);
+      /* releases are landing and the volume is back under the budget:
+         zero-copy reuse is viable. Clear-only — never set here (the
+         trigger is the miss, and the signal stays Linux-only). */
+      if (fl->lent_bytes <= MIZU_ZC_LENT_BUDGET) fl->churn = 0;
     } else {
       i++;
     }
@@ -524,12 +540,12 @@ void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot) {
     mizu_shm *shm = fl->led_regions[i];
     uint32_t flags =
       atomic_load_explicit(mizu_zc_flags_(shm->addr), memory_order_acquire);
+    mizu_ledger_drop(fl, i);
     if (flags & MIZU_ZC_FLAG_REFHELD) {
       mizu_region_destroy(shm);
     } else {
       mizu_spill_fl_insert(fl, shm);
-      fl->churn = 0;
+      if (fl->lent_bytes <= MIZU_ZC_LENT_BUDGET) fl->churn = 0;
     }
-    mizu_ledger_drop(fl, i);
   }
 }

@@ -1650,6 +1650,12 @@ static mizu_status pool_submit1(mizu_pool *p, mizu_keeper *keepers,
                                unsigned char *ring, void *task_obj,
                                uint16_t flags, mizu_task *out) {
   mizu_stage_rollback(&p->h);
+  /* The submitter-side churn lift: the busy-path quota sweep is
+     worker-loop-only, and a churned submitter's spill pops stop missing
+     once the copy tiers take over (the SHM_RAW reservation hits the
+     free list), so without this its ledger never drains and the
+     fallback never lifts. Churn-gated: one branch when clear. */
+  if (p->h.fl.churn) mizu_ledger_sweep(&p->h.fl, MIZU_REAP_QUOTA);
   uint32_t local;
   if (pool_alloc_rs(p, keepers, &local) != 0) return MIZU_ERR;
   uint32_t rs_index = p->sub[p->sub_slot].rs_start + local;

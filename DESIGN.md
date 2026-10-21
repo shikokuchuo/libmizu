@@ -633,6 +633,8 @@ An SHM_VEC region recycles only after its zc refcount reaches zero.
 A nonzero region waits in the lent-region ledger.
 Busy paths sweep the ledger with a quota.
 Idle paths and free-list misses sweep it in full.
+On Linux a free-list miss with lent bytes past `MIZU_ZC_LENT_BUDGET` sets the handle's churn flag and staging degrades to the copy tiers — below the budget a fresh create (pre-faulted, SIGBUS-proof) beats the copy floor, past it the copy tiers' deterministic reuse caps tmpfs growth.
+Sweeps and force-reclaims clear the flag once reclaims bring lent bytes back under the budget; a pool submitter sweeps at submit time while churned (the busy-path sweep is worker-loop-only, and its pops stop missing once the copy tiers take over), so the fallback lifts on the first reclaim instead of never.
 
 If the consumer dies, its counts leak.
 The death verdict on the producer then force-reclaims its lent regions.

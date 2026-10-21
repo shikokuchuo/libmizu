@@ -60,9 +60,12 @@ RngStreams, doxygen-awesome-css).
   `wait_win32.c` (WaitOnAddress + named events).
   Performance notes: the parker caches the self pid with an atfork reset;
   channel/pool reads start from a per-handle read-ctx template; the error
-  recorders are marked cold; reused spill regions collapse to huge pages
-  at free-list insert (Linux THP), so only regions that completed a
-  consumer-done cycle pay for it.
+  recorders are marked cold; on Linux, >= 2 MiB region mappings are
+  extent-aligned (`mizu_mmap_aligned` — MADV_COLLAPSE's congruence gate)
+  and creates are born huge on kernel >= 6.1 (one fault per extent +
+  MADV_COLLAPSE, MADV_POPULATE_WRITE as the failure fallback and over a
+  non-extent tail); the free-list-insert collapse remains as the heal
+  path for fallback-created regions.
 - `src/internal.h` — internals; unit tests may include it, integration tests
   must not.
 - `tests/unit/` — in-process, deterministic tier (one binary per `.c` file).

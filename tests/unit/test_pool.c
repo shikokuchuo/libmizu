@@ -332,6 +332,33 @@ static void test_spill(void) {
   puts("ok spill");
 }
 
+/* A churned submitter sweeps at submit time: the busy-path quota sweep
+   is worker-loop-only, and a churned submitter's pops stop missing once
+   the copy tiers take over — the submit-side sweep is what lets the
+   fallback lift here. Field-simulated past-budget state (256 MB of real
+   regions has no place in a unit test). */
+static void test_submit_sweep_churn(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_handle *h = (mizu_handle *) ctrl;
+  mizu_keeper tab[1];
+  memset(tab, 0, sizeof(tab));
+  mizu_shm *z = mizu_spill_region_get(&h->fl, 100);
+  mizu_stage_retain_zc(h, z);
+  mizu_keeper_commit(h, tab, 0);
+  mizu_zc_ref(z);
+  mizu_keeper_release(h, tab, 0);      /* lent: rc 1 on the ledger */
+  mizu_zc_unref(z);                    /* views gone: reclaimable */
+  h->fl.lent_bytes = MIZU_ZC_LENT_BUDGET + z->size;   /* past the budget */
+  h->fl.churn = 1;
+  mizu_task t = submit_bytes(ctrl, "x", 1);
+  assert(h->fl.churn == 0);            /* the submit-side sweep lifted it */
+  assert(h->fl.led_n == 0 && h->fl.n == 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, "x", 1);
+  pool_end();
+  puts("ok submit_sweep_churn");
+}
+
 /* Batches: a burst larger than the ring ends early at the deadline
    (MIZU_OK, *n_out < n); the single form answers MIZU_FULL. */
 static void test_batch(void) {
@@ -3875,6 +3902,7 @@ int main(void) {
   test_unpark_waking();
   test_round_trip();
   test_spill();
+  test_submit_sweep_churn();
   test_batch();
   test_exhaustion();
   test_cancel();
