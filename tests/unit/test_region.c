@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -250,6 +251,46 @@ int main(void) {
     mizu_shm_close(a, 1);
     assert(!maps_span(gone, &lo, &hi));
   }
+
+  /* a create reserves every page up front (the SIGBUS-proofing
+     invariant), whichever reservation path ran: mincore reports the
+     whole range resident — including the partial tail's pages, which
+     the huge-folio create leaves for the populate */
+  {
+    const size_t n = ((size_t) 6 << 20) + 100;
+    mizu_shm *a = NULL;
+    assert(mizu_shm_create(&a, n) == MIZU_OK);
+    const size_t pages = (n + 4095) / 4096;
+    unsigned char *vec = malloc(pages);
+    assert(vec != NULL);
+    assert(mincore(mizu_shm_addr(a), n, vec) == 0);
+    for (size_t i = 0; i < pages; i++) assert(vec[i] & 1);
+    free(vec);
+    mizu_shm_close(a, 1);
+  }
+
+#ifdef MADV_COLLAPSE
+  /* the huge-folio create (kernel >= 6.1) reserves at one fault per
+     2 MiB extent: single-digit minor faults per create against the
+     populate's one per page (2,048 at 8 MiB). Probe availability with
+     a re-collapse of the aligned mapping — idempotent where the kernel
+     supports it, EINVAL where not */
+  {
+    const size_t n = (size_t) 8 << 20;
+    mizu_shm *a = NULL;
+    assert(mizu_shm_create(&a, n) == MIZU_OK);
+    if (madvise(mizu_shm_addr(a), n, MADV_COLLAPSE) == 0) {
+      struct rusage ru0, ru1;
+      assert(getrusage(RUSAGE_SELF, &ru0) == 0);
+      mizu_shm *b = NULL;
+      assert(mizu_shm_create(&b, n) == MIZU_OK);
+      assert(getrusage(RUSAGE_SELF, &ru1) == 0);
+      assert(ru1.ru_minflt - ru0.ru_minflt < 512);
+      mizu_shm_close(b, 1);
+    }
+    mizu_shm_close(a, 1);
+  }
+#endif
 #endif
 
 #ifdef __linux__

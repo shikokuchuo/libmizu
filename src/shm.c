@@ -167,6 +167,13 @@ char **mizu_shm_reap(int *n) {
 #define MAP_POPULATE 0
 #endif
 
+/* Linux 6.1's MADV_COLLAPSE postdates some shipping libc headers; the
+   number is fixed, and an older kernel EINVALs into the create's
+   populate fallback. */
+#if defined(__linux__) && !defined(MADV_COLLAPSE)
+#define MADV_COLLAPSE 25
+#endif
+
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
@@ -664,7 +671,28 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
   if (size >= MIZU_HUGE_EXTENT)
     (void) madvise(addr, size, MADV_HUGEPAGE);
 #endif
-  if (madvise(addr, size, MADV_POPULATE_WRITE) != 0) {
+  int reserved = 0;
+  /* Huge-folio create (kernel >= 6.1; MADV_COLLAPSE is fallback-defined
+     above): touch one page per 2 MiB extent — a wholly-empty extent
+     fails the collapse (SCAN_TRUNCATED) — then collapse: the kernel
+     zero-fills each extent's holes into a fully-present huge folio, so
+     one fault per extent plus one madvise reserve the region where the
+     populate below faults once per page. A 0 return means the whole
+     extents are backed — no populate, and no write fault can SIGBUS
+     later. Any failure (EINVAL pre-6.1, ENOMEM on a failed huge
+     allocation) falls through to the populate, idempotent over
+     whatever did collapse. The extent-aligned mapping passes the
+     congruence gate; a partial tail stays for the populate. */
+  if (size >= MIZU_HUGE_EXTENT) {
+    const size_t whole = size & ~(MIZU_HUGE_EXTENT - 1);
+    volatile unsigned char *b = (volatile unsigned char *) addr;
+    for (size_t off = 0; off < whole; off += MIZU_HUGE_EXTENT) b[off] = 0;
+    if (madvise(addr, whole, MADV_COLLAPSE) == 0)
+      reserved = whole == size ||
+                 madvise((char *) addr + whole, size - whole,
+                         MADV_POPULATE_WRITE) == 0;
+  }
+  if (!reserved && madvise(addr, size, MADV_POPULATE_WRITE) != 0) {
     int perr = errno;
     munmap(addr, size);
     if (perr != EINVAL)             /* tmpfs full: fail, do not retry */
