@@ -9,6 +9,12 @@
    release point (a binding pins the staged object, whose serialized
    stream may carry hook-emitted identifiers). */
 
+/* _GNU_SOURCE: glibc hides MADV_COLLAPSE behind __USE_MISC under strict
+   -std=c11; define before any system header. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <stdlib.h>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -113,10 +119,13 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
      stock Linux shmem THP is off, so the create-time MADV_HUGEPAGE is
      inert and a reused region would stay on 4 KiB pages forever. At
      insert — not create — so only regions that completed a consumer-done
-     cycle pay; under zc churn lent regions never reach here. Idempotent
-     and benign on failure. */
-  if (size >= ((size_t) 2 << 20))
-    (void) madvise(shm->addr, size, MADV_COLLAPSE);
+     cycle pay; under zc churn lent regions never reach here. The
+     extent-aligned mapping passes the congruence gate; the length still
+     rounds down to whole extents (a partial tail EINVALs the call).
+     Idempotent and benign on failure. */
+  if (size >= MIZU_HUGE_EXTENT)
+    (void) madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1),
+                   MADV_COLLAPSE);
 #endif
 }
 

@@ -50,6 +50,18 @@ mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate);
    name. The public mizu_shm_close wraps this + free. */
 void mizu_shm_close_stack(mizu_shm *shm, int unlink);
 
+/* The THP extent MADV_COLLAPSE works in (the PMD unit): its congruence
+   gate validates each 2 MiB extent, so collapse lengths round down to
+   whole extents and collapse-worthy mappings must be extent-aligned. */
+#define MIZU_HUGE_EXTENT ((size_t) 2 << 20)
+
+/* mmap `size` bytes of fd (offset 0) — extent-aligned on Linux (shm.c):
+   shmem hands out the kernel's unaligned pick under the stock
+   shmem_enabled=[never], which fails MADV_COLLAPSE's congruence gate.
+   The plain mmap off Linux, for sub-extent sizes, and on any reservation
+   failure: alignment is an optimization, never a failure mode. */
+void *mizu_mmap_aligned(int fd, size_t size, int prot, int flags);
+
 /* The open forms' name copy: fixed-buffer truncate, always
    NUL-terminated, length stamped. */
 static inline MIZU_MAYBE_UNUSED void mizu_shm_set_name(mizu_shm *shm,

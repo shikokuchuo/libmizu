@@ -88,6 +88,28 @@ static void *delayed_unpark(void *arg) {
   mizu_unpark(pk);
   return NULL;
 }
+
+#ifdef __linux__
+/* The VMA span containing addr in this process's maps; 1 when found. */
+static int maps_span(void *addr, uintptr_t *lo, uintptr_t *hi) {
+  FILE *f = fopen("/proc/self/maps", "r");
+  if (f == NULL) return 0;
+  char line[512];
+  int found = 0;
+  while (fgets(line, sizeof(line), f) != NULL) {
+    unsigned long a, b;
+    if (sscanf(line, "%lx-%lx", &a, &b) != 2) continue;
+    if ((uintptr_t) addr >= (uintptr_t) a && (uintptr_t) addr < (uintptr_t) b) {
+      *lo = (uintptr_t) a;
+      *hi = (uintptr_t) b;
+      found = 1;
+      break;
+    }
+  }
+  fclose(f);
+  return found;
+}
+#endif
 #endif
 
 int main(void) {
@@ -166,6 +188,69 @@ int main(void) {
     mizu_shm_close(r, 0);
     mizu_shm_close(w, 1);
   }
+
+#ifdef __linux__
+  /* extent-aligned mappings: every >= 2 MiB region maps 2 MiB-congruently
+     (MADV_COLLAPSE's congruence gate) on the create, the plain open, the
+     writable attach, the populated RO open, and the view open — with the
+     reservation slop trimmed, so the VMA is exactly the region's pages
+     and close leaves nothing behind */
+  {
+    const size_t n = (size_t) 8 << 20;
+    mizu_shm *a = NULL;
+    assert(mizu_shm_create(&a, n) == MIZU_OK);
+    uintptr_t lo, hi;
+    assert((uintptr_t) mizu_shm_addr(a) % MIZU_HUGE_EXTENT == 0);
+    assert(maps_span(mizu_shm_addr(a), &lo, &hi));
+    assert(lo == (uintptr_t) mizu_shm_addr(a) && hi - lo == n);
+
+    mizu_shm *b = NULL;
+    assert(mizu_shm_open(&b, mizu_shm_name(a)) == MIZU_OK);
+    assert((uintptr_t) mizu_shm_addr(b) % MIZU_HUGE_EXTENT == 0);
+    assert(maps_span(mizu_shm_addr(b), &lo, &hi) && hi - lo == n);
+    mizu_shm_close(b, 0);
+
+    mizu_shm *c = NULL;
+    assert(mizu_shm_open_rw(&c, mizu_shm_name(a), 1) == MIZU_OK);
+    assert((uintptr_t) mizu_shm_addr(c) % MIZU_HUGE_EXTENT == 0);
+    mizu_shm_close(c, 0);
+
+    mizu_shm *d = mizu_shm_open_ro_heap(mizu_shm_name(a));
+    assert(d != NULL);
+    assert((uintptr_t) mizu_shm_addr(d) % MIZU_HUGE_EXTENT == 0);
+    mizu_shm_close(d, 0);
+
+    mizu_shm *v = NULL;
+    assert(mizu_shm_open_view(&v, mizu_shm_name(a)) == MIZU_OK);
+    assert((uintptr_t) mizu_shm_addr(v) % MIZU_HUGE_EXTENT == 0);
+    mizu_zc_unref(v);          /* balance the open's counted add */
+    mizu_shm_close(v, 0);
+
+    void *gone = mizu_shm_addr(a);
+    mizu_shm_close(a, 1);
+    assert(!maps_span(gone, &lo, &hi));
+  }
+
+  /* a size that is not an extent (or page) multiple: aligned start, the
+     tail edge rounded to whole pages, the last byte reachable */
+  {
+    const size_t n = ((size_t) 6 << 20) + 100;
+    mizu_shm *a = NULL;
+    assert(mizu_shm_create(&a, n) == MIZU_OK);
+    assert((uintptr_t) mizu_shm_addr(a) % MIZU_HUGE_EXTENT == 0);
+    uintptr_t lo, hi;
+    assert(maps_span(mizu_shm_addr(a), &lo, &hi));
+    assert(hi - lo == (((size_t) 6 << 20) + 4096));
+    ((unsigned char *) mizu_shm_addr(a))[n - 1] = 0x7E;
+    mizu_shm *b = NULL;
+    assert(mizu_shm_open(&b, mizu_shm_name(a)) == MIZU_OK);
+    assert(((unsigned char *) mizu_shm_addr(b))[n - 1] == 0x7E);
+    mizu_shm_close(b, 0);
+    void *gone = mizu_shm_addr(a);
+    mizu_shm_close(a, 1);
+    assert(!maps_span(gone, &lo, &hi));
+  }
+#endif
 
 #ifdef __linux__
   /* an oversize create fails fast with NOSPACE and materializes nothing:

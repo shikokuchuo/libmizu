@@ -110,9 +110,9 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   /* Pre-fault when asked, unlike the plain read-only consumer open: the
      whole ring is hot on the peer, so one populate beats faulting on the
      hot path. Lazy attaches (map contexts) opt out. */
-  void *addr = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                    /* NOLINTNEXTLINE(bugprone-branch-clone) */
-                    MAP_SHARED | (populate ? MAP_POPULATE : 0), fd, 0);
+  void *addr = mizu_mmap_aligned(fd, size, PROT_READ | PROT_WRITE,
+                                 /* NOLINTNEXTLINE(bugprone-branch-clone) */
+                                 MAP_SHARED | (populate ? MAP_POPULATE : 0));
   if (addr == MAP_FAILED) {
     close(fd);
     return -1;
@@ -130,12 +130,15 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 #endif
 
 #if defined(__linux__) && defined(MADV_COLLAPSE)
-  /* Collapse works on shm under shmem_enabled=[never] (kernel >= 6.1)
-     and installs PMD mappings for this process even when the creator
-     already collapsed the folios. Populated attaches only: a lazy attach
-     must keep demand paging. Failure is benign. */
-  if (populate && size >= ((size_t) 2 << 20))
-    (void) madvise(addr, size, MADV_COLLAPSE);
+  /* Collapse to huge folios (kernel >= 6.1): with the extent-aligned
+     mapping this succeeds under the stock shmem_enabled=[never] — no
+     PMD-mapping there, the win is the huge folio in the page cache (this
+     attach's PTEs install extent-at-a-time, and every later mapper
+     faults against it). Populated attaches only: a lazy attach must keep
+     demand paging. Round down to whole extents: a partial tail extent
+     EINVALs the call. Failure is benign. */
+  if (populate && size >= MIZU_HUGE_EXTENT)
+    (void) madvise(addr, size & ~(MIZU_HUGE_EXTENT - 1), MADV_COLLAPSE);
 #endif
 
   shm->addr = addr;
@@ -171,7 +174,8 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
     return NULL;
   }
   size_t size = (size_t) st.st_size;
-  void *addr = mmap(NULL, size, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+  void *addr = mizu_mmap_aligned(fd, size, PROT_READ,
+                                 MAP_SHARED | MAP_POPULATE);
   if (addr == MAP_FAILED) {
     close(fd);
     free(shm);
@@ -225,10 +229,13 @@ int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
 #endif
 #if defined(__linux__) && defined(MADV_COLLAPSE)
   /* The plain create's MADV_HUGEPAGE is inert under the stock
-     shmem_enabled=[never]; a synchronous collapse works regardless, and
-     the MAP_POPULATE pages already exist. Failure is benign. */
-  if (rc == MIZU_ERRCAT_NONE && size >= ((size_t) 2 << 20))
-    (void) madvise(shm->addr, size, MADV_COLLAPSE);
+     shmem_enabled=[never]; a synchronous collapse works regardless (the
+     mapping is extent-aligned), and the populated pages already exist.
+     Round down to whole extents: control-region sizes are not extent
+     multiples, and a partial tail extent EINVALs the call. Failure is
+     benign. */
+  if (rc == MIZU_ERRCAT_NONE && size >= MIZU_HUGE_EXTENT)
+    (void) madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1), MADV_COLLAPSE);
 #endif
   return rc;
 }
