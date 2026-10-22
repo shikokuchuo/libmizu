@@ -13,6 +13,27 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- The labeled attribute shapes (the new `MIZU_CAP_LABELED` capability
+  bit, 7): a named atomic vector (attrs exactly `names`, NA elements
+  carried), a dim array with `dimnames` — both the unnamed-axes list
+  form and the named-axes form (the `dimnames` list itself attributed
+  with exactly `names`, the one site a names-attributed list is not a
+  0x0d dict), with an optional `class = "table"` — and the extended
+  frame dict: a class vector whose last element is `"data.frame"`
+  (tibbles and user frame classes round-trip) plus extra attributes
+  outside the reserved set, emitted byte-sorted after the canonical
+  keys, an attributed extra's value crossing as an opaque
+  `attr(value, dict)` subtree (any encodable attribute set, byte-sorted
+  keys). New upstream surface: the `MIZU_IX_ATTR_DIMNAMES` /
+  `MIZU_IX_ATTR_TSP` / `MIZU_IX_CLASS_TABLE` constants, the dual-form
+  `mizu_ix_attr_reserved(key, len)` (the reserved-key set, one list for
+  both bindings), and `mizu_ix_skip(cur, &start, &len)` — an exported
+  cursor verb consuming one complete value and reporting its byte span,
+  so a binding can stash an extra's subtree verbatim and re-emit it
+  without a decode. Writers gate every emission site on the peer's bit
+  (decline, never strip); pre-cap readers fail loud on their exact-set
+  guards. No ABI bump: caps are negotiated.
+
 - `mizu_channel_abandon` / `mizu_pool_abandon`: the forked-child teardown
   for an inherited handle. Each releases only the process-local half —
   the child's copies of the mapping and fds plus its heap — and writes no

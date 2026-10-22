@@ -118,6 +118,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_ix_open);
   refs += sink((mizu_any_fn) &mizu_ix_next);
   refs += sink((mizu_any_fn) &mizu_ix_end);
+  refs += sink((mizu_any_fn) &mizu_ix_skip);
   refs += sink((mizu_any_fn) &mizu_ix_put_header);
   refs += sink((mizu_any_fn) &mizu_ix_put_nil);
   refs += sink((mizu_any_fn) &mizu_ix_put_lgl);
@@ -141,6 +142,7 @@ int main(void) {
      helpers; the task decode shim is exported-only, like the cursor. */
   refs += sink((mizu_any_fn) &mizu_ix_utf8_valid);
   refs += sink((mizu_any_fn) &mizu_ix_tag_of);
+  refs += sink((mizu_any_fn) &mizu_ix_attr_reserved);
   refs += sink((mizu_any_fn) &mizu_ix_write_err);
   refs += sink((mizu_any_fn) &mizu_ixt_open);
   refs += sink((mizu_any_fn) &mizu_ixt_want_code);
@@ -188,7 +190,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 122);
+  assert(refs == 124);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

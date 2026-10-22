@@ -384,6 +384,24 @@ mizu_status mizu_ix_end(mizu_ix *cur) {
   return MIZU_OK;
 }
 
+mizu_status mizu_ix_skip(mizu_ix *cur, const unsigned char **start,
+                         size_t *len) {
+  if (cur->err) return MIZU_ERR;
+  const unsigned char *s = cur->p;
+  const uint32_t base = cur->depth;
+  mizu_ix_item it;
+  /* one value completes when the depth returns to base: a scalar
+     completes in place; a container's frame pops through ix_complete,
+     which may cascade below base when the value was a parent's last
+     item */
+  do {
+    if (mizu_ix_next(cur, &it) != MIZU_OK) return MIZU_ERR;
+  } while (cur->depth > base);
+  *start = s;
+  *len = (size_t) (cur->p - s);
+  return MIZU_OK;
+}
+
 // The task-stream decode shim -------------------------------------------------------
 
 /* The per-field shape checks every task-stream decode shares (DESIGN.md's

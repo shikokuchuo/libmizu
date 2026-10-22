@@ -141,6 +141,10 @@ extern "C" {
    a tscale attribute — verbatim nanosecond timestamps and durations */
 #define MIZU_CAP_MIZL_U64V (1u << 6) /**< reads MIZL INT64 leaves carrying
    a u64 attribute — verbatim uint64 frame columns */
+#define MIZU_CAP_LABELED (1u << 7)  /**< reads the labeled attribute
+   shapes: a 1-D names vector, a dim + dimnames array (the table class
+   included), and the extended frame dict (a class vector ending
+   "data.frame" plus extra attributes) */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -1493,6 +1497,14 @@ MIZU_API mizu_status mizu_ix_next(mizu_ix *cur, mizu_ix_item *item);
 /** The finishing check: exactly one value per stream — fails on a
    truncated root value or on bytes past it. */
 MIZU_API mizu_status mizu_ix_end(mizu_ix *cur);
+/** Consume one complete value at the cursor's position without building
+   it, reporting its byte span: *start points into the stream (borrowed,
+   exactly as item spans are) and *len is the value's encoded byte
+   length, so a binding can stash a subtree verbatim or re-emit it
+   without a decode. MIZU_OK, or MIZU_ERR with the error in the TLS slot
+   (the cursor latches as usual). */
+MIZU_API mizu_status mizu_ix_skip(mizu_ix *cur, const unsigned char **start,
+                                  size_t *len);
 
 /** The task-stream decode shim (DESIGN.md's byte-shape helper registry):
    the per-field shape checks every task-stream decode shares, once.
@@ -1529,12 +1541,14 @@ MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 #define MIZU_IX_ATTR_NAMES    "names"
 #define MIZU_IX_ATTR_LEVELS   "levels"
 #define MIZU_IX_ATTR_DIM      "dim"
+#define MIZU_IX_ATTR_DIMNAMES "dimnames"
 #define MIZU_IX_ATTR_CLASS    "class"
 #define MIZU_IX_ATTR_UNITS    "units"
 #define MIZU_IX_ATTR_ROWNAMES "row.names"
 #define MIZU_IX_ATTR_TZONE    "tzone"
 #define MIZU_IX_ATTR_TSCALE   "tscale"
 #define MIZU_IX_ATTR_U64      "u64"
+#define MIZU_IX_ATTR_TSP      "tsp"
 
 #define MIZU_IX_CLASS_FACTOR    "factor"
 #define MIZU_IX_CLASS_DATE      "Date"
@@ -1542,6 +1556,7 @@ MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 #define MIZU_IX_CLASS_POSIXT    "POSIXt"
 #define MIZU_IX_CLASS_DIFFTIME  "difftime"
 #define MIZU_IX_CLASS_DATAFRAME "data.frame"
+#define MIZU_IX_CLASS_TABLE     "table"
 
 #define MIZU_IX_UNIT_SECS  "secs"
 #define MIZU_IX_UNIT_MINS  "mins"
@@ -1597,6 +1612,20 @@ MIZU_EXT_INLINE int mizu_ext_ix_tag_of_impl(int wire_type) {
   case MIZU_TYPE_INT64: return MIZU_IX_TAG_I64V;
   default:              return MIZU_IX_TAG_NIL;
   }
+}
+
+MIZU_EXT_INLINE int mizu_ext_ix_attr_reserved_impl(const char *key,
+                                                   size_t len) {
+  static const char *const reserved[] = {
+    MIZU_IX_ATTR_NAMES, MIZU_IX_ATTR_LEVELS, MIZU_IX_ATTR_DIM,
+    MIZU_IX_ATTR_DIMNAMES, MIZU_IX_ATTR_CLASS, MIZU_IX_ATTR_UNITS,
+    MIZU_IX_ATTR_ROWNAMES, MIZU_IX_ATTR_TZONE, MIZU_IX_ATTR_TSCALE,
+    MIZU_IX_ATTR_U64, MIZU_IX_ATTR_TSP
+  };
+  for (size_t i = 0; i < sizeof reserved / sizeof reserved[0]; i++)
+    if (strlen(reserved[i]) == len && memcmp(key, reserved[i], len) == 0)
+      return 1;
+  return 0;
 }
 
 /** The interop emit helpers' bodies (the interchange stream section
@@ -1843,6 +1872,7 @@ MIZU_EXT_INLINE size_t mizu_ext_ix_write_err_impl(
 #ifdef MIZU_EXT_NO_INLINES
 MIZU_API int mizu_ix_utf8_valid(const void *s, size_t n);
 MIZU_API int mizu_ix_tag_of(int wire_type);
+MIZU_API int mizu_ix_attr_reserved(const char *key, size_t len);
 MIZU_API size_t mizu_ix_put_header(unsigned char *dst);
 MIZU_API size_t mizu_ix_put_nil(unsigned char *dst);
 MIZU_API size_t mizu_ix_put_lgl(unsigned char *dst, int value);
@@ -1897,6 +1927,14 @@ MIZU_EXT_INLINE int mizu_ix_utf8_valid(const void *s, size_t n) {
    is distinguishable from every mapping). */
 MIZU_EXT_INLINE int mizu_ix_tag_of(int wire_type) {
   return mizu_ext_ix_tag_of_impl(wire_type);
+}
+/** The reserved attribute keys: every MIZU_IX_ATTR_* key (the whitelist
+   vocabulary) plus "tsp" — 1 when the (key, len) span names one, 0
+   otherwise. An extended frame dict's extra keys must all pass here:
+   the whitelist keys would shadow the canonical pairs, and "tsp" is a
+   key R validates at apply (a bad one longjmps mid-read). */
+MIZU_EXT_INLINE int mizu_ix_attr_reserved(const char *key, size_t len) {
+  return mizu_ext_ix_attr_reserved_impl(key, len);
 }
 MIZU_EXT_INLINE size_t mizu_ix_put_header(unsigned char *dst) {
   return mizu_ext_ix_put_header_impl(dst);

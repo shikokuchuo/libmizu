@@ -132,6 +132,10 @@ int mizu_ix_tag_of(int wire_type) {
   return mizu_ext_ix_tag_of_impl(wire_type);
 }
 
+int mizu_ix_attr_reserved(const char *key, size_t len) {
+  return mizu_ext_ix_attr_reserved_impl(key, len);
+}
+
 size_t mizu_ix_put_header(unsigned char *dst) {
   return mizu_ext_ix_put_header_impl(dst);
 }

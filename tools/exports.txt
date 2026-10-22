@@ -50,6 +50,7 @@ mizu_handle_churn
 mizu_handle_keep_out
 mizu_handle_kind
 mizu_handle_spill_info
+mizu_ix_attr_reserved
 mizu_ix_end
 mizu_ix_next
 mizu_ix_open
@@ -71,6 +72,7 @@ mizu_ix_put_strelt
 mizu_ix_put_strv_begin
 mizu_ix_put_task
 mizu_ix_put_vec
+mizu_ix_skip
 mizu_ix_tag_of
 mizu_ix_utf8_valid
 mizu_ix_write_err
