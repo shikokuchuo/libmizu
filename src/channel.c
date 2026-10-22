@@ -1292,6 +1292,40 @@ const char *mizu_channel_error(const mizu_channel *c) {
    instead of hanging on a vanished handle, then release what the
    (non-blocking) rendezvous check completes — the death verdict and
    mizu_shm_reap backstop the rest. */
+/* The payload half of the close rendezvous: wait for the peer to drain our
+   tx ring before the teardown unlinks any payload region — head
+   publication trails every resolve and copy-out (Recv's
+   read-before-publish), so a caught-up ring means nothing in flight
+   references a lent region. Bounded and verdict-gated: a dead peer falls
+   through to chan_probe_dead's survivor cleanup; a stuck-but-live one
+   costs the bound, never a hang. */
+#define MIZU_CLOSE_DRAIN_MS 1000.0
+static void chan_drain_wait(mizu_channel *c) {
+  const double deadline = mizu_now() + MIZU_CLOSE_DRAIN_MS / 1000;
+  for (;;) {
+    if (atomic_load_explicit(c->tx.head, memory_order_acquire) >=
+        atomic_load_explicit(c->tx.tail, memory_order_acquire))
+      return;
+    if (chan_probe_dead(c)) return;
+    long ms = mizu_wait_ms(deadline);
+    if (ms <= 0) return;
+    /* snapshot -> announce -> re-check -> sleep bounded: the consumer's
+       head publish unparks us, a peer death fires the listener */
+    uint32_t e = mizu_parker_snapshot(&c->self_pk);
+    atomic_store_explicit(c->self_parked, 1u, memory_order_relaxed);
+    atomic_thread_fence(memory_order_seq_cst);
+    if (atomic_load_explicit(c->tx.head, memory_order_acquire) >=
+        atomic_load_explicit(c->tx.tail, memory_order_acquire)) {
+      atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+      return;
+    }
+    mizu_park_bracket(&c->h.binding, 1);
+    mizu_park(&c->self_pk, e, ms);
+    mizu_park_bracket(&c->h.binding, 0);
+    atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+  }
+}
+
 void mizu_channel_destroy(mizu_channel *c) {
   if (c == NULL) return;
   if (!c->released) {
@@ -1300,9 +1334,14 @@ void mizu_channel_destroy(mizu_channel *c) {
       atomic_fetch_or_explicit(c->closedw, chan_closed_bit(c),
                                memory_order_seq_cst);
       if (c->pk_ok) mizu_unpark(&c->peer_pk);
-      /* the close protocol's rendezvous re-check: unlink only once the
-         peer has set its bit or its death is confirmed — a live peer's
-         in-flight drain is never raced */
+      /* the close protocol's rendezvous, payload half: a live peer reads
+         the in-flight tail before either side's teardown unlinks its
+         region — the drain is never raced */
+      if (c->pk_ok &&
+          atomic_load_explicit(c->ready, memory_order_acquire) != 0)
+        chan_drain_wait(c);
+      /* the rendezvous re-check: unlink only once the peer has set its
+         bit or its death is confirmed */
       uint32_t cw = atomic_load_explicit(c->closedw, memory_order_acquire);
       uint32_t other = 3u ^ chan_closed_bit(c);
       unlink_names = (cw & other) != 0 || c->verdict_dead ||

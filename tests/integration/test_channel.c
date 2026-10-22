@@ -26,6 +26,7 @@ int main(void) {
 
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static char token[64];
@@ -173,9 +174,56 @@ static void test_fork_abandon(void) {
   puts("ok fork_abandon");
 }
 
+/* The fire-and-exit producer: attach, one spill-region payload, immediate
+   destroy — destroy's drain rendezvous holds the teardown (and its
+   unlinks) until the host has read. */
+static void run_fire_peer(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel *p;
+  if (mizu_channel_attach(&p, token, &b) != MIZU_OK) _exit(15);
+  if (mizu_channel_ready_set(p) != MIZU_OK) _exit(16);
+  static unsigned char big[1 << 21];
+  for (size_t i = 0; i < sizeof big; i++) big[i] = (unsigned char) i;
+  mizu_bytes tb = { big, sizeof big };
+  if (mizu_channel_send(p, &tb) != MIZU_OK) _exit(17);
+  mizu_channel_destroy(p);
+  _exit(0);
+}
+
+static void test_drain_rendezvous(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
+  opts.capacity = 8;
+  opts.slot_size = 512;
+  opts.arena_size = 0;   /* force the spill region the race unlinks */
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof token) == MIZU_OK);
+  fflush(stdout);
+  pid_t p = fork();
+  assert(p >= 0);
+  if (p == 0) run_fire_peer();
+  { /* the peer's destroy is mid-rendezvous by now; pre-rendezvous this
+       recv read "payload region vanished" */
+    struct timespec ts = { 0, 300 * 1000000L };
+    nanosleep(&ts, NULL);
+  }
+  void *obj = NULL;
+  assert(mizu_channel_recv(host, &obj, 10000) == MIZU_OK);
+  mizu_bytes *rb = obj;
+  assert(rb->len == (size_t) (1 << 21));
+  mizu_bytes_free(rb);
+  assert(wait_exit(p) == 0);
+  mizu_channel_destroy(host);
+  puts("ok drain_rendezvous");
+}
+
 int main(void) {
   test_fork_guard();
   test_fork_abandon();
+  test_drain_rendezvous();
   puts("test_channel integration: all passed");
   return 0;
 }

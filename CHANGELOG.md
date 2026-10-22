@@ -395,6 +395,17 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- `mizu_channel_destroy` no longer unlinks in-flight payload regions
+  under a live peer: a producer exiting right after publishing stranded
+  the consumer's resolve with "payload region vanished" whenever the
+  teardown's unlinks beat the consumer's read (the close rendezvous
+  covered the control region's name only). Destroy now waits — bounded
+  (1 s) and death-verdict gated — for the peer to drain the tx ring
+  (head publication trails every resolve and copy-out) before the spill
+  teardown runs: the close protocol's "in-flight drain is never raced"
+  now covers payload regions. A dead peer falls through to the survivor
+  cleanup as before; a stuck-but-live peer costs the bound, never a
+  hang.
 - `mizu_arrow_str_at` no longer declines a string_view span that
   references the array's trailing buffer slot: the C Data spec puts the
   int64 variadic-sizes array there, but nanoarrow's nested and standalone

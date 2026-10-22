@@ -658,6 +658,13 @@ MIZU_API mizu_status mizu_channel_close(mizu_channel *, double timeout_ms);
 MIZU_API mizu_status mizu_channel_close_signal(mizu_channel *);
 /** Logically a read; the probe can run survivor cleanup internally. */
 MIZU_API int mizu_channel_alive(const mizu_channel *);
+/** Signal close and release the handle: the close bit is set and the peer
+   woken, then — while the peer is alive — the teardown waits (bounded; a
+   peer death confirmed by the liveness verdict ends it early) for the
+   peer to drain in-flight payloads before any payload region is
+   unlinked, so a producer exiting right after publishing never strands a
+   live consumer's read with a dangling region name. Blocks at most the
+   drain bound; frees the handle, and the pointer is dead on return. */
 MIZU_API void mizu_channel_destroy(mizu_channel *);
 /** The forked-child teardown: releases only the process-local half of an
    inherited handle — the child's copies of the mapping and fds and its
