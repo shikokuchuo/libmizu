@@ -230,6 +230,10 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_MIZL_U64V</b>&#160;&#160;&#160;(1u &lt;&lt; 6)</td></tr>
 <tr class="memdesc:a71e04ff99f9c14f8489830de32422dc2"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads MIZL INT64 leaves carrying a u64 attribute — verbatim uint64 frame columns <br /></td></tr>
 <tr class="separator:a71e04ff99f9c14f8489830de32422dc2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ace620049e87f54ac6f2810ecb15b9501" id="r_ace620049e87f54ac6f2810ecb15b9501"><td class="memItemLeft" align="right" valign="top"><a id="ace620049e87f54ac6f2810ecb15b9501" name="ace620049e87f54ac6f2810ecb15b9501"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_LABELED</b>&#160;&#160;&#160;(1u &lt;&lt; 7)</td></tr>
+<tr class="memdesc:ace620049e87f54ac6f2810ecb15b9501"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads the labeled attribute shapes: a 1-D names vector, a dim + dimnames array (the table class included), and the extended frame dict (a class vector ending "data.frame" plus extra attributes) <br /></td></tr>
+<tr class="separator:ace620049e87f54ac6f2810ecb15b9501"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5b840ab0de642c2462a22c967295f6e2" id="r_a5b840ab0de642c2462a22c967295f6e2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a5b840ab0de642c2462a22c967295f6e2">MIZU_IDENT</a>(lang,  caps)&#160;&#160;&#160;  ((uint64_t) (uint8_t) (lang) | ((uint64_t) (uint32_t) (caps) &lt;&lt; 32))</td></tr>
 <tr class="memdesc:a5b840ab0de642c2462a22c967295f6e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The identity word: the language in bits 0-7, the 32-bit capability mask in bits 32-63, bits 8-31 reserved — written zero and ignored by readers (a negotiation word, so a later field needs no reader taught to skip it).  <br /></td></tr>
 <tr class="separator:a5b840ab0de642c2462a22c967295f6e2"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -283,6 +287,9 @@ Macros</h2></td></tr>
 <tr class="memitem:a5c92b23df381009120b903da8d940070" id="r_a5c92b23df381009120b903da8d940070"><td class="memItemLeft" align="right" valign="top"><a id="a5c92b23df381009120b903da8d940070" name="a5c92b23df381009120b903da8d940070"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_DIM</b>&#160;&#160;&#160;&quot;dim&quot;</td></tr>
 <tr class="separator:a5c92b23df381009120b903da8d940070"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a780884159836ccadc7d829c717d37324" id="r_a780884159836ccadc7d829c717d37324"><td class="memItemLeft" align="right" valign="top"><a id="a780884159836ccadc7d829c717d37324" name="a780884159836ccadc7d829c717d37324"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_DIMNAMES</b>&#160;&#160;&#160;&quot;dimnames&quot;</td></tr>
+<tr class="separator:a780884159836ccadc7d829c717d37324"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2d64dfab4dc7e03c059836b1d839ef6f" id="r_a2d64dfab4dc7e03c059836b1d839ef6f"><td class="memItemLeft" align="right" valign="top"><a id="a2d64dfab4dc7e03c059836b1d839ef6f" name="a2d64dfab4dc7e03c059836b1d839ef6f"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_CLASS</b>&#160;&#160;&#160;&quot;class&quot;</td></tr>
 <tr class="separator:a2d64dfab4dc7e03c059836b1d839ef6f"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -301,6 +308,9 @@ Macros</h2></td></tr>
 <tr class="memitem:af3a91cf264ca8ad63e824d302c1952a6" id="r_af3a91cf264ca8ad63e824d302c1952a6"><td class="memItemLeft" align="right" valign="top"><a id="af3a91cf264ca8ad63e824d302c1952a6" name="af3a91cf264ca8ad63e824d302c1952a6"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_U64</b>&#160;&#160;&#160;&quot;u64&quot;</td></tr>
 <tr class="separator:af3a91cf264ca8ad63e824d302c1952a6"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a701a17350d6805efa2c3c3dbdedd6114" id="r_a701a17350d6805efa2c3c3dbdedd6114"><td class="memItemLeft" align="right" valign="top"><a id="a701a17350d6805efa2c3c3dbdedd6114" name="a701a17350d6805efa2c3c3dbdedd6114"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_TSP</b>&#160;&#160;&#160;&quot;tsp&quot;</td></tr>
+<tr class="separator:a701a17350d6805efa2c3c3dbdedd6114"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a845b6a0165d0d69a7f5a185859df4419" id="r_a845b6a0165d0d69a7f5a185859df4419"><td class="memItemLeft" align="right" valign="top"><a id="a845b6a0165d0d69a7f5a185859df4419" name="a845b6a0165d0d69a7f5a185859df4419"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_FACTOR</b>&#160;&#160;&#160;&quot;factor&quot;</td></tr>
 <tr class="separator:a845b6a0165d0d69a7f5a185859df4419"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -319,6 +329,9 @@ Macros</h2></td></tr>
 <tr class="memitem:afd6418a19918454a3467a2c2f8241b7f" id="r_afd6418a19918454a3467a2c2f8241b7f"><td class="memItemLeft" align="right" valign="top"><a id="afd6418a19918454a3467a2c2f8241b7f" name="afd6418a19918454a3467a2c2f8241b7f"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_DATAFRAME</b>&#160;&#160;&#160;&quot;data.frame&quot;</td></tr>
 <tr class="separator:afd6418a19918454a3467a2c2f8241b7f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a79ff7c82b0b86303e49cd8a47537f8fe" id="r_a79ff7c82b0b86303e49cd8a47537f8fe"><td class="memItemLeft" align="right" valign="top"><a id="a79ff7c82b0b86303e49cd8a47537f8fe" name="a79ff7c82b0b86303e49cd8a47537f8fe"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_TABLE</b>&#160;&#160;&#160;&quot;table&quot;</td></tr>
+<tr class="separator:a79ff7c82b0b86303e49cd8a47537f8fe"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8f8a5de11e6617edcb9af71d3a767e1e" id="r_a8f8a5de11e6617edcb9af71d3a767e1e"><td class="memItemLeft" align="right" valign="top"><a id="a8f8a5de11e6617edcb9af71d3a767e1e" name="a8f8a5de11e6617edcb9af71d3a767e1e"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_UNIT_SECS</b>&#160;&#160;&#160;&quot;secs&quot;</td></tr>
 <tr class="separator:a8f8a5de11e6617edcb9af71d3a767e1e"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -837,6 +850,9 @@ static void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_mizh_vali
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_end</b> (<a class="el" href="mizu__ext_8h.html#ac3e0d1af772ed4dee41ebcd15bc78aed">mizu_ix</a> *cur)</td></tr>
 <tr class="memdesc:a9627fa244448348229bd367d7657cb01"><td class="mdescLeft">&#160;</td><td class="mdescRight">The finishing check: exactly one value per stream — fails on a truncated root value or on bytes past it. <br /></td></tr>
 <tr class="separator:a9627fa244448348229bd367d7657cb01"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a2ab3e14a77918d59a797d8fd56c471e3" id="r_a2ab3e14a77918d59a797d8fd56c471e3"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a2ab3e14a77918d59a797d8fd56c471e3">mizu_ix_skip</a> (<a class="el" href="mizu__ext_8h.html#ac3e0d1af772ed4dee41ebcd15bc78aed">mizu_ix</a> *cur, const unsigned char **start, size_t *len)</td></tr>
+<tr class="memdesc:a2ab3e14a77918d59a797d8fd56c471e3"><td class="mdescLeft">&#160;</td><td class="mdescRight">Consume one complete value at the cursor's position without building it, reporting its byte span: *start points into the stream (borrowed, exactly as item spans are) and *len is the value's encoded byte length, so a binding can stash a subtree verbatim or re-emit it without a decode.  <br /></td></tr>
+<tr class="separator:a2ab3e14a77918d59a797d8fd56c471e3"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aa6217f0cd99b9fe4f02ca011c84aea03" id="r_aa6217f0cd99b9fe4f02ca011c84aea03"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#aa6217f0cd99b9fe4f02ca011c84aea03">mizu_ixt_open</a> (<a class="el" href="mizu__ext_8h.html#ac3e0d1af772ed4dee41ebcd15bc78aed">mizu_ix</a> *cur, const void *buf, size_t len, <a class="el" href="structmizu__ix__item__s.html">mizu_ix_item</a> *item, int max_kind)</td></tr>
 <tr class="memdesc:aa6217f0cd99b9fe4f02ca011c84aea03"><td class="mdescLeft">&#160;</td><td class="mdescRight">The task-stream decode shim (DESIGN.md's byte-shape helper registry): the per-field shape checks every task-stream decode shares, once.  <br /></td></tr>
 <tr class="separator:aa6217f0cd99b9fe4f02ca011c84aea03"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -857,6 +873,9 @@ static void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_mizh_vali
 <tr class="separator:af55a5c2b71dd527ce2bd1ddfa7e137bc"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2e836f8a991fcbedb0ab23cf4f537382" id="r_a2e836f8a991fcbedb0ab23cf4f537382"><td class="memItemLeft" align="right" valign="top">static int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#a2e836f8a991fcbedb0ab23cf4f537382">mizu_ext_ix_tag_of_impl</a> (int wire_type)</td></tr>
 <tr class="separator:a2e836f8a991fcbedb0ab23cf4f537382"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a6e5908593196f61312f05677d03e7dbb" id="r_a6e5908593196f61312f05677d03e7dbb"><td class="memItemLeft" align="right" valign="top"><a id="a6e5908593196f61312f05677d03e7dbb" name="a6e5908593196f61312f05677d03e7dbb"></a>
+static int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_ix_attr_reserved_impl</b> (const char *key, size_t len)</td></tr>
+<tr class="separator:a6e5908593196f61312f05677d03e7dbb"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a60fb95ceb4fe8797885ee893a0432a93" id="r_a60fb95ceb4fe8797885ee893a0432a93"><td class="memItemLeft" align="right" valign="top"><a id="a60fb95ceb4fe8797885ee893a0432a93" name="a60fb95ceb4fe8797885ee893a0432a93"></a>
 static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_ix_put_header_impl</b> (unsigned char *dst)</td></tr>
 <tr class="memdesc:a60fb95ceb4fe8797885ee893a0432a93"><td class="mdescLeft">&#160;</td><td class="mdescRight">The interop emit helpers' bodies (the interchange stream section below): every count and value follows its tag byte directly at unaligned offsets, little-endian, so writes are memcpy, never casts. <br /></td></tr>
@@ -924,6 +943,9 @@ static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ext_ix_
 static int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_tag_of</b> (int wire_type)</td></tr>
 <tr class="memdesc:a6550a7b9c22145ca2506607bcb6a71c1"><td class="mdescLeft">&#160;</td><td class="mdescRight">The wire-type -&gt; vector-tag mapping: MIZU_TYPE_LGL / INT / REAL / CPLX / RAW / INT64 -&gt; 0x06 / 0x07 / 0x08 / 0x09 / 0x0a / 0x0e; any other input returns 0 (MIZU_IX_TAG_NIL, never a vector tag, so the failure is distinguishable from every mapping). <br /></td></tr>
 <tr class="separator:a6550a7b9c22145ca2506607bcb6a71c1"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac6666eb8bc2d56e6230747608b254120" id="r_ac6666eb8bc2d56e6230747608b254120"><td class="memItemLeft" align="right" valign="top">static int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu__ext_8h.html#ac6666eb8bc2d56e6230747608b254120">mizu_ix_attr_reserved</a> (const char *key, size_t len)</td></tr>
+<tr class="memdesc:ac6666eb8bc2d56e6230747608b254120"><td class="mdescLeft">&#160;</td><td class="mdescRight">The reserved attribute keys: every MIZU_IX_ATTR_* key (the whitelist vocabulary) plus "tsp" — 1 when the (key, len) span names one, 0 otherwise.  <br /></td></tr>
+<tr class="separator:ac6666eb8bc2d56e6230747608b254120"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8f8ebf548f9d8431203f17f38c562f8e" id="r_a8f8ebf548f9d8431203f17f38c562f8e"><td class="memItemLeft" align="right" valign="top"><a id="a8f8ebf548f9d8431203f17f38c562f8e" name="a8f8ebf548f9d8431203f17f38c562f8e"></a>
 static size_t&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_ix_put_header</b> (unsigned char *dst)</td></tr>
 <tr class="separator:a8f8ebf548f9d8431203f17f38c562f8e"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -3262,6 +3284,43 @@ newer format", never a bare corrupt-stream error). </p>
 
 </div>
 </div>
+<a id="a2ab3e14a77918d59a797d8fd56c471e3" name="a2ab3e14a77918d59a797d8fd56c471e3"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a2ab3e14a77918d59a797d8fd56c471e3">&#9670;&#160;</a></span>mizu_ix_skip()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_ix_skip </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="mizu__ext_8h.html#ac3e0d1af772ed4dee41ebcd15bc78aed">mizu_ix</a> *&#160;</td>
+          <td class="paramname"><em>cur</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const unsigned char **&#160;</td>
+          <td class="paramname"><em>start</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t *&#160;</td>
+          <td class="paramname"><em>len</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Consume one complete value at the cursor's position without building it, reporting its byte span: *start points into the stream (borrowed, exactly as item spans are) and *len is the value's encoded byte length, so a binding can stash a subtree verbatim or re-emit it without a decode. </p>
+<p>MIZU_OK, or MIZU_ERR with the error in the TLS slot (the cursor latches as usual). </p>
+
+</div>
+</div>
 <a id="aa6217f0cd99b9fe4f02ca011c84aea03" name="aa6217f0cd99b9fe4f02ca011c84aea03"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#aa6217f0cd99b9fe4f02ca011c84aea03">&#9670;&#160;</a></span>mizu_ixt_open()</h2>
 
@@ -3627,6 +3686,45 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>The emit helpers: each returns its byte count, writing only when dst is not NULL, so a binding's two-pass walk sizes (dst NULL) and writes through the same byte-level code. </p>
 <p>The write pass relies on the size pass's count, so no limit is carried. Bodies are impl delegations, the dual-form single-sourcing discipline. Strict RFC 3629 UTF-8 validation: 1 when the n bytes at s are a well-formed byte sequence (shortest forms only, no surrogates, no code point past U+10FFFF), 0 otherwise. The empty span is valid; s shall be NULL only when n is 0. A pure predicate: O(n), no allocation, no error record. </p>
+
+</div>
+</div>
+<a id="ac6666eb8bc2d56e6230747608b254120" name="ac6666eb8bc2d56e6230747608b254120"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ac6666eb8bc2d56e6230747608b254120">&#9670;&#160;</a></span>mizu_ix_attr_reserved()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">static int mizu_ix_attr_reserved </td>
+          <td>(</td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>key</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>len</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+<p>The reserved attribute keys: every MIZU_IX_ATTR_* key (the whitelist vocabulary) plus "tsp" — 1 when the (key, len) span names one, 0 otherwise. </p>
+<p>An extended frame dict's extra keys must all pass here: the whitelist keys would shadow the canonical pairs, and "tsp" is a key R validates at apply (a bad one longjmps mid-read). </p>
 
 </div>
 </div>
