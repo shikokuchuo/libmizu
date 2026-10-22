@@ -697,8 +697,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_opts_ini
 int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_alive</b> (const mizu_channel *)</td></tr>
 <tr class="memdesc:a4dc7958390798a3ad7e0806ef05b2b9a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Logically a read; the probe can run survivor cleanup internally. <br /></td></tr>
 <tr class="separator:a4dc7958390798a3ad7e0806ef05b2b9a"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ad64e4ff6ea156dea0190c7159a3c17ee" id="r_ad64e4ff6ea156dea0190c7159a3c17ee"><td class="memItemLeft" align="right" valign="top"><a id="ad64e4ff6ea156dea0190c7159a3c17ee" name="ad64e4ff6ea156dea0190c7159a3c17ee"></a>
-void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_destroy</b> (mizu_channel *)</td></tr>
+<tr class="memitem:ad64e4ff6ea156dea0190c7159a3c17ee" id="r_ad64e4ff6ea156dea0190c7159a3c17ee"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#ad64e4ff6ea156dea0190c7159a3c17ee">mizu_channel_destroy</a> (mizu_channel *)</td></tr>
+<tr class="memdesc:ad64e4ff6ea156dea0190c7159a3c17ee"><td class="mdescLeft">&#160;</td><td class="mdescRight">Signal close and release the handle: the close bit is set and the peer woken, then — while the peer is alive — the teardown waits (bounded; a peer death confirmed by the liveness verdict ends it early) for the peer to drain in-flight payloads before any payload region is unlinked, so a producer exiting right after publishing never strands a live consumer's read with a dangling region name.  <br /></td></tr>
 <tr class="separator:ad64e4ff6ea156dea0190c7159a3c17ee"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1008d1c382e343858fd3b06a9cc7be3a" id="r_a1008d1c382e343858fd3b06a9cc7be3a"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="mizu_8h.html#a1008d1c382e343858fd3b06a9cc7be3a">mizu_channel_abandon</a> (mizu_channel *)</td></tr>
 <tr class="memdesc:a1008d1c382e343858fd3b06a9cc7be3a"><td class="mdescLeft">&#160;</td><td class="mdescRight">The forked-child teardown: releases only the process-local half of an inherited handle — the child's copies of the mapping and fds and its heap — writing no cross-process word (no close signal, no unlink, no parker or refcount change), so the creating process's handle and the wire state are untouched.  <br /></td></tr>
@@ -1744,6 +1744,27 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 
 <p>close signals this side's close bit, then waits up to timeout_ms for the peer's close bit or its death — the rendezvous that makes it safe to release the sent-payload pins, since the peer sets its bit only after draining. </p>
 <p>MIZU_OK: rendezvoused, resources released, the region unlinked, and the handle dead (destroy is a no-op after). MIZU_TIMEOUT: the handle stays usable and the rendezvous is retried at destroy. Idempotent. close_signal just sets this side's bit (the peer half of the protocol). After either side signals, sends on both sides return MIZU_CLOSED and receives drain before reporting it. alive is the peer-liveness verdict (lock probe, not the listener flag); a peer that closed but still runs reads as alive. destroy is the GC-finalizer target: idempotent, never blocks; on a handle that never rendezvoused it signals close and releases what the (non-blocking) rendezvous check completes — the death verdict and mizu_shm_reap backstop the rest. Handles are process-private and do not survive fork(): verbs on an inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer empty. destroy on an inherited handle is a contract violation — teardown belongs to the creating process; abandon is the inherited handle's verb. </p>
+
+</div>
+</div>
+<a id="ad64e4ff6ea156dea0190c7159a3c17ee" name="ad64e4ff6ea156dea0190c7159a3c17ee"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ad64e4ff6ea156dea0190c7159a3c17ee">&#9670;&#160;</a></span>mizu_channel_destroy()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_channel_destroy </td>
+          <td>(</td>
+          <td class="paramtype">mizu_channel *&#160;</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Signal close and release the handle: the close bit is set and the peer woken, then — while the peer is alive — the teardown waits (bounded; a peer death confirmed by the liveness verdict ends it early) for the peer to drain in-flight payloads before any payload region is unlinked, so a producer exiting right after publishing never strands a live consumer's read with a dangling region name. </p>
+<p>Blocks at most the drain bound; frees the handle, and the pointer is dead on return. </p>
 
 </div>
 </div>
