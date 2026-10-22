@@ -482,6 +482,10 @@ struct mizu_shm_s {
   char name[MIZU_NAME_MAX];
   uint8_t name_len;
   unsigned int pid;            /**< creator PID: fork guard (POSIX only) */
+  uint8_t collapsed;           /**< Linux: whole 2 MiB extents of addr are
+                                    huge (set by a successful MADV_COLLAPSE;
+                                    one-way latch — a shared mapping's folios
+                                    are never split by mizu) */
 #ifdef _WIN32
   void *handle;
 #endif

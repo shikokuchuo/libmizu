@@ -122,10 +122,14 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
      cycle pay; under zc churn lent regions never reach here. The
      extent-aligned mapping passes the congruence gate; the length still
      rounds down to whole extents (a partial tail EINVALs the call).
-     Idempotent and benign on failure. */
-  if (size >= MIZU_HUGE_EXTENT)
-    (void) madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1),
-                   MADV_COLLAPSE);
+     Benign on failure. Skipped once the mapping is known huge (the
+     create-time collapse already succeeded, or an earlier insert's did):
+     the folios persist for the mapping's life, so a re-collapse would be
+     a redundant scan per cycle. */
+  if (size >= MIZU_HUGE_EXTENT && !shm->collapsed &&
+      madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1),
+              MADV_COLLAPSE) == 0)
+    shm->collapsed = 1;
 #endif
 }
 

@@ -279,15 +279,15 @@ static inline MIZU_MAYBE_UNUSED int mizu_keeperless(uint32_t kind,
 
 // Spill free list, lent-region ledger, open cache, retain table (spill.c) ---------
 
-#define MIZU_SPILL_FL_MAX    16
-#define MIZU_SPILL_FL_CLASS  2
-#define MIZU_SPILL_FL_BYTES  ((size_t) 32 << 20)
+#define MIZU_SPILL_FL_MAX    32
+#define MIZU_SPILL_FL_CLASS  16
+#define MIZU_SPILL_FL_BYTES  ((size_t) 64 << 20)
 #define MIZU_SPILL_FL_FLOOR  ((size_t) 4096)
-#define MIZU_LEDGER_MAX      64
+#define MIZU_LEDGER_MAX      256
 /* Outstanding lent-region bytes at which the zc churn fallback engages:
    below it a free-list miss creates fresh (a ~1 ms huge-folio create
    beats the copy tiers' extra passes); past it the copy tiers'
-   deterministic reuse caps tmpfs growth. 256 MB = 8x the free-list
+   deterministic reuse caps tmpfs growth. 256 MB = 4x the free-list
    byte cap. */
 #define MIZU_ZC_LENT_BUDGET  ((size_t) 256 << 20)
 

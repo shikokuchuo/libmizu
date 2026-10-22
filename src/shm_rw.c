@@ -234,8 +234,9 @@ int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
      Round down to whole extents: control-region sizes are not extent
      multiples, and a partial tail extent EINVALs the call. Failure is
      benign. */
-  if (rc == MIZU_ERRCAT_NONE && size >= MIZU_HUGE_EXTENT)
-    (void) madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1), MADV_COLLAPSE);
+  if (rc == MIZU_ERRCAT_NONE && size >= MIZU_HUGE_EXTENT &&
+      madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1), MADV_COLLAPSE) == 0)
+    shm->collapsed = 1;
 #endif
   return rc;
 }

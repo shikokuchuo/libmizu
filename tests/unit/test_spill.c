@@ -5,7 +5,11 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/utsname.h>
+#endif
 
 #include "internal.h"
 
@@ -263,44 +267,46 @@ int main(void) {
   mizu_spill_fl_teardown(&h, &h.fl);
   assert(h.fl.n == 0 && h.fl.total == 0 && h.fl.staging == NULL);
 
-  /* free-list caps: two entries per size class — the third is
+  /* free-list caps: sixteen entries per size class — the seventeenth is
      destroyed, not listed */
   handle_reset();
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 16; i++) {
     mizu_shm *q = NULL;
     assert(mizu_shm_create_heap(&q, 4096) == MIZU_ERRCAT_NONE);
     mizu_spill_fl_insert(&h.fl, q);
   }
-  assert(h.fl.n == 2);
+  assert(h.fl.n == 16);
   mizu_shm *q3 = NULL;
   assert(mizu_shm_create_heap(&q3, 4096) == MIZU_ERRCAT_NONE);
   mizu_spill_fl_insert(&h.fl, q3);
-  assert(h.fl.n == 2);              /* class full: destroyed */
+  assert(h.fl.n == 16);              /* class full: destroyed */
   mizu_spill_fl_teardown(&h, &h.fl);
 
   /* the byte cap evicts largest-oldest until the insert fits */
   handle_reset();
-  mizu_shm *e1 = NULL, *e2 = NULL, *e3 = NULL;
+  mizu_shm *e1 = NULL, *e2 = NULL, *e3 = NULL, *e4 = NULL;
   assert(mizu_shm_create_heap(&e1, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
-  assert(mizu_shm_create_heap(&e2, (size_t) 8 << 20) == MIZU_ERRCAT_NONE);
-  assert(mizu_shm_create_heap(&e3, (size_t) 8 << 20) == MIZU_ERRCAT_NONE);
+  assert(mizu_shm_create_heap(&e2, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
+  assert(mizu_shm_create_heap(&e3, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
+  assert(mizu_shm_create_heap(&e4, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
   mizu_spill_fl_insert(&h.fl, e1);
   mizu_spill_fl_insert(&h.fl, e2);
   mizu_spill_fl_insert(&h.fl, e3);
-  assert(h.fl.n == 3 && h.fl.total == ((size_t) 32 << 20));
-  mizu_shm *e4 = NULL;
-  assert(mizu_shm_create_heap(&e4, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
-  mizu_spill_fl_insert(&h.fl, e4);   /* over the cap: e1 evicted */
-  assert(h.fl.n == 3 && h.fl.total == ((size_t) 32 << 20));
+  mizu_spill_fl_insert(&h.fl, e4);
+  assert(h.fl.n == 4 && h.fl.total == ((size_t) 64 << 20));
+  mizu_shm *e5 = NULL;
+  assert(mizu_shm_create_heap(&e5, (size_t) 16 << 20) == MIZU_ERRCAT_NONE);
+  mizu_spill_fl_insert(&h.fl, e5);   /* over the cap: e1 evicted */
+  assert(h.fl.n == 4 && h.fl.total == ((size_t) 64 << 20));
   assert(h.fl.regions[0] == NULL ||
          h.fl.regions[0] != e1);      /* e1's slot was reused */
   mizu_spill_fl_teardown(&h, &h.fl);
 
-  /* every slot occupied (two per class, eight classes): an insert of a
+  /* every slot occupied (four per class, eight classes): an insert of a
      fresh class destroys outright */
   handle_reset();
   for (int c = 0; c < 8; c++)
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 4; i++) {
       mizu_shm *o = NULL;
       assert(mizu_shm_create_heap(&o, (size_t) 4096 << c) ==
              MIZU_ERRCAT_NONE);
@@ -312,6 +318,34 @@ int main(void) {
   mizu_spill_fl_insert(&h.fl, o17);
   assert(h.fl.n == MIZU_SPILL_FL_MAX);   /* no room: destroyed */
   mizu_spill_fl_teardown(&h, &h.fl);
+
+#ifdef __linux__
+  /* the collapsed latch: a born-huge create (kernel >= 6.1) sets it, the
+     insert's re-scan skip keeps it, and it rides the pop/reinsert cycle.
+     Failure to collapse (older kernel) leaves it 0 — the insert's heal
+     attempt then remains live, idempotently. */
+  handle_reset();
+  {
+    struct utsname uts;
+    int kv = uname(&uts) == 0
+               ? atoi(uts.release) * 100 + atoi(strchr(uts.release, '.') + 1)
+               : 0;
+    int born_huge = kv >= 601;
+    mizu_shm *g = NULL;
+    assert(mizu_shm_create_heap(&g, MIZU_HUGE_EXTENT) == MIZU_ERRCAT_NONE);
+    assert(g->collapsed == born_huge);
+    mizu_spill_fl_insert(&h.fl, g);
+    assert(g->collapsed == born_huge);
+    mizu_shm *g2 = mizu_spill_region_get(&h.fl, MIZU_HUGE_EXTENT);
+    assert(g2 == g && g2->collapsed == born_huge);
+    mizu_stage_rollback(&h);   /* the checkout rejoins the free list */
+    int found = 0;
+    for (int i = 0; i < MIZU_SPILL_FL_MAX; i++)
+      if (h.fl.regions[i] == g) found = 1;
+    assert(h.fl.n == 1 && found);
+    mizu_spill_fl_teardown(&h, &h.fl);
+  }
+#endif
 
   /* a free-list miss sweeps the ledger once and retries: a lent region
      whose last view released rejoins and serves the checkout */

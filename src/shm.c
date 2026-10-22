@@ -74,6 +74,7 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
 
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
   shm->handle = NULL;
   shm->pid = (unsigned int) GetCurrentProcessId();
 
@@ -107,6 +108,7 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
 
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
   shm->handle = NULL;
   mizu_shm_set_name(shm, name);
   shm->pid = 0;                      /* consumer: never the creator */
@@ -626,6 +628,7 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
 
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
 
   shm->pid = (unsigned int) getpid();
   shm->name_len = (uint8_t) mizu_region_name(shm->name, sizeof(shm->name), shm->pid);
@@ -687,10 +690,12 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
     const size_t whole = size & ~(MIZU_HUGE_EXTENT - 1);
     volatile unsigned char *b = (volatile unsigned char *) addr;
     for (size_t off = 0; off < whole; off += MIZU_HUGE_EXTENT) b[off] = 0;
-    if (madvise(addr, whole, MADV_COLLAPSE) == 0)
+    if (madvise(addr, whole, MADV_COLLAPSE) == 0) {
+      shm->collapsed = 1;
       reserved = whole == size ||
                  madvise((char *) addr + whole, size - whole,
                          MADV_POPULATE_WRITE) == 0;
+    }
   }
   if (!reserved && madvise(addr, size, MADV_POPULATE_WRITE) != 0) {
     int perr = errno;
@@ -747,6 +752,7 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
 
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
   mizu_shm_set_name(shm, name);
   shm->pid = 0;                      /* consumer: never the creator */
 
