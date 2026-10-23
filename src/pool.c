@@ -66,7 +66,7 @@ struct mizu_pool_s {
   intptr_t live_sub;             /* a worker's nested-submitter slot lock */
   intptr_t live_owner;           /* kept fd on the owner file; 0 = not open */
   intptr_t *live_all;            /* controller: kept probe fds, wk then sub */
-  char livedir[1024];
+  char livedir[MIZU_PATH_BUF];
 
   /* controller-only: per-worker death watches whose C callbacks run the
      reap off the calling thread. reap_owner serializes a callback reap
@@ -100,7 +100,7 @@ struct mizu_pool_s {
   /* worker-local */
   unsigned char *scratch;        /* slot-sized claim copy buffer */
   uint32_t scan_start;           /* rotating ring-scan start */
-  uint64_t claims;               /* fairness-tick counter (% 61) */
+  uint64_t claims;               /* fairness-tick counter */
   uint64_t rng;                  /* xorshift state for victim selection */
   int announced;                 /* park announce (mask bit + park_state)
                                     not yet restored: gates the entry heal */
@@ -238,7 +238,7 @@ const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
     return "pool sections exceed the mapped region";
   if (h.livedir_offset > region_size ||
       h.livedir_size > region_size - h.livedir_offset ||
-      h.livedir_size == 0 || h.livedir_size > 900)
+      h.livedir_size == 0 || h.livedir_size > MIZU_LIVEDIR_MAX)
     return "liveness-dir string is missing or lies outside the region";
   if (out != NULL) *out = h;
   return NULL;
@@ -287,6 +287,23 @@ static int pool_live_path(mizu_pool *p, char *buf, size_t size,
     snprintf(buf, size, "%s/mizu_%s.owner", p->livedir, suffix) :
     snprintf(buf, size, "%s/mizu_%s.%s.%u", p->livedir, suffix, kind, idx);
   return (n > 0 && (size_t) n < size) ? 0 : -1;
+}
+
+/* The by-path death verdict shared by the three probers: open the lock
+   file without creating, identity-check against the (dev, ino) recorded
+   at join, and try the lock. ACQUIRED is the verdict — held out for the
+   caller's reap + close (a close releases an OFD lock); anything else
+   closes and reads indeterminate, never a verdict. */
+static int pool_probe_dead(const char *path, uint64_t dev, uint64_t ino,
+                          intptr_t *h_out) {
+  if (mizu_live_open_existing(path, h_out) != 0) return 0;
+  uint64_t d, i;
+  if (mizu_live_ident(*h_out, &d, &i) != 0 || d != dev || i != ino ||
+      mizu_live_try(*h_out) != MIZU_LIVE_ACQUIRED) {
+    mizu_live_close(*h_out);
+    return 0;
+  }
+  return 1;
 }
 
 // Forward declarations for the cross-section call graph ------------------------------
@@ -484,25 +501,14 @@ static void pool_failed(mizu_pool *p, int created) {
 // Handle access ---------------------------------------------------------------------
 
 static mizu_pool *pool_get(mizu_pool *p) {
-  if (p == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
+  if (mizu_handle_check(p != NULL ? &p->h : NULL, p != NULL && p->released,
+                        p != NULL ? p->self_pid : 0, "pool") != 0)
     return NULL;
-  }
-  if (p->released) {
-    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "pool handle is closed");
-    return NULL;
-  }
-  if (p->self_pid != mizu_self_pid()) {
-    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
-                   "pool handles do not survive fork()");
-    return NULL;
-  }
   return p;
 }
 
 static mizu_status pool_intr(mizu_pool *p) {
-  mizu_err_record(&p->h, MIZU_ERRCAT_INTERRUPTED, "interrupted");
-  return MIZU_ERR;
+  return mizu_handle_intr(&p->h);
 }
 
 /* An error raised by the hook is an infrastructure failure at its site:
@@ -522,10 +528,6 @@ mizu_status mizu_pool_set_trace(mizu_pool *p, mizu_trace_fn fn, void *ctx) {
 }
 
 // Create (controller) -----------------------------------------------------------------
-
-static int mizu_pow2_u64(uint64_t v) {
-  return v != 0 && (v & (v - 1)) == 0;
-}
 
 mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
                            const mizu_binding *b) {
@@ -582,7 +584,7 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
     return MIZU_ERR;
   }
   size_t livedir_len = strlen(livedir);
-  if (livedir_len > 900) {
+  if (livedir_len > MIZU_LIVEDIR_MAX) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "liveness directory path too long");
     return MIZU_ERR;
   }
@@ -614,12 +616,7 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
   }
   int rc = mizu_shm_create_populate(&p->shm, (size_t) total);
   if (rc != MIZU_ERRCAT_NONE) {
-    const char *summary, *hint;
-    mizu_err_describe((mizu_errcat) rc, &summary, &hint);
-    mizu_err_record_tls((mizu_errcat) rc,
-                       "cannot create pool region (%llu bytes): %s%s%s",
-                       (unsigned long long) total, summary,
-                       hint[0] != '\0' ? ". " : "", hint);
+    mizu_err_record_create((mizu_errcat) rc, "pool region", total);
     free(p);
     return MIZU_ERR;
   }
@@ -666,7 +663,7 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
   /* Liveness: create every file up front and keep the fds — the controller
      always probes on kept fds — then take the owner lock before any spawn
      (pool lifetime = creator lifetime) and the submitter-slot-0 lock. */
-  char path[1024];
+  char path[MIZU_PATH_BUF];
   for (uint32_t i = 0; i < h.max_workers + h.max_submitters; i++) {
     int is_wk = i < h.max_workers;
     if (pool_live_path(p, path, sizeof(path), is_wk ? "wk" : "sub",
@@ -739,13 +736,7 @@ mizu_status mizu_pool_token(const mizu_pool *p, char *buf, size_t cap) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
     return MIZU_ERR;
   }
-  const char *suffix = p->shm.name + strlen(MIZU_PREFIX_LITERAL);
-  int n = snprintf(buf, cap, "%s", suffix);
-  if (n <= 0 || (size_t) n >= cap) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "token buffer too small");
-    return MIZU_ERR;
-  }
-  return MIZU_OK;
+  return mizu_token_from_name(p->shm.name, buf, cap);
 }
 
 /* Startup / elastic-spawn rendezvous: park on the creator's submitter-0
@@ -770,7 +761,7 @@ mizu_status mizu_pool_ready_wait(mizu_pool *p, const uint32_t *slots,
                      "worker slot index out of range");
       return MIZU_ERR;
     }
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   int timed_out = 0;
   for (;;) {
     uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, 0));
@@ -896,16 +887,8 @@ void mizu_pool_abandon(mizu_pool *p) {
    slot on failure. */
 static mizu_pool *pool_open_common(const char *token, const mizu_binding *b,
                                   int keeper_len_is_rs) {
-  if (!mizu_token_valid(token)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
-    return NULL;
-  }
   char name[MIZU_NAME_MAX];
-  int nn = snprintf(name, sizeof(name), "%s%s", MIZU_PREFIX_LITERAL, token);
-  if (nn <= 0 || (size_t) nn >= sizeof(name)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
-    return NULL;
-  }
+  if (mizu_name_from_token(token, name, sizeof(name)) != 0) return NULL;
 
   mizu_pool *p = calloc(1, sizeof(*p));
   if (p == NULL) {
@@ -956,7 +939,7 @@ static mizu_pool *pool_open_common(const char *token, const mizu_binding *b,
    acquire means the previous holder is dead — the probe simply refuses the
    join (closing the handle releases the momentarily-held lock). */
 static mizu_status pool_owner_check(mizu_pool *p) {
-  char path[1024];
+  char path[MIZU_PATH_BUF];
   if (pool_live_path(p, path, sizeof(path), "owner", 0) != 0) {
     mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "liveness file path too long");
     return MIZU_ERR;
@@ -980,7 +963,7 @@ static mizu_status pool_owner_check(mizu_pool *p) {
    p->sub_slot, and returns the held lock through *lock_out. Shared by
    mizu_pool_attach and a worker's first nested submit. */
 static mizu_status pool_claim_sub_slot(mizu_pool *p, intptr_t *lock_out) {
-  char path[1024];
+  char path[MIZU_PATH_BUF];
   uint32_t per = p->hdr.result_slots / p->hdr.max_submitters;
   for (uint32_t j = 0; j < p->hdr.max_submitters; j++) {
     if (pool_live_path(p, path, sizeof(path), "sub", j) != 0) {
@@ -995,14 +978,7 @@ static mizu_status pool_claim_sub_slot(mizu_pool *p, intptr_t *lock_out) {
          lock — an acquire means it is gone. Identity-check the file:
          ENOENT or a mismatch is indeterminate, never a verdict. */
       mizu_sub_slot *s = &p->sub[j];
-      if (mizu_live_open_existing(path, &h) != 0) continue;
-      uint64_t dev, ino;
-      if (mizu_live_ident(h, &dev, &ino) != 0 ||
-          dev != s->live_dev || ino != s->live_ino ||
-          mizu_live_try(h) != MIZU_LIVE_ACQUIRED) {
-        mizu_live_close(h);
-        continue;
-      }
+      if (!pool_probe_dead(path, s->live_dev, s->live_ino, &h)) continue;
       pool_reap_submitter(p, j);
       /* the zc death backstop, as in pool_probe_submitter: this handle's
          lent regions consumed by the dead submitter force-reclaim (on a
@@ -1103,7 +1079,7 @@ mizu_status mizu_pool_worker_join(mizu_pool **out, const char *token,
   /* Lock-before-CAS: what makes "CLAIMING + free lock" a reliable
      dead-worker signal for the reaper, and what fail-fasts against a
      leftover ghost from a previous spawn. */
-  char path[1024];
+  char path[MIZU_PATH_BUF];
   if (pool_live_path(p, path, sizeof(path), "wk", slot) != 0) {
     mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "liveness file path too long");
     pool_failed(p, 0);
@@ -1437,7 +1413,7 @@ static mizu_status pool_ring_space_wait(mizu_pool *p, _Atomic int64_t *head,
   if (p->inj_ltail - p->inj_cached_head < (int64_t) p->hdr.inj_cap)
     return MIZU_OK;
   uint64_t bit = 1ull << p->sub_slot;
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   for (;;) {
     uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, (uint32_t) p->sub_slot));
     atomic_fetch_or_explicit(p->full_waiters, bit, memory_order_seq_cst);
@@ -1769,7 +1745,7 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
   }
   unsigned char *ring = pool_ring(p, (uint32_t) p->sub_slot);
 
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   /* wake cadence: a power of two no wider than the ring (both are), so
      one wake lands within any ring-filling window */
   int64_t cad = (int64_t) p->hdr.inj_cap < 64 ? (int64_t) p->hdr.inj_cap : 64;
@@ -2233,10 +2209,13 @@ static int pool_fairness_scan(mizu_pool *p) {
   return 0;
 }
 
+/* Claims between fairness scans + stats publishes. */
+#define MIZU_FAIRNESS_TICK 61
+
 /* One claim attempt in tier order. On success the entry is in scratch and
    announced; the caller executes it. */
 static int pool_next_task(mizu_pool *p) {
-  if (++p->claims % 61 == 0) {
+  if (++p->claims % MIZU_FAIRNESS_TICK == 0) {
     pool_stats_publish(p);
     if (pool_fairness_scan(p)) return 1;
   }
@@ -2518,16 +2497,14 @@ static int pool_probe_worker(mizu_pool *p, uint32_t slot) {
     atomic_store_explicit(&p->reap_owner[slot], 0, memory_order_release);
     dead = 1;
   } else {
-    char path[1024];
+    char path[MIZU_PATH_BUF];
     intptr_t h;
     if (pool_live_path(p, path, sizeof(path), "wk", slot) != 0) return 0;
-    if (mizu_live_open_existing(path, &h) != 0) return 0;
-    uint64_t dev, ino;
-    dead = mizu_live_ident(h, &dev, &ino) == 0 &&
-      dev == w->live_dev && ino == w->live_ino &&
-      mizu_live_try(h) == MIZU_LIVE_ACQUIRED;
-    if (dead) pool_reap_worker(p, slot);
-    mizu_live_close(h);
+    dead = pool_probe_dead(path, w->live_dev, w->live_ino, &h);
+    if (dead) {
+      pool_reap_worker(p, slot);
+      mizu_live_close(h);
+    }
   }
   /* the zc death backstop: this handle's lent regions consumed by the
      dead worker (task-arg payloads, keyed at the release point)
@@ -2596,18 +2573,14 @@ static void pool_probe_submitter(mizu_pool *p, uint32_t j) {
     mizu_live_unlock(h);
     reaped = 1;
   } else {
-    char path[1024];
+    char path[MIZU_PATH_BUF];
     intptr_t h;
     if (pool_live_path(p, path, sizeof(path), "sub", j) != 0) return;
-    if (mizu_live_open_existing(path, &h) != 0) return;
-    uint64_t dev, ino;
-    if (mizu_live_ident(h, &dev, &ino) == 0 &&
-        dev == s->live_dev && ino == s->live_ino &&
-        mizu_live_try(h) == MIZU_LIVE_ACQUIRED) {
+    if (pool_probe_dead(path, s->live_dev, s->live_ino, &h)) {
       pool_reap_submitter(p, j);
       reaped = 1;
+      mizu_live_close(h);
     }
-    mizu_live_close(h);
   }
   /* the zc death backstop rides the submitter reap: this handle's lent
      regions consumed by the dead submitter force-reclaim (REFHELD ones
@@ -2712,7 +2685,7 @@ static int pool_watch_owner(mizu_pool *p, mizu_parker *own_pk) {
    by path, the region via the dead-PID reaper (its name embeds the dead
    creator's pid). */
 static void pool_remove_live_files(mizu_pool *p) {
-  char path[1024];
+  char path[MIZU_PATH_BUF];
   for (uint32_t i = 0; i < p->hdr.max_workers; i++)
     if (pool_live_path(p, path, sizeof(path), "wk", i) == 0)
       (void) remove(path);
@@ -3014,7 +2987,7 @@ static int pool_step_impl(mizu_pool *p, double timeout_ms, int single) {
   }
   mizu_wk_slot *me = &p->wk[p->wk_slot];
   uint64_t my_bit = 1ull << p->wk_slot;
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
 
   /* heal any announce (or unwind-path eval flag) left dangling by an
      abandoned previous step: a stale bit costs the pusher one failed CAS.
@@ -3335,6 +3308,20 @@ static void *pool_rs_claim(mizu_pool *p, mizu_rs_hdr *rs, uint32_t idx,
   }
 }
 
+/* One help beat while blocked in collect: pop own deque, else steal
+   (ownerless-only at the depth limit). 1 executed, 0 none found,
+   -1 the execute failed. */
+static int pool_help_beat(mizu_pool *p) {
+  int got = pool_deque_pop(p);
+  if (!got) got = pool_steal_any(p, p->help_depth >= MIZU_HELP_DEPTH_LIMIT);
+  if (!got) return 0;
+  p->st_helps++;
+  p->help_depth++;
+  int rc = pool_execute(p, 1);
+  p->help_depth--;
+  return rc != 0 ? -1 : 1;
+}
+
 mizu_status mizu_pool_collect(mizu_pool *p, const mizu_task *t,
                             void **value_out, double timeout_ms) {
   if (value_out != NULL) *value_out = NULL;
@@ -3375,17 +3362,9 @@ mizu_status mizu_pool_collect(mizu_pool *p, const mizu_task *t,
        chain of waiting collectors bottoms out in a worker executing. */
     if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
         p->h.binding.exec != NULL) {
-      int got = pool_deque_pop(p);
-      if (!got)
-        got = pool_steal_any(p, p->help_depth >= MIZU_HELP_DEPTH_LIMIT);
-      if (got) {
-        p->st_helps++;
-        p->help_depth++;
-        int rc = pool_execute(p, 1);
-        p->help_depth--;
-        if (rc != 0) return MIZU_ERR;
-        continue;
-      }
+      int helped = pool_help_beat(p);
+      if (helped < 0) return MIZU_ERR;
+      if (helped > 0) continue;
     }
 
     if (timeout_ms == 0) return MIZU_TIMEOUT;
@@ -3568,21 +3547,13 @@ mizu_status mizu_pool_collect_any(mizu_pool *p, const mizu_task *tasks,
        make progress on runnable work, not park. */
     if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
         p->h.binding.exec != NULL) {
-      int got = pool_deque_pop(p);
-      if (!got)
-        got = pool_steal_any(p, p->help_depth >= MIZU_HELP_DEPTH_LIMIT);
-      if (got) {
-        p->st_helps++;
-        p->help_depth++;
-        int rc = pool_execute(p, 1);
-        p->help_depth--;
-        if (rc != 0) {
-          pool_any_unannounce(rss, n);
-          free(rss);
-          return MIZU_ERR;
-        }
-        continue;
+      int helped = pool_help_beat(p);
+      if (helped < 0) {
+        pool_any_unannounce(rss, n);
+        free(rss);
+        return MIZU_ERR;
       }
+      if (helped > 0) continue;
     }
 
     if (timeout_ms == 0) {
@@ -3702,21 +3673,13 @@ static mizu_status pool_collect_all_impl(mizu_pool *p, const mizu_task *tasks,
        make progress on runnable work, not park. */
     if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
         p->h.binding.exec != NULL) {
-      int got = pool_deque_pop(p);
-      if (!got)
-        got = pool_steal_any(p, p->help_depth >= MIZU_HELP_DEPTH_LIMIT);
-      if (got) {
-        p->st_helps++;
-        p->help_depth++;
-        int rc = pool_execute(p, 1);
-        p->help_depth--;
-        if (rc != 0) {
-          pool_any_unannounce(rss, n);
-          free(rss);
-          return MIZU_ERR;
-        }
-        continue;
+      int helped = pool_help_beat(p);
+      if (helped < 0) {
+        pool_any_unannounce(rss, n);
+        free(rss);
+        return MIZU_ERR;
       }
+      if (helped > 0) continue;
     }
 
     if (timeout_ms == 0) {
@@ -4133,7 +4096,7 @@ mizu_status mizu_pool_stop(mizu_pool *p, double timeout_ms) {
 
   /* wait for workers to take their clean-exit path; their liveness locks
      release with their fds either way */
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   int clean;
   int interrupted = 0;
   for (;;) {

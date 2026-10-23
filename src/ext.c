@@ -30,8 +30,7 @@ MIZU_ATOMIC(uint32_t) *mizu_zc_flags_(void *base) {
 }
 
 double mizu_timeout_ms(double seconds) {
-  if (!isfinite(seconds)) return -1;
-  return seconds <= 0 ? 0 : seconds * 1000;
+  return mizu_ext_timeout_ms_impl(seconds);
 }
 
 void *mizu_stage_raw(mizu_handle *h, uint64_t n, int wire_type,
@@ -75,7 +74,8 @@ void mizu_mizh_write(void *base, int wire_type, int64_t n_elems) {
   memcpy((unsigned char *) base + 4, &t32, 4);
   memcpy((unsigned char *) base + 8, &n_elems, 8);
   memcpy((unsigned char *) base + 16, &zero64, 8);
-  memset((unsigned char *) base + 24, 0, MIZU_HEADER_SIZE - 24);
+  memset((unsigned char *) base + MIZU_ZC_REFCOUNT_OFF, 0,
+         MIZU_HEADER_SIZE - MIZU_ZC_REFCOUNT_OFF);
 }
 
 int mizu_mizh_check(const void *base, size_t size,

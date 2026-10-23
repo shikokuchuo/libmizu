@@ -235,13 +235,7 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
 
   struct mizu_death_watch_s *w = calloc(1, sizeof(*w));
   if (w == NULL) return NULL;
-  w->flag = flag;
-  if (pk != NULL) {
-    w->pk = *pk;
-    w->has_pk = 1;
-  }
-  w->cb = cb;
-  w->cb_arg = cb_arg;
+  MIZU_DW_INIT_COMMON(w, flag, pk, cb, cb_arg);
 
   int pidfd = (int) syscall(SYS_pidfd_open, (pid_t) pid, 0);
   if (pidfd < 0) {

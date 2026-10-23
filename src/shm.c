@@ -196,13 +196,14 @@ static int mizu_err_classify(long code) {
 }
 
 /* Linux: go through /dev/shm directly to avoid the -lrt link dependency
-   that shm_open/shm_unlink would introduce. macOS has them in libc. */
+   that shm_open/shm_unlink would introduce. macOS has them in libc.
+   Non-static: the writable-attach layer (shm_rw.c) shares it. */
 
 #ifdef __linux__
 
 #include <sys/statvfs.h>
 
-static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
+int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   char path[64];
   snprintf(path, sizeof(path), "/dev/shm%s", name);
   /* O_CLOEXEC: the fd lives only until the mmap below, but a concurrent
@@ -218,7 +219,7 @@ static int mizu_shm_os_unlink(const char *name) {
 
 #else /* macOS / other POSIX */
 
-static int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
+int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
   /* macOS shm_open rejects O_CLOEXEC: set it by fcntl. The fd lives
      only until the mmap below, but a concurrent thread's fork+exec in
      that window would otherwise inherit it. */
@@ -278,6 +279,7 @@ static int mizu_log_dir(char *out, size_t size) {
    the inherited fd (closing it could race a sibling thread's write). */
 #define MIZU_LOG_PID_MASK 0xffffffff00000000ull
 #define MIZU_LOG_NO_FD    0xffffffffu          /* low word: no fd yet */
+#define MIZU_LOG_MINE     ((uint64_t) (uint32_t) getpid() << 32)
 static _Atomic uint64_t mizu_log_state = MIZU_LOG_NO_FD;  /* pid << 32 | fd */
 
 /* Truncate the log at a zero crossing only once it holds this many
@@ -294,6 +296,14 @@ static _Atomic uint64_t mizu_log_state = MIZU_LOG_NO_FD;  /* pid << 32 | fd */
 static _Atomic long mizu_log_live  = 0;
 static _Atomic long mizu_log_dirty = 0;
 
+/* This process's registry-log path ("<dir>/mizu_<pid hex>"), 0/-1. */
+static int mizu_log_path(char *dir, size_t dsize, char *path, size_t psize) {
+  if (mizu_log_dir(dir, dsize) != 0) return -1;
+  int n = snprintf(path, psize, "%s/%s%x", dir, &MIZU_PREFIX_LITERAL[1],
+                   (unsigned) getpid());
+  return n > 0 && (size_t) n < psize ? 0 : -1;
+}
+
 /* Record a created region: its name's counter as one 4-byte record
    (native endianness — the log is read on the same host), opening the
    log on first use. The count increments unconditionally, staying
@@ -306,7 +316,7 @@ static void mizu_log_append(const char *name) {
   if (us == NULL) return;
   uint32_t rec = (uint32_t) strtoul(us + 1, NULL, 16);
 
-  const uint64_t mine = (uint64_t) (uint32_t) getpid() << 32;
+  const uint64_t mine = MIZU_LOG_MINE;
   uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
   if ((cur & MIZU_LOG_PID_MASK) != mine) {
     /* first append, or post-fork: a lost reset CAS just means a
@@ -320,10 +330,7 @@ static void mizu_log_append(const char *name) {
   int fd = (int32_t) (uint32_t) cur;
   if (fd < 0) {
     char dir[PATH_MAX], path[PATH_MAX];
-    if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
-    int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
-                     &MIZU_PREFIX_LITERAL[1], (unsigned) getpid());
-    if (n <= 0 || (size_t) n >= sizeof(path)) return;
+    if (mizu_log_path(dir, sizeof(dir), path, sizeof(path)) != 0) return;
     int nfd = open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
     if (nfd < 0 && errno == ENOENT) {   /* dir absent: create it and retry */
       mkdir(dir, 0700);
@@ -360,7 +367,7 @@ static void mizu_log_release(void) {
   if (atomic_fetch_sub_explicit(&mizu_log_live, 1, memory_order_relaxed) != 1)
     return;
   uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
-  if ((cur & MIZU_LOG_PID_MASK) != ((uint64_t) (uint32_t) getpid() << 32))
+  if ((cur & MIZU_LOG_PID_MASK) != MIZU_LOG_MINE)
     return;                                  /* pre-fork state: not our log */
   int fd = (int32_t) (uint32_t) cur;
   if (fd < 0) return;
@@ -386,18 +393,14 @@ __attribute__((destructor)) void mizu_log_teardown(void) {
   if (atomic_load_explicit(&mizu_log_live, memory_order_relaxed) != 0)
     return;
   uint64_t cur = atomic_load_explicit(&mizu_log_state, memory_order_acquire);
-  if ((cur & MIZU_LOG_PID_MASK) != ((uint64_t) (uint32_t) getpid() << 32))
+  if ((cur & MIZU_LOG_PID_MASK) != MIZU_LOG_MINE)
     return;
   char dir[PATH_MAX], path[PATH_MAX];
-  if (mizu_log_dir(dir, sizeof(dir)) != 0) return;
-  int n = snprintf(path, sizeof(path), "%s/%s%x", dir,
-                   &MIZU_PREFIX_LITERAL[1], (unsigned) getpid());
-  if (n <= 0 || (size_t) n >= sizeof(path)) return;
+  if (mizu_log_path(dir, sizeof(dir), path, sizeof(path)) != 0) return;
   unlink(path);
   rmdir(dir);            /* succeeds once the last process's log is gone */
-  atomic_store_explicit(&mizu_log_state,
-                        ((uint64_t) (uint32_t) getpid() << 32) |
-                        MIZU_LOG_NO_FD, memory_order_relaxed);
+  atomic_store_explicit(&mizu_log_state, MIZU_LOG_MINE | MIZU_LOG_NO_FD,
+                        memory_order_relaxed);
 }
 
 #endif /* __APPLE__ */
@@ -779,8 +782,8 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
   close(fd);
 
 #ifdef MADV_HUGEPAGE
-  if (size >= 2 * 1024 * 1024)
-    madvise(addr, size, MADV_HUGEPAGE);
+  if (size >= MIZU_HUGE_EXTENT)
+    (void) madvise(addr, size, MADV_HUGEPAGE);
 #endif
   /* No MADV_WILLNEED on macOS: the same eager PTE install MAP_POPULATE
      is omitted to avoid. */
@@ -892,12 +895,7 @@ void mizu_shm_host_release(mizu_shm *shm) {
 mizu_status mizu_shm_create(mizu_shm **out, size_t size) {
   int rc = mizu_shm_create_heap(out, size);
   if (rc == MIZU_ERRCAT_NONE) return MIZU_OK;
-  const char *summary, *hint;
-  mizu_err_describe((mizu_errcat) rc, &summary, &hint);
-  mizu_err_record_tls((mizu_errcat) rc,
-                     "cannot create region (%llu bytes): %s%s%s",
-                     (unsigned long long) size, summary,
-                     hint[0] != '\0' ? ". " : "", hint);
+  mizu_err_record_create((mizu_errcat) rc, "region", size);
   return MIZU_ERR;
 }
 

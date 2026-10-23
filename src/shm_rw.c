@@ -15,6 +15,10 @@
 #include <stdio.h>
 #include "internal.h"
 
+/* Pre-fault touch stride: one store per 4 KiB never skips a page
+   (16 KiB pages on arm64 macOS take four stores). */
+#define MIZU_TOUCH_STRIDE 4096
+
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
@@ -50,7 +54,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
      mapping-time flag on Windows: read-touch to populate. Reads only —
      the region is live, creator-initialized state. */
   if (populate)
-    for (size_t off = 0; off < mbi.RegionSize; off += 4096)
+    for (size_t off = 0; off < mbi.RegionSize; off += MIZU_TOUCH_STRIDE)
       (void) ((const volatile unsigned char *) addr)[off];
 
   shm->addr = addr;
@@ -70,34 +74,14 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 #define MAP_POPULATE 0
 #endif
 
-/* Same /dev/shm direct-open as shm.c on Linux (avoids -lrt); macOS has
-   shm_open in libc. */
-#ifdef __linux__
-static int mizu_shm_os_open_rw(const char *name) {
-  char path[64];
-  snprintf(path, sizeof(path), "/dev/shm%s", name);
-  /* O_CLOEXEC as in shm.c: no region fd outlives its mmap in a child */
-  return open(path, O_RDWR | O_CLOEXEC, 0);
-}
-#else
-static int mizu_shm_os_open_rw(const char *name) {
-  /* macOS shm_open rejects O_CLOEXEC: set it by fcntl (as in shm.c) */
-  int fd = shm_open(name, O_RDWR, 0);
-  if (fd >= 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
-    close(fd);
-    return -1;
-  }
-  return fd;
-}
-#endif
-
+/* The OS open is shm.c's mizu_shm_os_open (internal.h). */
 int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
   shm->addr = NULL;
   shm->size = 0;
   mizu_shm_set_name(shm, name);
 
-  int fd = mizu_shm_os_open_rw(name);
+  int fd = mizu_shm_os_open(name, O_RDWR, 0);
   if (fd < 0) return -1;
 
   struct stat st;
@@ -125,7 +109,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
      creator's populated create already materialized the pages; each touch
      just fills this process's page table off the hot path. */
   if (populate)
-    for (size_t off = 0; off < size; off += 4096)
+    for (size_t off = 0; off < size; off += MIZU_TOUCH_STRIDE)
       (void) ((const volatile unsigned char *) addr)[off];
 #endif
 
@@ -160,9 +144,7 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   shm->size = 0;
   mizu_shm_set_name(shm, name);
 
-  char path[64];
-  snprintf(path, sizeof(path), "/dev/shm%s", name);
-  int fd = open(path, O_RDONLY | O_CLOEXEC, 0);
+  int fd = mizu_shm_os_open(name, O_RDONLY, 0);
   if (fd < 0) {
     free(shm);
     return NULL;
@@ -183,8 +165,8 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   }
   close(fd);
 #ifdef MADV_HUGEPAGE
-  if (size >= 2 * 1024 * 1024)
-    madvise(addr, size, MADV_HUGEPAGE);
+  if (size >= MIZU_HUGE_EXTENT)
+    (void) madvise(addr, size, MADV_HUGEPAGE);
 #endif
   shm->addr = addr;
   shm->size = size;
@@ -215,8 +197,7 @@ mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate) {
    a µs-scale round trip. Linux's plain create already maps MAP_POPULATE;
    macOS and Windows have no mmap-time flag, so touch one byte per page —
    the creator pays the zero-fill once, and every later first access on
-   either side is a soft fault on a resident page. Stride 4096 never
-   skips a page (16 KiB pages on arm64 macOS take four stores). Payload
+   either side is a soft fault on a resident page. Payload
    regions keep the plain create: written in full immediately, prefault
    would be a redundant pass. */
 int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
@@ -224,7 +205,7 @@ int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
 #ifndef __linux__
   if (rc == MIZU_ERRCAT_NONE) {
     volatile unsigned char *b = (volatile unsigned char *) shm->addr;
-    for (size_t off = 0; off < size; off += 4096) b[off] = 0;
+    for (size_t off = 0; off < size; off += MIZU_TOUCH_STRIDE) b[off] = 0;
   }
 #endif
 #if defined(__linux__) && defined(MADV_COLLAPSE)

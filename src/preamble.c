@@ -11,6 +11,8 @@
 
 #include "internal.h"
 
+#include <stdio.h>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -98,4 +100,31 @@ int mizu_name_valid(const char *name) {
   for (; *q != '\0'; q++)
     if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f'))) return 0;
   return 1;
+}
+
+/* token -> region name: "<prefix><token>", bounded. The channel/pool
+   attach paths' shared prologue; TLS-recorded on either failure. */
+int mizu_name_from_token(const char *token, char *name, size_t cap) {
+  if (!mizu_token_valid(token)) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
+    return -1;
+  }
+  int nn = snprintf(name, cap, "%s%s", MIZU_PREFIX_LITERAL, token);
+  if (nn <= 0 || (size_t) nn >= cap) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
+    return -1;
+  }
+  return 0;
+}
+
+/* The inverse: the join token is the region name past the prefix.
+   TLS-recorded on truncation. */
+mizu_status mizu_token_from_name(const char *name, char *buf, size_t cap) {
+  const char *suffix = name + strlen(MIZU_PREFIX_LITERAL);
+  int n = snprintf(buf, cap, "%s", suffix);
+  if (n <= 0 || (size_t) n >= cap) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "token buffer too small");
+    return MIZU_ERR;
+  }
+  return MIZU_OK;
 }

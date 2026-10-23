@@ -86,8 +86,8 @@ struct mizu_channel_s {
   mizu_parker self_pk;            /* we park here; the peer unparks it */
   mizu_parker peer_pk;            /* we unpark this */
   intptr_t live_self, live_peer; /* kept liveness fds/handles; 0 = not open */
-  char live_self_path[1024];
-  char live_peer_path[1024];
+  char live_self_path[MIZU_PATH_BUF];
+  char live_peer_path[MIZU_PATH_BUF];
   _Atomic int peer_dead;         /* death-listener flag: wake trigger only */
   mizu_death_watch *watch;
 
@@ -118,8 +118,7 @@ static uint32_t chan_closed_bit(const mizu_channel *c) {
 }
 
 static mizu_status chan_intr(mizu_channel *c) {
-  mizu_err_record(&c->h, MIZU_ERRCAT_INTERRUPTED, "interrupted");
-  return MIZU_ERR;
+  return mizu_handle_intr(&c->h);
 }
 
 // Wiring --------------------------------------------------------------------------
@@ -678,10 +677,6 @@ static mizu_status chan_consume1(mizu_channel *c, void **out,
 
 // Create (host) -------------------------------------------------------------------
 
-static int mizu_pow2(uint64_t v) {
-  return v != 0 && (v & (v - 1)) == 0;
-}
-
 mizu_status mizu_channel_create(mizu_channel **out,
                               const mizu_channel_opts *opts,
                               const mizu_binding *b) {
@@ -690,12 +685,12 @@ mizu_status mizu_channel_create(mizu_channel **out,
   uint64_t cap = opts->capacity;
   uint64_t slot = opts->slot_size;
   uint64_t arena = opts->arena_size;
-  if (!mizu_pow2(cap) || cap < 2 || cap > ((uint64_t) 1 << 24)) {
+  if (!mizu_pow2_u64(cap) || cap < 2 || cap > ((uint64_t) 1 << 24)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "capacity must be a power of two between 2 and 2^24");
     return MIZU_ERR;
   }
-  if (!mizu_pow2(slot) || slot < 64 || slot > ((uint64_t) 1 << 20)) {
+  if (!mizu_pow2_u64(slot) || slot < 64 || slot > ((uint64_t) 1 << 20)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "slot_size must be a power of two between 64 and 2^20");
     return MIZU_ERR;
@@ -718,7 +713,7 @@ mizu_status mizu_channel_create(mizu_channel **out,
     return MIZU_ERR;
   }
   size_t livedir_len = strlen(livedir);
-  if (livedir_len > 900) {
+  if (livedir_len > MIZU_LIVEDIR_MAX) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "liveness directory path too long");
     return MIZU_ERR;
@@ -740,12 +735,7 @@ mizu_status mizu_channel_create(mizu_channel **out,
   }
   int rc = mizu_shm_create_populate(&c->shm, (size_t) total);
   if (rc != MIZU_ERRCAT_NONE) {
-    const char *summary, *hint;
-    mizu_err_describe((mizu_errcat) rc, &summary, &hint);
-    mizu_err_record_tls((mizu_errcat) rc,
-                       "cannot create channel region (%llu bytes): %s%s%s",
-                       (unsigned long long) total, summary,
-                       hint[0] != '\0' ? ". " : "", hint);
+    mizu_err_record_create((mizu_errcat) rc, "channel region", total);
     free(c);
     return MIZU_ERR;
   }
@@ -838,40 +828,23 @@ mizu_status mizu_channel_create(mizu_channel **out,
    (alive, peer_ident, drop) answer empty on fork. destroy stays unguarded
    by design — teardown belongs to the creating process. */
 static mizu_channel *chan_get(const mizu_channel *c) {
-  if (c == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "channel handle is closed");
-    return NULL;
-  }
   mizu_channel *mc = (mizu_channel *) c;
-  if (c->released) {
-    mizu_err_record(&mc->h, MIZU_ERRCAT_OTHER, "channel handle is closed");
+  if (mizu_handle_check(mc != NULL ? &mc->h : NULL,
+                        mc != NULL && mc->released,
+                        mc != NULL ? mc->self_pid : 0, "channel") != 0)
     return NULL;
-  }
-  if (c->self_pid != mizu_self_pid()) {
-    mizu_err_record(&mc->h, MIZU_ERRCAT_OTHER,
-                   "channel handles do not survive fork()");
-    return NULL;
-  }
   return mc;
 }
 
 static mizu_status chan_forked(mizu_channel *c) {
-  mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
-                 "channel handles do not survive fork()");
-  return MIZU_ERR;
+  return mizu_handle_forked(&c->h, "channel");
 }
 
 /* The join token is the region name past the namespace prefix:
    "<pid hex>_<counter hex>". */
 mizu_status mizu_channel_token(const mizu_channel *c, char *buf, size_t cap) {
   if (chan_get(c) == NULL) return MIZU_ERR;
-  const char *suffix = c->shm.name + strlen(MIZU_PREFIX_LITERAL);
-  int n = snprintf(buf, cap, "%s", suffix);
-  if (n <= 0 || (size_t) n >= cap) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "token buffer too small");
-    return MIZU_ERR;
-  }
-  return MIZU_OK;
+  return mizu_token_from_name(c->shm.name, buf, cap);
 }
 
 /* Startup rendezvous: park on the host parker re-checking the ready word;
@@ -880,7 +853,7 @@ mizu_status mizu_channel_token(const mizu_channel *c, char *buf, size_t cap) {
    deadline expiry — the caller walks the channel back (destroy). */
 mizu_status mizu_channel_ready_wait(mizu_channel *c, double timeout_ms) {
   if (chan_get(c) == NULL) return MIZU_ERR;
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   for (;;) {
     uint32_t e = mizu_parker_snapshot(&c->self_pk);
     if (atomic_load_explicit(c->ready, memory_order_acquire) != 0) break;
@@ -913,16 +886,8 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
                               const mizu_binding *b) {
   *out = NULL;
   if (mizu_binding_check(b, "channel") != 0) return MIZU_ERR;
-  if (!mizu_token_valid(token)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
-    return MIZU_ERR;
-  }
   char name[MIZU_NAME_MAX];
-  int nn = snprintf(name, sizeof(name), "%s%s", MIZU_PREFIX_LITERAL, token);
-  if (nn <= 0 || (size_t) nn >= sizeof(name)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "malformed region-name suffix");
-    return MIZU_ERR;
-  }
+  if (mizu_name_from_token(token, name, sizeof(name)) != 0) return MIZU_ERR;
 
   mizu_channel *c = calloc(1, sizeof(*c));
   if (c == NULL) {
@@ -945,7 +910,7 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
   /* validate before touching any other field */
   mizu_preamble p;
   const char *err = mizu_preamble_validate(c->shm.addr, c->shm.size, &p);
-  if (err == NULL && (p.livedir_size == 0 || p.livedir_size > 900))
+  if (err == NULL && (p.livedir_size == 0 || p.livedir_size > MIZU_LIVEDIR_MAX))
     err = "liveness directory path is missing or too long";
   if (err != NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "invalid channel region: %s", err);
@@ -963,7 +928,7 @@ mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
     return MIZU_ERR;
   }
 
-  char livedir[1024];
+  char livedir[MIZU_PATH_BUF];
   memcpy(livedir, c->base + p.livedir_offset, (size_t) p.livedir_size);
   livedir[p.livedir_size] = '\0';
   if (chan_live_paths(c, livedir) != 0) {
@@ -1205,7 +1170,7 @@ mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
   mizu_unpark(&c->peer_pk);
 
   /* 3. rendezvous: the other side's bit, or its death confirmed */
-  double deadline = timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+  double deadline = mizu_deadline(timeout_ms);
   for (;;) {
     uint32_t e = mizu_parker_snapshot(&c->self_pk);
     if ((atomic_load_explicit(c->closedw, memory_order_acquire) & other) !=

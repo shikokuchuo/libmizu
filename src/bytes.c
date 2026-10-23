@@ -86,7 +86,6 @@ static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
     break;
   case MIZU_KIND_ARENA:
     /* resolved stream bytes; limit is the arena-validated length */
-    src = payload;
     n = limit;
     break;
   case MIZU_KIND_RAWSPILL:

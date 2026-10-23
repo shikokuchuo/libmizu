@@ -16,6 +16,9 @@
 #define MIZU_INTERNAL_H
 
 #include <string.h>
+#if !defined(_WIN32)
+#  include <sys/types.h>          /* mode_t: mizu_shm_os_open */
+#endif
 
 #include "mizu.h"
 #include "mizu_ext.h"
@@ -28,6 +31,13 @@
 #else
 #  define MIZU_MAYBE_UNUSED
 #endif
+
+// Common -------------------------------------------------------------------------
+
+/* Power-of-two test for the create/validate option gates. */
+static inline MIZU_MAYBE_UNUSED int mizu_pow2_u64(uint64_t v) {
+  return v != 0 && (v & (v - 1)) == 0;
+}
 
 // Region layer internals ---------------------------------------------------------
 
@@ -46,6 +56,12 @@ mizu_shm *mizu_shm_open_heap(const char *name);
    regions, so peers map read-write; populate pre-faults. */
 int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate);
 mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate);
+/* The OS-level shm open (shm.c, POSIX only), shared by every open path:
+   Linux goes through /dev/shm directly to avoid the -lrt link dependency
+   that shm_open/shm_unlink would introduce; macOS has them in libc. */
+#ifndef _WIN32
+int mizu_shm_os_open(const char *name, int flags, mode_t mode);
+#endif
 /* Unmaps only (never frees the struct); unlink != 0 also removes the
    name. The public mizu_shm_close wraps this + free. */
 void mizu_shm_close_stack(mizu_shm *shm, int unlink);
@@ -114,6 +130,11 @@ void mizu_region_unlink(mizu_shm *shm);
    records, valid until the next call on the same handle / thread. */
 MIZU_COLD void mizu_err_record(mizu_handle *h, mizu_errcat cat, const char *fmt, ...);
 MIZU_COLD void mizu_err_record_tls(mizu_errcat cat, const char *fmt, ...);
+/* The region-create failure record shared by the channel/pool creates,
+   the public region create, and the spill layer (err.c): the category
+   describe plus "cannot create <what> (<size> bytes): ..." TLS-side. */
+MIZU_COLD void mizu_err_record_create(mizu_errcat cat, const char *what,
+                                     uint64_t size);
 
 // Spin machinery (parker.c) --------------------------------------------------------
 
@@ -191,6 +212,11 @@ static inline MIZU_MAYBE_UNUSED uint64_t mizu_spin_learn(double gap_ns, uint64_t
 #  define MIZU_INTERRUPT_BOUND_MS 2000L
 #endif
 
+/* timeout_ms (0 polls, < 0 indefinite) to an mizu_now()-scale deadline. */
+static inline MIZU_MAYBE_UNUSED double mizu_deadline(double timeout_ms) {
+  return timeout_ms < 0 ? -1 : mizu_now() + timeout_ms / 1000;
+}
+
 /* Park-timeout budget for a wait deadline: the interrupt-bound ceiling,
    tightened to the remaining deadline (+1 ms round-up), or -1 once the
    deadline has passed — the caller disposes (timeout/abort path). A
@@ -212,6 +238,20 @@ static inline MIZU_MAYBE_UNUSED long mizu_wait_ms(double deadline) {
    listener teardown are binding-author surface (mizu_ext.h). start2
    stays private: the callback-capable form is the pool's worker reap. */
 
+/* The mizu_death_watch_start2 prologue shared by the three platform
+   waiters: the callback/binding fields (their structs all carry these
+   member names). */
+#define MIZU_DW_INIT_COMMON(w, flag, pk, cb, cb_arg)                        \
+  do {                                                                      \
+    (w)->flag = (flag);                                                      \
+    if ((pk) != NULL) {                                                      \
+      (w)->pk = *(pk);                                                       \
+      (w)->has_pk = 1;                                                       \
+    }                                                                        \
+    (w)->cb = (cb);                                                          \
+    (w)->cb_arg = (cb_arg);                                                  \
+  } while (0)
+
 /* As mizu_death_watch_start, plus a callback invoked after the flag store
    and unpark, on the listener's callback thread (or synchronously from
    start when the pid is already dead): pure C only; its targets must
@@ -228,6 +268,12 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
 void mizu_death_watch_abandon(mizu_death_watch *w);
 
 // Liveness lock internals (liveness.c) ------------------------------------------
+
+/* Liveness path sizing: a lock path is "<livedir>/mizu_<name>...", and
+   create/attach reject a livedir past MIZU_LIVEDIR_MAX so the full path
+   always fits a MIZU_PATH_BUF buffer. */
+#define MIZU_LIVEDIR_MAX 900
+#define MIZU_PATH_BUF    1024
 
 /* The liveness contract, mizu_live_dir/open/try/close, and the
    mizu_live_probe enum are binding-author surface (mizu_ext.h). What
@@ -256,6 +302,12 @@ int mizu_token_valid(const char *token);
    plus "<hex>_<hex>", nothing else): the gate for the read-side opens
    against a "/../" traversal from a corrupt or hostile peer. */
 int mizu_name_valid(const char *name);
+/* token -> "<prefix><token>" region name, and the inverse (the join
+   token is the name past the prefix). Both record TLS-side on failure
+   ("malformed region-name suffix" / "token buffer too small"): the
+   channel/pool attach and token-getter prologues (preamble.c). */
+int mizu_name_from_token(const char *token, char *name, size_t cap);
+mizu_status mizu_token_from_name(const char *name, char *buf, size_t cap);
 /* The pool header's magic + version + layout check (pool.c), the attach
    path's counterpart of mizu_preamble_validate. */
 const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
@@ -451,6 +503,42 @@ static inline MIZU_MAYBE_UNUSED void mizu_read_tmpl_init(mizu_handle *h) {
   h->read_tmpl.died_slot = -1;
   h->read_tmpl.handle = h;
   h->read_tmpl.binding_ctx = h->binding.ctx;
+}
+
+/* The closed + fork guard shared by the channel/pool raising-verb
+   getters: NULL records TLS-side (no handle to record on), a live
+   handle records on itself. released/self_pid ride as parameters —
+   they live past this shared header, in each TU's own struct. */
+static inline MIZU_MAYBE_UNUSED int mizu_handle_check(mizu_handle *h,
+                                                   int released,
+                                                   long self_pid,
+                                                   const char *what) {
+  if (h == NULL) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "%s handle is closed", what);
+    return -1;
+  }
+  if (released) {
+    mizu_err_record(h, MIZU_ERRCAT_OTHER, "%s handle is closed", what);
+    return -1;
+  }
+  if (self_pid != mizu_self_pid()) {
+    mizu_err_record(h, MIZU_ERRCAT_OTHER, "%s handles do not survive fork()",
+                   what);
+    return -1;
+  }
+  return 0;
+}
+
+static inline MIZU_MAYBE_UNUSED mizu_status mizu_handle_intr(mizu_handle *h) {
+  mizu_err_record(h, MIZU_ERRCAT_INTERRUPTED, "interrupted");
+  return MIZU_ERR;
+}
+
+static inline MIZU_MAYBE_UNUSED mizu_status mizu_handle_forked(mizu_handle *h,
+                                                              const char *what) {
+  mizu_err_record(h, MIZU_ERRCAT_OTHER, "%s handles do not survive fork()",
+                 what);
+  return MIZU_ERR;
 }
 
 static inline MIZU_MAYBE_UNUSED int mizu_check_interrupt(const mizu_binding *b) {

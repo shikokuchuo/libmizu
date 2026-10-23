@@ -216,7 +216,9 @@ static void bench_spill(void) {
     mizu_spill_fl_insert(&fl, s);
   }
   double recycle = (mizu_now() - t0) / RECYCLE_N * 1e6;
-  mizu_spill_fl_teardown(&fl);
+  mizu_handle h;
+  memset(&h, 0, sizeof(h));    /* drop hook NULL: no pins in play here */
+  mizu_spill_fl_teardown(&h, &fl);
   printf("spill_fresh_1MiB      %8.2f us  per create+close (n=%d)\n",
          fresh, FRESH_N);
   printf("spill_recycle_1MiB    %8.2f us  per pop+insert (n=%d)\n",

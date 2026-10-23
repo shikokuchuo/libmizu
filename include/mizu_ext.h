@@ -1245,6 +1245,15 @@ MIZU_EXT_INLINE uint64_t mizu_ext_na_apply_impl(int type, void *dst,
   return nulls;
 }
 
+/* The one definition behind mizu_timeout_ms's two forms (documented
+   there): the exported symbol and the inline cannot drift apart. */
+MIZU_EXT_INLINE double mizu_ext_timeout_ms_impl(double seconds) {
+  if (!isfinite(seconds)) return -1;
+  if (seconds <= 0) return 0;
+  const double ms = seconds * 1000;
+  return isfinite(ms) ? ms : -1;
+}
+
 #ifdef MIZU_EXT_NO_INLINES
 MIZU_API double mizu_timeout_ms(double seconds);
 MIZU_API void mizu_store_na_real(void *dst);
@@ -1275,10 +1284,7 @@ MIZU_API uint64_t mizu_na_apply(int type, void *dst, const void *src,
    wait is unbounded either way, and downstream deadline arithmetic
    stays in double range. */
 MIZU_EXT_INLINE double mizu_timeout_ms(double seconds) {
-  if (!isfinite(seconds)) return -1;
-  if (seconds <= 0) return 0;
-  const double ms = seconds * 1000;
-  return isfinite(ms) ? ms : -1;
+  return mizu_ext_timeout_ms_impl(seconds);
 }
 MIZU_EXT_INLINE void mizu_store_na_real(void *dst) {
   const uint64_t bits = MIZU_NA_REAL_BITS;
@@ -1314,7 +1320,8 @@ MIZU_EXT_INLINE void mizu_mizh_write(void *base, int wire_type,
   memcpy((unsigned char *) base + 4, &t32, 4);
   memcpy((unsigned char *) base + 8, &n_elems, 8);
   memcpy((unsigned char *) base + 16, &zero64, 8);
-  memset((unsigned char *) base + 24, 0, MIZU_HEADER_SIZE - 24);
+  memset((unsigned char *) base + MIZU_ZC_REFCOUNT_OFF, 0,
+         MIZU_HEADER_SIZE - MIZU_ZC_REFCOUNT_OFF);
 }
 /** Validate the MIZH header at base: region size, magic, a known atomic
    wire type, the element/attribute extents against the region size, the

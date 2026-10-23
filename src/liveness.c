@@ -291,8 +291,8 @@ const char *mizu_live_dir(void) {
      are thread-local: threaded consumers create control regions
      concurrently, and the returned pointer must stay valid until the
      caller copies it out. */
-  static _Thread_local char ovr[1024];
-  static _Thread_local char def[1024];
+  static _Thread_local char ovr[MIZU_PATH_BUF];
+  static _Thread_local char def[MIZU_PATH_BUF];
   static _Thread_local int resolved = 0;  /* 0 = untried, 1 = valid, -1 = failed */
   const char *out;
 

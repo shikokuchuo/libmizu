@@ -99,44 +99,29 @@ static double half_to_double(uint16_t h) {
    access alignment-safe (a contiguous buffer can still be
    element-misaligned — np.frombuffer with a byte offset); fixed-size
    memcpys compile to single load/store pairs. */
+/* The widening rows are one shape: fixed-size memcpys (single load/store
+   pairs) around a per-lane conversion. U64_REAL (the range check + warn),
+   BOOL8_LGL, C64_CPLX and COPY stay explicit below. */
+#define ARROW_CVT_WIDEN(NAME, ST, SW, DT, DW, CONV)                          \
+  case NAME:                                                                 \
+    for (size_t i = 0; i < n; i++) {                                         \
+      ST v;                                                                  \
+      memcpy(&v, src + (SW) * i, (SW));                                      \
+      DT o = (CONV);                                                         \
+      memcpy(dst + (DW) * i, &o, (DW));                                      \
+    }                                                                        \
+    break;
+
 static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
                     const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   switch (row->cvt) {
   case MIZU_CVT_COPY:
     memcpy(dst, src, n * row->w_out);
     break;
-  case MIZU_CVT_I8_INT:
-    for (size_t i = 0; i < n; i++) {
-      int8_t v;
-      memcpy(&v, src + i, 1);
-      int32_t o = (int32_t) v;
-      memcpy(dst + 4 * i, &o, 4);
-    }
-    break;
-  case MIZU_CVT_I16_INT:
-    for (size_t i = 0; i < n; i++) {
-      int16_t v;
-      memcpy(&v, src + 2 * i, 2);
-      int32_t o = v;
-      memcpy(dst + 4 * i, &o, 4);
-    }
-    break;
-  case MIZU_CVT_U16_INT:
-    for (size_t i = 0; i < n; i++) {
-      uint16_t v;
-      memcpy(&v, src + 2 * i, 2);
-      int32_t o = v;
-      memcpy(dst + 4 * i, &o, 4);
-    }
-    break;
-  case MIZU_CVT_U32_REAL:
-    for (size_t i = 0; i < n; i++) {
-      uint32_t v;
-      memcpy(&v, src + 4 * i, 4);
-      double o = (double) v;
-      memcpy(dst + 8 * i, &o, 8);
-    }
-    break;
+  ARROW_CVT_WIDEN(MIZU_CVT_I8_INT, int8_t, 1, int32_t, 4, (int32_t) v)
+  ARROW_CVT_WIDEN(MIZU_CVT_I16_INT, int16_t, 2, int32_t, 4, v)
+  ARROW_CVT_WIDEN(MIZU_CVT_U16_INT, uint16_t, 2, int32_t, 4, v)
+  ARROW_CVT_WIDEN(MIZU_CVT_U32_REAL, uint32_t, 4, double, 8, (double) v)
   case MIZU_CVT_U64_REAL:
     for (size_t i = 0; i < n; i++) {
       uint64_t v;
@@ -150,22 +135,8 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
       }
     }
     break;
-  case MIZU_CVT_F16_REAL:
-    for (size_t i = 0; i < n; i++) {
-      uint16_t v;
-      memcpy(&v, src + 2 * i, 2);
-      double o = half_to_double(v);
-      memcpy(dst + 8 * i, &o, 8);
-    }
-    break;
-  case MIZU_CVT_F32_REAL:
-    for (size_t i = 0; i < n; i++) {
-      float v;
-      memcpy(&v, src + 4 * i, 4);
-      double o = v;
-      memcpy(dst + 8 * i, &o, 8);
-    }
-    break;
+  ARROW_CVT_WIDEN(MIZU_CVT_F16_REAL, uint16_t, 2, double, 8, half_to_double(v))
+  ARROW_CVT_WIDEN(MIZU_CVT_F32_REAL, float, 4, double, 8, v)
   case MIZU_CVT_BOOL8_LGL:
     for (size_t i = 0; i < n; i++) {
       int32_t o = src[i] != 0;
@@ -185,6 +156,7 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
     break;
   }
 }
+#undef ARROW_CVT_WIDEN
 
 /* Fill n lanes with the wire type's missing sentinel. */
 static void cvt_fill_na(uint8_t *dst, size_t n, int wire) {
@@ -197,6 +169,11 @@ static void cvt_fill_na(uint8_t *dst, size_t n, int wire) {
     const int32_t na = MIZU_NA_INT32;   /* INT and LGL share the sentinel */
     for (size_t i = 0; i < n; i++) memcpy(dst + 4 * i, &na, 4);
   }
+}
+
+/* All-ones over `lanes` lanes (the shift alone is UB at 64). */
+static uint64_t arrow_lanes_mask(size_t lanes) {
+  return lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1;
 }
 
 /* Load lanes (<= 64) validity bits starting at bit position pos (Arrow
@@ -216,7 +193,7 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
     else hi = p[j];   /* j == 8: only when sh > 0 and lanes == 64 */
   }
   uint64_t w = sh != 0 ? (lo >> sh) | (hi << (64 - sh)) : lo;
-  if (lanes < 64) w &= ((uint64_t) 1 << lanes) - 1;
+  w &= arrow_lanes_mask(lanes);
   return w;
 }
 
@@ -268,7 +245,7 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
   while (i < n) {
     size_t lanes = n - i < 64 ? n - i : 64;
     uint64_t w = bitmap_word(valid, off + i, lanes);
-    uint64_t full = lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1;
+    uint64_t full = arrow_lanes_mask(lanes);
     if (w == full) {
       cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
       cvt_count_min(dst + i * wo, lanes, row, warn);
@@ -297,7 +274,7 @@ static void convert_bit_lgl(uint8_t *dst, const uint8_t *data,
     size_t lanes = n - i < 64 ? n - i : 64;
     uint64_t dbits = bitmap_word(data, off + i, lanes);
     uint64_t vbits = valid != NULL ? bitmap_word(valid, off + i, lanes) :
-      (lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1);
+      arrow_lanes_mask(lanes);
     uint64_t vals = dbits & vbits;
     for (size_t j = 0; j < lanes; j++) {
       int32_t o = (vbits >> j) & 1 ? (int32_t) ((vals >> j) & 1) : INT32_MIN;
@@ -570,6 +547,14 @@ typedef struct {
                            resolved at classify */
 } arrow_pcol;
 
+/* The shared TS/TD unit decode: scale, unit char, and the ns-verbatim
+   verdict (unit n and a peer advertising MIZU_CAP_MIZL_TSN). */
+static void arrow_ts_unit(char u, uint32_t caps, arrow_pcol *pc) {
+  pc->ts_scale = u == 's' ? 1.0 : u == 'm' ? 1e-3 : u == 'u' ? 1e-6 : 1e-9;
+  pc->unit = u;
+  pc->ts_verbatim = u == 'n' && (caps & MIZU_CAP_MIZL_TSN) != 0;
+}
+
 typedef struct {
   int64_t body;      /* the leaf's data bytes, blob excluded */
   int64_t blob;      /* the leaf attrs blob size (0 for plain columns) */
@@ -732,11 +717,7 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
   if (f[0] == 't' && f[1] == 's' &&
       (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n') &&
       f[3] == ':') {
-    pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
-      f[2] == 'u' ? 1e-6 : 1e-9;
-    pc->unit = f[2];
-    pc->ts_verbatim = f[2] == 'n' &&
-      (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
+    arrow_ts_unit(f[2], a->peer_caps, pc);
     const char *tz = f + 4;
     if (tz[0] == '\0') tz = "UTC";
     const size_t tzlen = strlen(tz);
@@ -753,11 +734,7 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
   if (f[0] == 't' && f[1] == 'D' &&
       (f[2] == 's' || f[2] == 'm' || f[2] == 'u' || f[2] == 'n') &&
       f[3] == '\0') {
-    pc->ts_scale = f[2] == 's' ? 1.0 : f[2] == 'm' ? 1e-3 :
-      f[2] == 'u' ? 1e-6 : 1e-9;
-    pc->unit = f[2];
-    pc->ts_verbatim = f[2] == 'n' &&
-      (a->peer_caps & MIZU_CAP_MIZL_TSN) != 0;
+    arrow_ts_unit(f[2], a->peer_caps, pc);
     pc->kind = MIZU_ARROW_TD;
     return 0;
   }
@@ -903,6 +880,19 @@ static int arrow_levels_check(mizu_arrow *a, int col) {
   return 0;
 }
 
+/* One signed/unsigned pair of dictionary-index arms. */
+#define ARROW_IDX_ARM(W, ST, UT)                                             \
+  case W: {                                                                  \
+    if (is_signed) {                                                         \
+      ST v;                                                                  \
+      memcpy(&v, idx + (W) * i, (W));                                        \
+      return v;                                                              \
+    }                                                                        \
+    UT v;                                                                    \
+    memcpy(&v, idx + (W) * i, (W));                                          \
+    return v;                                                                \
+  }
+
 /* One dictionary index element: per-element memcpy, the file's alignment
    discipline (the buffer can be element-misaligned). An unsigned index
    past int64 reads negative — the bounds check declines it. */
@@ -915,26 +905,8 @@ static int64_t arrow_idx_at(const uint8_t *idx, int64_t i, int w,
     memcpy(&v, idx + i, 1);
     return v;
   }
-  case 2: {
-    if (is_signed) {
-      int16_t v;
-      memcpy(&v, idx + 2 * i, 2);
-      return v;
-    }
-    uint16_t v;
-    memcpy(&v, idx + 2 * i, 2);
-    return v;
-  }
-  case 4: {
-    if (is_signed) {
-      int32_t v;
-      memcpy(&v, idx + 4 * i, 4);
-      return v;
-    }
-    uint32_t v;
-    memcpy(&v, idx + 4 * i, 4);
-    return v;
-  }
+  ARROW_IDX_ARM(2, int16_t, uint16_t)
+  ARROW_IDX_ARM(4, int32_t, uint32_t)
   default: {
     int64_t v;
     memcpy(&v, idx + 8 * i, 8);
@@ -942,6 +914,7 @@ static int64_t arrow_idx_at(const uint8_t *idx, int64_t i, int w,
   }
   }
 }
+#undef ARROW_IDX_ARM
 
 /* A later batch's dictionary must equal batch 0's canonical set. */
 static int arrow_levels_match(mizu_arrow *a, int col,
@@ -1006,6 +979,24 @@ static int arrow_validate_dicts(mizu_arrow *a) {
 
 // The size pass -------------------------------------------------------------------------
 
+/* One offsets-width span walk (the null-free span: the endpoints alone
+   don't prove the interior monotone, so walk it; COND rejects a step). */
+#define ARROW_STR_SIZE_SPAN(otype, ow, COND)                                 \
+  {                                                                          \
+    const uint8_t *offs = (const uint8_t *) ba->buffers[1];                  \
+    otype first, prev;                                                       \
+    memcpy(&first, offs + (ow) * ba->offset, (ow));                          \
+    prev = first;                                                            \
+    if (prev < 0) goto malformed;                                            \
+    for (int64_t k = 0; k < ba->length; k++) {                               \
+      otype o;                                                               \
+      memcpy(&o, offs + (ow) * (ba->offset + k + 1), (ow));                  \
+      if (COND) goto malformed;                                              \
+      prev = o;                                                              \
+    }                                                                        \
+    bytes += prev - first;                                                   \
+  }
+
 /* The packed string byte total: per batch the offset span when no nulls
    (a null's span must collapse, so a batch with nulls walks). Runs at
    open: a malformed record declines there, ahead of any emit. */
@@ -1020,33 +1011,10 @@ static int arrow_size_str(mizu_arrow *a, int col) {
          intermediate offsets — the writer rebases per element, so a
          non-monotonic interior (or an i64 span past the int32 element
          bound) would size one way and gather another; walk them */
-      if (pc->str_form == 1) {
-        const uint8_t *offs = (const uint8_t *) ba->buffers[1];
-        int32_t first, prev;
-        memcpy(&first, offs + 4 * ba->offset, 4);
-        prev = first;
-        if (prev < 0) goto malformed;
-        for (int64_t k = 0; k < ba->length; k++) {
-          int32_t o;
-          memcpy(&o, offs + 4 * (ba->offset + k + 1), 4);
-          if (o < prev) goto malformed;
-          prev = o;
-        }
-        bytes += prev - first;
-      } else {
-        const uint8_t *offs = (const uint8_t *) ba->buffers[1];
-        int64_t first, prev;
-        memcpy(&first, offs + 8 * ba->offset, 8);
-        prev = first;
-        if (prev < 0) goto malformed;
-        for (int64_t k = 0; k < ba->length; k++) {
-          int64_t o;
-          memcpy(&o, offs + 8 * (ba->offset + k + 1), 8);
-          if (o < prev || o - prev > INT32_MAX) goto malformed;
-          prev = o;
-        }
-        bytes += prev - first;
-      }
+      if (pc->str_form == 1)
+        ARROW_STR_SIZE_SPAN(int32_t, 4, o < prev)
+      else
+        ARROW_STR_SIZE_SPAN(int64_t, 8, o < prev || o - prev > INT32_MAX)
       continue;
     }
     for (int64_t k = 0; k < ba->length; k++) {
@@ -1066,6 +1034,7 @@ malformed:
                       a->schema->children[col]->name);
   return -1;
 }
+#undef ARROW_STR_SIZE_SPAN
 
 static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
   const arrow_pcol *pc = &a->cols[col];
@@ -1164,6 +1133,26 @@ static void arrow_write_cvt(uint8_t *dst, const mizu_arrow *a, int col,
   }
 }
 
+/* One offsets-width batch copy (the null-free path: rebase the offsets
+   per batch, the bytes one memcpy). */
+#define ARROW_STR_COPY_SPAN(otype, ow)                                       \
+  {                                                                          \
+    const uint8_t *so = (const uint8_t *) ba->buffers[1];                    \
+    otype base0;                                                             \
+    memcpy(&base0, so + (ow) * ba->offset, (ow));                            \
+    for (int64_t k = 0; k < ba->length; k++) {                               \
+      otype o;                                                               \
+      memcpy(&o, so + (ow) * (ba->offset + k + 1), (ow));                    \
+      offs[done + k + 1] = run + (o - base0);                                \
+    }                                                                        \
+    otype oend;                                                              \
+    memcpy(&oend, so + (ow) * (ba->offset + ba->length), (ow));              \
+    otype blen = oend - base0;                                               \
+    memcpy(data + run, (const uint8_t *) ba->buffers[2] + base0,             \
+           (size_t) blen);                                                   \
+    run += blen;                                                             \
+  }
+
 /* The MIZS string block: validity bitmap (present bits), i64 offsets, the
    per-string encoding bytes, the packed bytes — each section 64-byte
    aligned from the block start. Present elements mark CE_UTF8, an NA
@@ -1185,37 +1174,10 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
     for (size_t b = 0; b < a->nb; b++) {
       const ArrowArray *ba = a->batches[b]->children[col];
       if (ba->length == 0) continue;
-      if (pc->str_form == 1) {
-        const uint8_t *so = (const uint8_t *) ba->buffers[1];
-        int32_t base0;
-        memcpy(&base0, so + 4 * ba->offset, 4);
-        for (int64_t k = 0; k < ba->length; k++) {
-          int32_t o;
-          memcpy(&o, so + 4 * (ba->offset + k + 1), 4);
-          offs[done + k + 1] = run + (o - base0);
-        }
-        int32_t oend;
-        memcpy(&oend, so + 4 * (ba->offset + ba->length), 4);
-        int32_t blen = oend - base0;
-        memcpy(data + run, (const uint8_t *) ba->buffers[2] + base0,
-               (size_t) blen);
-        run += blen;
-      } else {
-        const uint8_t *so = (const uint8_t *) ba->buffers[1];
-        int64_t base0;
-        memcpy(&base0, so + 8 * ba->offset, 8);
-        for (int64_t k = 0; k < ba->length; k++) {
-          int64_t o;
-          memcpy(&o, so + 8 * (ba->offset + k + 1), 8);
-          offs[done + k + 1] = run + (o - base0);
-        }
-        int64_t oend;
-        memcpy(&oend, so + 8 * (ba->offset + ba->length), 8);
-        int64_t blen = oend - base0;
-        memcpy(data + run, (const uint8_t *) ba->buffers[2] + base0,
-               (size_t) blen);
-        run += blen;
-      }
+      if (pc->str_form == 1)
+        ARROW_STR_COPY_SPAN(int32_t, 4)
+      else
+        ARROW_STR_COPY_SPAN(int64_t, 8)
       done += ba->length;
     }
     return;
@@ -1242,6 +1204,7 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
     done += ba->length;
   }
 }
+#undef ARROW_STR_COPY_SPAN
 
 /* A dictionary column: the INT32 leaf of 1-based R codes (NA = INT_MIN). */
 static void arrow_write_dict(uint8_t *dst, const mizu_arrow *a, int col) {
@@ -1353,7 +1316,7 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
   const int64_t rows = a->rows;
   /* the reserved header band [24-63]: a recycled region carries stale
      words — the zc refcount included, which retain_zc stores after */
-  memset(base + 24, 0, MIZU_HEADER_SIZE - 24);
+  memset(base + MIZU_ZC_REFCOUNT_OFF, 0, MIZU_HEADER_SIZE - MIZU_ZC_REFCOUNT_OFF);
   size_t cur = MIZU_ALIGN64(MIZU_HEADER_SIZE + 32 * (size_t) ncols);
   int64_t *tab = a->tab;
   for (int i = 0; i < ncols; i++) {

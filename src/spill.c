@@ -189,12 +189,7 @@ mizu_shm *mizu_spill_region_get(mizu_spill_fl *fl, size_t n) {
     size_t cap = fl != NULL && n <= MIZU_SPILL_FL_BYTES ? spill_round(n) : n;
     int rc = mizu_shm_create_heap(&shm, cap);
     if (rc != MIZU_ERRCAT_NONE) {
-      const char *summary, *hint;
-      mizu_err_describe((mizu_errcat) rc, &summary, &hint);
-      mizu_err_record_tls((mizu_errcat) rc,
-                         "cannot create payload region (%llu bytes): %s%s%s",
-                         (unsigned long long) cap, summary,
-                         hint[0] != '\0' ? ". " : "", hint);
+      mizu_err_record_create((mizu_errcat) rc, "payload region", cap);
       return NULL;
     }
   }
@@ -241,6 +236,28 @@ void mizu_stage_pin(mizu_handle *h, void *pin) {
 
 // Retain table -----------------------------------------------------------------
 
+/* Drop a registered pin through the binding's hook (NULL-safe). */
+static void spill_pin_drop(mizu_handle *h, void *pin) {
+  if (pin != NULL && h->binding.drop != NULL)
+    h->binding.drop(h->binding.ctx, pin);
+}
+
+/* Clear the staging checkout (the region/pin are the caller's by then). */
+static void spill_staging_clear(mizu_spill_fl *fl) {
+  fl->staging = NULL;
+  fl->staging_pin = NULL;
+  fl->staging_kind = MIZU_KEEP_FREE;
+}
+
+/* Surrender a released region per its kind: ZC through the refcount
+   protocol, SPILL to the free list. */
+static void spill_surrender(mizu_spill_fl *fl, mizu_shm *shm, uint8_t kind,
+                           int32_t key) {
+  if (shm == NULL) return;
+  if (kind == MIZU_KEEP_ZC) mizu_zc_release(fl, shm, key);
+  else mizu_spill_fl_insert(fl, shm);
+}
+
 /* Roll back an abandoned checkout (a stage that raised or failed before
    commit): the region rejoins the free list intact and a registered pin
    drops through the binding's hook. Runs at the top of every staging
@@ -250,11 +267,8 @@ void mizu_stage_rollback(mizu_handle *h) {
   mizu_spill_fl *fl = &h->fl;
   mizu_shm *shm = fl->staging;
   void *pin = fl->staging_pin;
-  fl->staging = NULL;
-  fl->staging_pin = NULL;
-  fl->staging_kind = MIZU_KEEP_FREE;
-  if (pin != NULL && h->binding.drop != NULL)
-    h->binding.drop(h->binding.ctx, pin);
+  spill_staging_clear(fl);
+  spill_pin_drop(h, pin);
   if (shm != NULL) mizu_spill_fl_insert(fl, shm);
 }
 
@@ -266,9 +280,7 @@ void mizu_keeper_commit(mizu_handle *h, mizu_keeper *tab, uint32_t at) {
   tab[at].pin = fl->staging_pin;
   tab[at].key = -1;
   tab[at].kind = fl->staging_kind;
-  fl->staging = NULL;
-  fl->staging_pin = NULL;
-  fl->staging_kind = MIZU_KEEP_FREE;
+  spill_staging_clear(fl);
 }
 
 /* The consumer-done release: drop the pin through the binding's hook,
@@ -285,11 +297,8 @@ void mizu_keeper_release(mizu_handle *h, mizu_keeper *tab, uint32_t at) {
   k->region = NULL;
   k->key = -1;
   k->pin = NULL;
-  if (pin != NULL && h->binding.drop != NULL)
-    h->binding.drop(h->binding.ctx, pin);
-  if (shm == NULL) return;
-  if (kind == MIZU_KEEP_ZC) mizu_zc_release(&h->fl, shm, key);
-  else mizu_spill_fl_insert(&h->fl, shm);
+  spill_pin_drop(h, pin);
+  spill_surrender(&h->fl, shm, kind, key);
 }
 
 /* The never-published discard (a cancelled pool publish): surrender the
@@ -299,14 +308,9 @@ void mizu_keeper_discard(mizu_handle *h) {
   uint8_t kind = fl->staging_kind;
   mizu_shm *shm = fl->staging;
   void *pin = fl->staging_pin;
-  fl->staging = NULL;
-  fl->staging_pin = NULL;
-  fl->staging_kind = MIZU_KEEP_FREE;
-  if (pin != NULL && h->binding.drop != NULL)
-    h->binding.drop(h->binding.ctx, pin);
-  if (shm == NULL) return;
-  if (kind == MIZU_KEEP_ZC) mizu_zc_release(fl, shm, -1);
-  else mizu_spill_fl_insert(fl, shm);
+  spill_staging_clear(fl);
+  spill_pin_drop(h, pin);
+  spill_surrender(fl, shm, kind, -1);
 }
 
 /* Handle teardown: close + unlink every retained region, drop every pin.
@@ -316,8 +320,7 @@ void mizu_keepers_teardown(mizu_handle *h, mizu_keeper *tab, uint32_t n) {
   for (uint32_t i = 0; i < n; i++) {
     if (tab[i].kind == MIZU_KEEP_FREE) continue;
     mizu_region_destroy(tab[i].region);
-    if (tab[i].pin != NULL && h->binding.drop != NULL)
-      h->binding.drop(h->binding.ctx, tab[i].pin);
+    spill_pin_drop(h, tab[i].pin);
     tab[i].kind = MIZU_KEEP_FREE;
     tab[i].region = NULL;
     tab[i].key = -1;
@@ -329,8 +332,7 @@ void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl) {
   /* mizu_stage_rollback normally retires the checkout first; a live one
      here drops its pin through the binding's hook like any keeper entry
      (the contract mizu_keepers_teardown keeps for the tables) */
-  if (fl->staging_pin != NULL && h->binding.drop != NULL)
-    h->binding.drop(h->binding.ctx, fl->staging_pin);
+  spill_pin_drop(h, fl->staging_pin);
   fl->staging_pin = NULL;
   fl->staging_kind = MIZU_KEEP_FREE;
   mizu_region_destroy(fl->staging);

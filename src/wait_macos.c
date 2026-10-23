@@ -109,13 +109,7 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
                                         void (*cb)(void *), void *cb_arg) {
   struct mizu_death_watch_s *w = calloc(1, sizeof(*w));
   if (w == NULL) return NULL;
-  w->flag = flag;
-  if (pk != NULL) {
-    w->pk = *pk;
-    w->has_pk = 1;
-  }
-  w->cb = cb;
-  w->cb_arg = cb_arg;
+  MIZU_DW_INIT_COMMON(w, flag, pk, cb, cb_arg);
 
   w->queue = dispatch_queue_create("mizu.death", DISPATCH_QUEUE_SERIAL);
   if (w->queue == NULL) {

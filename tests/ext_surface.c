@@ -254,6 +254,7 @@ int main(void) {
      tests/unit/test_wire.c; here a smoke pass proves the two forms). */
   assert(mizu_timeout_ms(1.5) == 1500.0);
   assert(mizu_timeout_ms(NAN) == -1 && mizu_timeout_ms(-1) == 0);
+  assert(mizu_timeout_ms(1e306) == -1);  /* overflow reports indefinite */
   unsigned char na8[8];
   mizu_store_na_real(na8);
   uint64_t na_bits;
