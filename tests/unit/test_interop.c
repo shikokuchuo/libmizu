@@ -827,6 +827,95 @@ static void tag_table_tests(void) {
   assert(buf[0] == MIZU_IX_TAG_INTV);
 }
 
+/* mizu_ix_attr_reserved: the exact whitelist vocabulary — every
+   MIZU_IX_ATTR_* key plus "tsp" passes, with the length and case
+   matching exactly. */
+static void attr_reserved_tests(void) {
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_NAMES,
+                               strlen(MIZU_IX_ATTR_NAMES)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_LEVELS,
+                               strlen(MIZU_IX_ATTR_LEVELS)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_DIM,
+                               strlen(MIZU_IX_ATTR_DIM)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_DIMNAMES,
+                               strlen(MIZU_IX_ATTR_DIMNAMES)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_CLASS,
+                               strlen(MIZU_IX_ATTR_CLASS)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_UNITS,
+                               strlen(MIZU_IX_ATTR_UNITS)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_ROWNAMES,
+                               strlen(MIZU_IX_ATTR_ROWNAMES)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_TZONE,
+                               strlen(MIZU_IX_ATTR_TZONE)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_TSCALE,
+                               strlen(MIZU_IX_ATTR_TSCALE)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_U64,
+                               strlen(MIZU_IX_ATTR_U64)) == 1);
+  assert(mizu_ix_attr_reserved(MIZU_IX_ATTR_TSP,
+                               strlen(MIZU_IX_ATTR_TSP)) == 1);
+  /* near-misses: a short span, a long one, case, the empty key */
+  assert(mizu_ix_attr_reserved("clas", 4) == 0);
+  assert(mizu_ix_attr_reserved("classy", 6) == 0);
+  assert(mizu_ix_attr_reserved("Class", 5) == 0);
+  assert(mizu_ix_attr_reserved("u6", 2) == 0);
+  assert(mizu_ix_attr_reserved("tspx", 4) == 0);
+  assert(mizu_ix_attr_reserved("", 0) == 0);
+}
+
+/* mizu_ix_skip: one value's raw span — a scalar in place, a container's
+   whole subtree, the elements of an open container one at a time; the
+   cursor lands on the next value each time, so a full skip walk ends
+   exactly at ix_end. The error latch arms on a truncated value and
+   sticks. */
+static void skip_tests(void) {
+  unsigned char buf[128];
+  size_t off = mizu_ix_put_header(buf);
+  const size_t hdr = off;
+  off += mizu_ix_put_list_begin(buf + off, 3);
+  const unsigned char *exp1 = buf + off;
+  const size_t n1 = mizu_ix_put_int(buf + off, 42);
+  off += n1;
+  const unsigned char *exp2 = buf + off;
+  size_t n2 = mizu_ix_put_list_begin(buf + off, 2);
+  n2 += mizu_ix_put_real(buf + off + n2, 1.5);
+  n2 += mizu_ix_put_str(buf + off + n2, "xy", 2);
+  off += n2;
+  const unsigned char *exp3 = buf + off;
+  const size_t n3 = mizu_ix_put_str(buf + off, "tail", 4);
+  off += n3;
+
+  mizu_ix cur;
+  mizu_ix_item it;
+  const unsigned char *start;
+  size_t len;
+  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
+  /* the root begin, then each skip covers one element exactly */
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_LIST);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_OK);
+  assert(start == exp1 && len == n1);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_OK);
+  assert(start == exp2 && len == n2);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_OK);
+  assert(start == exp3 && len == n3);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* a skip at the root takes the whole value, the header excluded */
+  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_OK);
+  assert(start == buf + hdr && len == off - hdr);
+  assert(mizu_ix_end(&cur) == MIZU_OK);
+
+  /* a truncated value fails the skip and latches the cursor */
+  unsigned char bad[16];
+  size_t bl = mizu_ix_put_header(bad);
+  bl += mizu_ix_put_list_begin(bad + bl, 1);
+  bad[bl++] = MIZU_IX_TAG_INT;      /* the payload never comes */
+  assert(mizu_ix_open(&cur, bad, bl) == MIZU_OK);
+  assert(mizu_ix_next(&cur, &it) == MIZU_OK && it.kind == MIZU_IX_LIST);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_ERR);
+  assert(mizu_ix_skip(&cur, &start, &len) == MIZU_ERR);
+}
+
 int main(void) {
   open_tests();
   err_task_tests();
@@ -838,6 +927,8 @@ int main(void) {
   err_framer_tests();
   shim_tests();
   tag_table_tests();
+  attr_reserved_tests();
+  skip_tests();
   corpus_tests();
   printf("test_interop: OK\n");
   return 0;
