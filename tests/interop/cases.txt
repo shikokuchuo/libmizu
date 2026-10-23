@@ -92,6 +92,7 @@ dict-empty | rt | all | dict() | R reads a named list whose names are character(
 dict-unicode | rt | all | dict("héllo"=int(1))
 dict-nested | rt | all | dict(x=list(int(1)),y=dict(z=nil))
 tuple | enc | PY | tuple(int(1),str("a")) | a tuple encodes 0x0c and reads back as a list (any list row pins the dec half)
+tree-dim-leaf | rt | all | list(attr(realv[1,2,3,4,5,6], dim=intv[2,3]), str("x")) | a dim leaf nested in a list: strides are a staging concern, the wire form is one
 
 # --- attr shapes ---
 factor | rt | R | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor"))
