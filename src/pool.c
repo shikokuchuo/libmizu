@@ -1662,8 +1662,6 @@ static void pool_inj_publish(mizu_pool *p, unsigned char *ring) {
     atomic_fetch_or_explicit(p->inj_ready, bit, memory_order_seq_cst);
 }
 
-/* The shared submit core: the shutdown/owner gates, then the role
-   dispatch. */
 static mizu_status pool_submit(mizu_pool *p, void *task_obj, uint16_t flags,
                               mizu_task *out, double timeout_ms) {
   if (atomic_load_explicit(p->shutdown, memory_order_acquire) != 0) {
@@ -1782,7 +1780,6 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
   return MIZU_OK;
 }
 
-/* The array form over the supply core. */
 static void *pool_batch_array_supply(void *ctx, size_t i) {
   return ((void **) ctx)[i];
 }
@@ -3457,7 +3454,6 @@ static int pool_any_terminal(mizu_rs_hdr **rss, size_t n, size_t *found,
   return 0;
 }
 
-/* The collect-all predicate: every slot terminal. */
 static int pool_all_terminal(mizu_rs_hdr **rss, size_t n) {
   for (size_t i = 0; i < n; i++)
     if (atomic_load_explicit(&rss[i]->status, memory_order_acquire) ==
@@ -3478,8 +3474,6 @@ static void pool_any_unannounce(mizu_rs_hdr **rss, size_t n) {
       atomic_store_explicit(&rss[i]->waiter_slot, -1, memory_order_relaxed);
 }
 
-/* Vectored-collect front matter: validate the array and resolve each
-   handle to its slot (sequence-checked). */
 static mizu_status pool_collect_resolve(mizu_pool *p, const mizu_task *tasks,
                                        size_t n, mizu_rs_hdr ***rss_out) {
   if (tasks == NULL || n == 0) {

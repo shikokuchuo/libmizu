@@ -343,7 +343,7 @@ static int chan_arena_alloc(mizu_channel *c, uint64_t n, uint64_t *out) {
       return 1;
     }
     if (attempt > 0) return 0;
-    chan_reap(c, 1); /* full -> reap -> retry, then give up */
+    chan_reap(c, 1);
   }
 }
 
@@ -599,7 +599,6 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
       continue;
     }
 
-    /* the spin came up empty: decay toward the floor */
     c->wait_budget_ns = c->wait_budget_ns / 2 < MIZU_SPIN_FLOOR_NS ?
       MIZU_SPIN_FLOOR_NS : c->wait_budget_ns / 2;
 
@@ -1163,9 +1162,8 @@ mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
   if (c->self_pid != mizu_self_pid()) return chan_forked(c);
   uint32_t own = chan_closed_bit(c), other = 3u ^ own;
 
-  /* 1. flush — close never silently discards sent messages */
+  /* flush first: close never silently discards sent messages */
   chan_flush(c);
-  /* 2. signal */
   atomic_fetch_or_explicit(c->closedw, own, memory_order_seq_cst);
   mizu_unpark(&c->peer_pk);
 

@@ -1456,7 +1456,6 @@ void mizu_arrow_write(mizu_arrow *a, void *base_, mizu_arrow_warn *warn) {
     mizu_mizh_validity_set(base, 0, -1);
   }
 
-  /* the header */
   {
     uint32_t magic = MIZU_MAGIC_LIST;
     int32_t n32 = (int32_t) ncols;
@@ -1568,7 +1567,6 @@ mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
     if (schema->children[i] == NULL ||
         arrow_classify(a, i, schema->children[i]) < 0)
       goto fail_classify;
-  /* the batches: the struct shape, then the per-column vetting */
   for (size_t b = 0; b < n_batches; b++) {
     const ArrowArray *ba = batches[b];
     if (ba == NULL || ba->n_children != schema->n_children ||
@@ -1797,8 +1795,6 @@ mizu_status mizu_arrow_stage(mizu_handle *h, mizu_arrow *a,
   uint8_t *base = (uint8_t *) shm->addr;
   memset(warn, 0, sizeof(*warn));
   mizu_arrow_write(a, base, warn);
-  /* the SHM_VEC frame: the region name, the type tag and the exact used
-     byte count in aux */
   hdr->kind = MIZU_KIND_SHM_VEC;
   hdr->len = (uint32_t) shm->name_len;
   hdr->aux = mizu_aux_shm_vec(MIZU_TYPE_VEC, (uint64_t) a->total);
