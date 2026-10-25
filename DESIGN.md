@@ -62,6 +62,7 @@ It rides the word the publish already loads and tests — the channel's `parked`
 The publisher clears the bit as it signals (the winner of the clear sends), so one signal moves per idle-to-data transition, never one per publish.
 The pool coalesces per submitter: the slot's gate selects the endpoint wake, and the first publisher past it clears the submitter's `notify` word — one signal per burst, however many workers publish.
 Spurious and stale signals are absorbed by the drain-and-recheck; a datagram queued while disarmed is dropped at the next arm.
+That arm-time drain is an active consume on every platform — a non-blocking read of the endpoint socket on POSIX, a zero-timeout wait on the auto-reset event on Windows — so a signal queued while disarmed can never fire a later-installed watch.
 
 A terminal that publishes nothing still wakes an armed consumer.
 The channel's watch chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark.

@@ -16,7 +16,7 @@ rem MSVC environment: clang-cl auto-detects the toolchain to compile,
 rem but lib.exe/link.exe want vcvars on PATH. vswhere ships with any
 rem VS2017+ installer.
 for /f "usebackq delims=" %%v in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSINSTALL=%%v
-if not defined VSINSTALL (echo error: Visual Studio C++ tools not found & exit /b 1)
+if not defined VSINSTALL (echo error: Visual Studio C++ tools not found & goto :fail)
 call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul
 
 rem /W4, not -Wall: clang-cl maps -Wall to /Wall (-Weverything), which
@@ -32,10 +32,10 @@ if exist build rmdir /s /q build
 mkdir build
 
 for %%f in (src\*.c) do (
-  clang-cl %CFLAGS% -c %%f -Fobuild\ || exit /b 1
+  clang-cl %CFLAGS% -c %%f -Fobuild\ || goto :fail
 )
 
-lib -nologo -out:build\mizu.lib build\*.obj || exit /b 1
+lib -nologo -out:build\mizu.lib build\*.obj || goto :fail
 
 rem The DLL needs its own object set: dllexport is a compile-time
 rem attribute (MIZU_API defaults to empty — objects compiled without
@@ -43,22 +43,30 @@ rem MIZU_SHARED carry no exports), and the link's default import library
 rem name would clobber the static mizu.lib.
 mkdir build\dll
 for %%f in (src\*.c) do (
-  clang-cl %DLLFLAGS% -c %%f -Fobuild\dll\ || exit /b 1
+  clang-cl %DLLFLAGS% -c %%f -Fobuild\dll\ || goto :fail
 )
-clang-cl -nologo -LD build\dll\*.obj -Fe:build\mizu.dll -link -IMPLIB:build\mizu-dll.lib || exit /b 1
+clang-cl -nologo -LD build\dll\*.obj -Fe:build\mizu.dll -link -IMPLIB:build\mizu-dll.lib || goto :fail
 
 if "%~1"=="test" (
   for %%t in (tests\unit\*.c) do (
-    clang-cl %CFLAGS% %%t build\mizu.lib -Fe:build\%%~nf.exe || exit /b 1
-    build\%%~nf.exe || exit /b 1
+    clang-cl %CFLAGS% %%t build\mizu.lib -Fe:build\%%~nf.exe || goto :fail
+    build\%%~nf.exe || goto :fail
   )
   rem The ext surface in its exported-symbol form, linked against the
   rem DLL's import library and run against the DLL: every mizu_ext.h
   rem symbol must be dllexport'ed (check-exports.sh's Windows twin).
-  clang-cl %CFLAGS% /DEXT_PROBE_EXPORTS tests\ext_surface.c build\mizu-dll.lib -Fe:build\ext_surface.exe || exit /b 1
+  clang-cl %CFLAGS% /DEXT_PROBE_EXPORTS tests\ext_surface.c build\mizu-dll.lib -Fe:build\ext_surface.exe || goto :fail
   set "PATH=%CD%\build;!PATH!"
-  build\ext_surface.exe || exit /b 1
+  build\ext_surface.exe || goto :fail
 )
 
 echo build-win: ok
 endlocal
+exit /b 0
+
+rem Failure path: the exit must run at top level — exit /b inside a
+rem for/if block can lose the code to the invoking shell (a failing test
+rem then reports as a green CI step), so failures goto here.
+:fail
+endlocal
+exit /b 1

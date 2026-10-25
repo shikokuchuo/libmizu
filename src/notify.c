@@ -206,7 +206,9 @@ intptr_t mizu_notify_ep_handle(const mizu_notify_ep *ep) {
 }
 
 void mizu_notify_ep_drain(mizu_notify_ep *ep) {
-  (void) ep;   /* the registered wait consumes the signal */
+  /* consume a pending stale signal: the zero-timeout wait absorbs it
+     (auto-reset — at most one is pending) */
+  (void) WaitForSingleObject(ep->ev, 0);
 }
 
 void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path) {
