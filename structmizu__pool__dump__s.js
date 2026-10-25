@@ -5,5 +5,6 @@ var structmizu__pool__dump__s =
     [ "fl_hits", "structmizu__pool__dump__s.html#a90ef57b72d55af3ab636a0f8b3c8a8c5", null ],
     [ "open_misses", "structmizu__pool__dump__s.html#a63fefa12938ccc27bd52ac0cdad75b45", null ],
     [ "collect_parks", "structmizu__pool__dump__s.html#aa6efcff05bf248d0d83b956a03136e57", null ],
-    [ "ledger_entries", "structmizu__pool__dump__s.html#a97862b238582ef2cc02ece33fc98162f", null ]
+    [ "ledger_entries", "structmizu__pool__dump__s.html#a97862b238582ef2cc02ece33fc98162f", null ],
+    [ "notify_sends", "structmizu__pool__dump__s.html#ad07edbf841678087a2507340a47ff709", null ]
 ];

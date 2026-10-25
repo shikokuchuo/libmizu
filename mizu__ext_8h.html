@@ -516,6 +516,20 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_death_watch_stop
 <tr class="memitem:abe1cab3caf78986d73197f7bd6189128" id="r_abe1cab3caf78986d73197f7bd6189128"><td class="memItemLeft" align="right" valign="top"><a id="abe1cab3caf78986d73197f7bd6189128" name="abe1cab3caf78986d73197f7bd6189128"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_death_listener_teardown</b> (void)</td></tr>
 <tr class="memdesc:abe1cab3caf78986d73197f7bd6189128"><td class="mdescLeft">&#160;</td><td class="mdescRight">Library-unload teardown; joins the Linux epoll thread (no-op elsewhere: macOS dispatch sources and Windows thread-pool waits are per-watch). <br /></td></tr>
+<tr class="memitem:aad8d5822cd30234e761c62abea32206b" id="r_aad8d5822cd30234e761c62abea32206b"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aad8d5822cd30234e761c62abea32206b">mizu_channel_notify_arm</a> (mizu_channel *, int on, int *avail_out)</td></tr>
+<tr class="memdesc:aad8d5822cd30234e761c62abea32206b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Event-driven wakes for a binding's async integration: an armed consumer owns a named, pollable endpoint (Linux an abstract-namespace datagram socket, macOS a bound filesystem datagram socket under the liveness dir, Windows an auto-reset named event); the publisher signals it at the same fenced checkpoint where it tests the parked announce, so the arm/re-check discipline is the parker protocol transplanted.  <br /></td></tr>
+<tr class="memitem:a842d36677f155b2f11fe6fbd8c88f202" id="r_a842d36677f155b2f11fe6fbd8c88f202"><td class="memItemLeft" align="right" valign="top"><a id="a842d36677f155b2f11fe6fbd8c88f202" name="a842d36677f155b2f11fe6fbd8c88f202"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_notify_watch</b> (mizu_channel *, void(*cb)(void *), void *ctx)</td></tr>
+<tr class="memitem:afae1329513efdd57600b769a4596aeef" id="r_afae1329513efdd57600b769a4596aeef"><td class="memItemLeft" align="right" valign="top"><a id="afae1329513efdd57600b769a4596aeef" name="afae1329513efdd57600b769a4596aeef"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_notify_unwatch</b> (mizu_channel *)</td></tr>
+<tr class="memitem:a32f1ff9e30d30c5525db234682c90d3c" id="r_a32f1ff9e30d30c5525db234682c90d3c"><td class="memItemLeft" align="right" valign="top"><a id="a32f1ff9e30d30c5525db234682c90d3c" name="a32f1ff9e30d30c5525db234682c90d3c"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_notify_arm</b> (mizu_pool *, int on)</td></tr>
+<tr class="memitem:a478c9ab890d677df71fcda8b03b83a5e" id="r_a478c9ab890d677df71fcda8b03b83a5e"><td class="memItemLeft" align="right" valign="top"><a id="a478c9ab890d677df71fcda8b03b83a5e" name="a478c9ab890d677df71fcda8b03b83a5e"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_notify_watch</b> (mizu_pool *, void(*cb)(void *), void *ctx)</td></tr>
+<tr class="memitem:ae638ce4aa68ea63fb61eaec4312c6235" id="r_ae638ce4aa68ea63fb61eaec4312c6235"><td class="memItemLeft" align="right" valign="top"><a id="ae638ce4aa68ea63fb61eaec4312c6235" name="ae638ce4aa68ea63fb61eaec4312c6235"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_notify_unwatch</b> (mizu_pool *)</td></tr>
+<tr class="memitem:aa3f6f7bbbca65f465626f040df27e1a6" id="r_aa3f6f7bbbca65f465626f040df27e1a6"><td class="memItemLeft" align="right" valign="top"><a id="aa3f6f7bbbca65f465626f040df27e1a6" name="aa3f6f7bbbca65f465626f040df27e1a6"></a>
+<a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_task_notify</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, int on)</td></tr>
 <tr class="memitem:a5c66c429d4a8b1afe4c2f5bd0611ded5" id="r_a5c66c429d4a8b1afe4c2f5bd0611ded5"><td class="memItemLeft" align="right" valign="top">const char *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a5c66c429d4a8b1afe4c2f5bd0611ded5">mizu_live_dir</a> (void)</td></tr>
 <tr class="memdesc:a5c66c429d4a8b1afe4c2f5bd0611ded5"><td class="mdescLeft">&#160;</td><td class="mdescRight">Directory for liveness lock files: the MIZU_LIVENESS_DIR override (read-through, checked every call) else a per-platform default resolved once — /dev/shm on Linux, the per-user temp dir on macOS and Windows.  <br /></td></tr>
 <tr class="memitem:a8a52337cdc7133df4cad8c4f33937ed5" id="r_a8a52337cdc7133df4cad8c4f33937ed5"><td class="memItemLeft" align="right" valign="top"><a id="a8a52337cdc7133df4cad8c4f33937ed5" name="a8a52337cdc7133df4cad8c4f33937ed5"></a>
@@ -1780,6 +1794,35 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 
 <p>Sleeps while the epoch still equals snapshot, up to timeout_ms (0 = poll: never sleeps; &lt; 0 = indefinite — on POSIX an untimed wait would silently restart under SA_RESTART and swallow an interrupt until the next genuine wake, so indefinite parks are internally bounded and rely on directed unparks). </p>
 <p>Returns MIZU_PARK_*. </p>
+
+</div>
+</div>
+<a id="aad8d5822cd30234e761c62abea32206b" name="aad8d5822cd30234e761c62abea32206b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aad8d5822cd30234e761c62abea32206b">&#9670;&#160;</a></span>mizu_channel_notify_arm()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_channel_notify_arm </td>
+          <td>(</td>
+          <td class="paramtype">mizu_channel *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int</td>          <td class="paramname"><span class="paramname"><em>on</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int *</td>          <td class="paramname"><span class="paramname"><em>avail_out</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Event-driven wakes for a binding's async integration: an armed consumer owns a named, pollable endpoint (Linux an abstract-namespace datagram socket, macOS a bound filesystem datagram socket under the liveness dir, Windows an auto-reset named event); the publisher signals it at the same fenced checkpoint where it tests the parked announce, so the arm/re-check discipline is the parker protocol transplanted. </p>
+<p>The arm is edge-triggered: the publisher clears the bit as it signals (one signal per idle-to-data transition, never one per publish), and spurious or stale signals are absorbed by the consumer's drain-and-recheck. The unarmed publish path is unchanged: the notify bit rides the word the publish already loads and tests. An endpoint is created lazily at the first arm or watch and lives until the handle's destroy; a graceful destroy unlinks the macOS socket path, a hard kill leaves it as residue beside the .live.* files (unlink-before-bind absorbs it; the reaper's exact region grammar never touches suffixed names). arm on a MIZU_FLAG_SPIN channel fails MIZU_ERR: the spin publish path skips the wake checkpoint by design. The watch registers a persistent pure-C callback on the endpoint: it may run on any thread and its targets must stay valid until unwatch (or destroy) returns — stop synchronizes with an in-flight callback. The channel watch additionally chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark, so an armed consumer's drain also surfaces CLOSED and PEER_GONE, never only publishes. A pool submitter needs no chain: a worker death is failed into result publishes by the reaper, which reach the armed submitter through the ordinary waiter_slot path. mizu_channel_notify_arm(on != 0) sets MIZU_WAIT_NOTIFY in the side's parked word and reports availability in *avail_out (may be NULL): the caller drains what is already there synchronously, then stays armed. Re-arms are idempotent; on == 0 disarms. mizu_pool_notify_arm is the submitter-half arm (the coalescing word); mizu_pool_task_notify announces (on != 0) or withdraws (on == 0) the MIZU_WS_NOTIFY gate on each task's result slot — announce before arming the word, then re-check the tasks' terminal states (the sync scan resolves whatever was already published). Withdrawing restores -1 on slots still holding this submitter's announce; a publish racing it at worst sends one absorbed signal or skips a wake nobody waits on. Both pool verbs need a handle with a claimed submitter slot. </p>
 
 </div>
 </div>

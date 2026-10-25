@@ -187,6 +187,11 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTITY_PARKED</b>&#160;&#160;&#160;4</td></tr>
 <tr class="memitem:a6051c48a0b3f46b70c12de0811c4ca91" id="r_a6051c48a0b3f46b70c12de0811c4ca91"><td class="memItemLeft" align="right" valign="top"><a id="a6051c48a0b3f46b70c12de0811c4ca91" name="a6051c48a0b3f46b70c12de0811c4ca91"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTITY_REG</b>&#160;&#160;&#160;8</td></tr>
+<tr class="memitem:ae6a79b06b7caf8c683e9c636a751efa2" id="r_ae6a79b06b7caf8c683e9c636a751efa2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae6a79b06b7caf8c683e9c636a751efa2">MIZU_WAIT_PARKED</a>&#160;&#160;&#160;1u</td></tr>
+<tr class="memdesc:ae6a79b06b7caf8c683e9c636a751efa2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The entity block's parked word (MIZU_ENTITY_PARKED) is a bitmask: bit 0 is the park announce (the publisher's <span class="tt">!= 0</span> test keeps its meaning); bit 1 arms the side's notify endpoint ("signal my endpoint when data is
+published for me" — the publisher clears it as it signals, so one signal per idle transition); bit 2 is reserved.  <br /></td></tr>
+<tr class="memitem:a8abcf59d827d6f9e03169f3cf78f9143" id="r_a8abcf59d827d6f9e03169f3cf78f9143"><td class="memItemLeft" align="right" valign="top"><a id="a8abcf59d827d6f9e03169f3cf78f9143" name="a8abcf59d827d6f9e03169f3cf78f9143"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_WAIT_NOTIFY</b>&#160;&#160;&#160;2u</td></tr>
 <tr class="memitem:ac898f4d62bd0a236f0b4f35ce384fe12" id="r_ac898f4d62bd0a236f0b4f35ce384fe12"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ac898f4d62bd0a236f0b4f35ce384fe12">MIZU_ENTITY_IDENT</a>&#160;&#160;&#160;16</td></tr>
 <tr class="memdesc:ac898f4d62bd0a236f0b4f35ce384fe12"><td class="mdescLeft">&#160;</td><td class="mdescRight">Offset 16 of the 64-byte entity block: the side's identity word (MIZU_IDENT in <a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a> — language byte, reader-capability mask).  <br /></td></tr>
 <tr class="memitem:acf8deaaffe3aa7880ccfc9423df90278" id="r_acf8deaaffe3aa7880ccfc9423df90278"><td class="memItemLeft" align="right" valign="top"><a id="acf8deaaffe3aa7880ccfc9423df90278" name="acf8deaaffe3aa7880ccfc9423df90278"></a>
@@ -254,6 +259,8 @@ Macros</h2></td></tr>
 <tr class="memitem:af131fb86cf4d98956e2979247a514bc1" id="r_af131fb86cf4d98956e2979247a514bc1"><td class="memItemLeft" align="right" valign="top"><a id="af131fb86cf4d98956e2979247a514bc1" name="af131fb86cf4d98956e2979247a514bc1"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_MAX_WORKERS</b>&#160;&#160;&#160;64</td></tr>
 <tr class="memdesc:af131fb86cf4d98956e2979247a514bc1"><td class="mdescLeft">&#160;</td><td class="mdescRight">Parked-worker bitmask width; also the map CLAIM array bound. <br /></td></tr>
+<tr class="memitem:aa03ce9643a310dc014c4cbd0323c42e9" id="r_aa03ce9643a310dc014c4cbd0323c42e9"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aa03ce9643a310dc014c4cbd0323c42e9">MIZU_WS_NOTIFY</a>&#160;&#160;&#160;(INT32_C(1) &lt;&lt; 30)</td></tr>
+<tr class="memdesc:aa03ce9643a310dc014c4cbd0323c42e9"><td class="mdescLeft">&#160;</td><td class="mdescRight">Bit 30 of <a class="el" href="structmizu__rs__hdr__s.html#a724c59bca2c09f54cc7234c802180825" title="submitter slot parked on this (-1; MIZU_WS_NOTIFY OR&#39;d when the wake is a notify signal)">mizu_rs_hdr.waiter_slot</a>: the waiter wants a signal on the submitter's notify endpoint instead of an unpark.  <br /></td></tr>
 <tr class="memitem:adb83f206960d5da95c6a60124039afbd" id="r_adb83f206960d5da95c6a60124039afbd"><td class="memItemLeft" align="right" valign="top"><a id="adb83f206960d5da95c6a60124039afbd" name="adb83f206960d5da95c6a60124039afbd"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTRY_RUNNER</b>&#160;&#160;&#160;1u</td></tr>
 <tr class="memitem:a92366f133f6295dd1e8e52317491b2ce" id="r_a92366f133f6295dd1e8e52317491b2ce"><td class="memItemLeft" align="right" valign="top"><a id="a92366f133f6295dd1e8e52317491b2ce" name="a92366f133f6295dd1e8e52317491b2ce"></a>
@@ -736,6 +743,24 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 </div><!-- fragment -->
 </div>
 </div>
+<a id="ae6a79b06b7caf8c683e9c636a751efa2" name="ae6a79b06b7caf8c683e9c636a751efa2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ae6a79b06b7caf8c683e9c636a751efa2">&#9670;&#160;</a></span>MIZU_WAIT_PARKED</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define MIZU_WAIT_PARKED&#160;&#160;&#160;1u</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The entity block's parked word (MIZU_ENTITY_PARKED) is a bitmask: bit 0 is the park announce (the publisher's <span class="tt">!= 0</span> test keeps its meaning); bit 1 arms the side's notify endpoint ("signal my endpoint when data is
+published for me" — the publisher clears it as it signals, so one signal per idle transition); bit 2 is reserved. </p>
+<p>The word has two writers (the side itself and the publisher's clear): every store is an RMW. </p>
+
+</div>
+</div>
 <a id="ac898f4d62bd0a236f0b4f35ce384fe12" name="ac898f4d62bd0a236f0b4f35ce384fe12"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#ac898f4d62bd0a236f0b4f35ce384fe12">&#9670;&#160;</a></span>MIZU_ENTITY_IDENT</h2>
 
@@ -870,6 +895,23 @@ const char *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_err
 
 <p>MIZH (atomic vector): [4-7] i32 wire type, [8-15] i64 element count, [16-23] i64 attrs blob size; bare element bytes at 64, the attrs blob trailing. </p>
 <p>MIZS (string vector): [4-7] i32 attrs blob size, [8-15] i64 string count, [16-23] i64 string-block byte size; the string block at 64, the attrs blob trailing it. The string block (also the form of an MIZL STRSXP leaf): a ceil(n / 8)-byte validity bitmap, (n + 1) i64 offsets, n encoding bytes (MIZU_CE_*), and the packed string bytes — each section 64-byte aligned from the block start. The first, second and fourth are Arrow large_utf8's three buffers verbatim; the encoding section is R's per-CHARSXP mark. MIZL (list tree): [4-7] i32 element count n, [8-15] i64 attrs blob offset, [16-23] i64 attrs blob size; then n 32-byte directory entries, each { i64 data_offset (64-byte aligned), i64 data_size, i32 sexptype, i32 attrs_size, i64 length }. The entry's data is the bare element bytes (an atomic leaf), a string block (STRSXP), a nested MIZL (VECSXP) or a serialized stream (sexptype 0); the leaf's attrs blob is the last attrs_size bytes of data_size. Bit 30 of the entry's sexptype is the leaf's S4 bit; the remainder is a listed tag — 0 (serialized), the atomic tags, STR, VEC, and 32 (MIZU_TYPE_INT64 is legal on MIZL leaves). Tag 33 is a remote leaf: the column lives in another region and crosses by reference. data_offset / data_size hold the identifier span — the region name, optionally name[i,j,...] with 1-based decimal indices, 1-255 bytes — length and attrs_size describe the referenced column as resolved, the S4 bit is never set, and the validity pair is a {0,0} / {0,-1} claim alone (DESIGN.md's remote-leaf rules are normative). </p>
+
+</div>
+</div>
+<a id="aa03ce9643a310dc014c4cbd0323c42e9" name="aa03ce9643a310dc014c4cbd0323c42e9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa03ce9643a310dc014c4cbd0323c42e9">&#9670;&#160;</a></span>MIZU_WS_NOTIFY</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define MIZU_WS_NOTIFY&#160;&#160;&#160;(INT32_C(1) &lt;&lt; 30)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Bit 30 of <a class="el" href="structmizu__rs__hdr__s.html#a724c59bca2c09f54cc7234c802180825" title="submitter slot parked on this (-1; MIZU_WS_NOTIFY OR&#39;d when the wake is a notify signal)">mizu_rs_hdr.waiter_slot</a>: the waiter wants a signal on the submitter's notify endpoint instead of an unpark. </p>
+<p>The value stays non-negative, so the publisher's <span class="tt">&gt;= 0</span> test is unchanged; the taken branch masks the bit to find the submitter. One writer regime per slot (the submitter), so announce and withdraw stay plain stores. </p>
 
 </div>
 </div>

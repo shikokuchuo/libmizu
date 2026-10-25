@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['languages_20capabilities_20and_20the_20identity_20word_0',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md17',1,'']]],
+  ['languages_20capabilities_20and_20the_20identity_20word_0',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
   ['libmizu_20水_1',['libmizu 水',['../index.html',1,'']]],
   ['libmizu_20design_20notes_2',['libmizu design notes',['../md_DESIGN.html',1,'']]],
   ['license_3',['License',['../index.html#autotoc_md7',1,'']]],

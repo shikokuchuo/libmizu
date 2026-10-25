@@ -7,5 +7,7 @@ var searchData=
   ['n_5frange_4',['n_range',['../structmizu__arrow__warn__s.html#af58ded2e39acb51d051cb6abbb265793',1,'mizu_arrow_warn_s']]],
   ['n_5fsubmitters_5',['n_submitters',['../structmizu__pool__dump__s.html#a0780c1f713ba08a9e4f1a9c1765c8df1',1,'mizu_pool_dump_s']]],
   ['n_5fworkers_6',['n_workers',['../structmizu__pool__dump__s.html#ad8d6f1df855f08b0ae2c2bb955c0e189',1,'mizu_pool_dump_s']]],
-  ['na_7',['na',['../structmizu__ix__item__s.html#aeb4fb917ef35e83dd34b049441266b24',1,'mizu_ix_item_s']]]
+  ['na_7',['na',['../structmizu__ix__item__s.html#aeb4fb917ef35e83dd34b049441266b24',1,'mizu_ix_item_s']]],
+  ['notify_8',['notify',['../structmizu__sub__slot__s.html#a612d66758bb75f4cc38756b638d5bce3',1,'mizu_sub_slot_s']]],
+  ['notify_5fsends_9',['notify_sends',['../structmizu__channel__info__s.html#ac28cd9d01968ccbec36612edb9e56ad3',1,'mizu_channel_info_s::notify_sends'],['../structmizu__pool__dump__s.html#ad07edbf841678087a2507340a47ff709',1,'mizu_pool_dump_s::notify_sends']]]
 ];

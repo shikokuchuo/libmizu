@@ -31,32 +31,33 @@ var NAVTREE =
       [ "Statuses, not exceptions", "md_DESIGN.html#autotoc_md10", null ],
       [ "Liveness lock is the death verdict", "md_DESIGN.html#autotoc_md11", null ],
       [ "Parker protocol", "md_DESIGN.html#autotoc_md12", null ],
-      [ "Payload framing tiers", "md_DESIGN.html#autotoc_md13", [
-        [ "Codec registry", "md_DESIGN.html#autotoc_md14", null ],
-        [ "The keeperless claim", "md_DESIGN.html#autotoc_md15", null ]
+      [ "Notify endpoints", "md_DESIGN.html#autotoc_md13", null ],
+      [ "Payload framing tiers", "md_DESIGN.html#autotoc_md14", [
+        [ "Codec registry", "md_DESIGN.html#autotoc_md15", null ],
+        [ "The keeperless claim", "md_DESIGN.html#autotoc_md16", null ]
       ] ],
-      [ "Interchange codec", "md_DESIGN.html#autotoc_md16", [
-        [ "Languages, capabilities and the identity word", "md_DESIGN.html#autotoc_md17", null ],
-        [ "The format", "md_DESIGN.html#autotoc_md18", null ],
-        [ "The byte-shape helper registry", "md_DESIGN.html#autotoc_md19", null ],
-        [ "The Arrow frame writer", "md_DESIGN.html#autotoc_md20", null ],
-        [ "Validity as data", "md_DESIGN.html#autotoc_md21", null ]
+      [ "Interchange codec", "md_DESIGN.html#autotoc_md17", [
+        [ "Languages, capabilities and the identity word", "md_DESIGN.html#autotoc_md18", null ],
+        [ "The format", "md_DESIGN.html#autotoc_md19", null ],
+        [ "The byte-shape helper registry", "md_DESIGN.html#autotoc_md20", null ],
+        [ "The Arrow frame writer", "md_DESIGN.html#autotoc_md21", null ],
+        [ "Validity as data", "md_DESIGN.html#autotoc_md22", null ]
       ] ],
-      [ "The binding seam", "md_DESIGN.html#autotoc_md22", [
-        [ "Staging policy", "md_DESIGN.html#autotoc_md23", null ],
-        [ "Map morsel protocol", "md_DESIGN.html#autotoc_md24", null ]
+      [ "The binding seam", "md_DESIGN.html#autotoc_md23", [
+        [ "Staging policy", "md_DESIGN.html#autotoc_md24", null ],
+        [ "Map morsel protocol", "md_DESIGN.html#autotoc_md25", null ]
       ] ],
-      [ "Retain table", "md_DESIGN.html#autotoc_md25", null ],
-      [ "Zero-copy views", "md_DESIGN.html#autotoc_md26", null ],
-      [ "Crash atomicity", "md_DESIGN.html#autotoc_md27", null ],
-      [ "Pool mechanics", "md_DESIGN.html#autotoc_md28", null ],
-      [ "ABI discipline", "md_DESIGN.html#autotoc_md29", null ]
+      [ "Retain table", "md_DESIGN.html#autotoc_md26", null ],
+      [ "Zero-copy views", "md_DESIGN.html#autotoc_md27", null ],
+      [ "Crash atomicity", "md_DESIGN.html#autotoc_md28", null ],
+      [ "Pool mechanics", "md_DESIGN.html#autotoc_md29", null ],
+      [ "ABI discipline", "md_DESIGN.html#autotoc_md30", null ]
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
-      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md31", [
-        [ "Added", "md_CHANGELOG.html#autotoc_md32", null ],
-        [ "Changed", "md_CHANGELOG.html#autotoc_md33", null ],
-        [ "Fixed", "md_CHANGELOG.html#autotoc_md34", null ]
+      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md32", [
+        [ "Added", "md_CHANGELOG.html#autotoc_md33", null ],
+        [ "Changed", "md_CHANGELOG.html#autotoc_md34", null ],
+        [ "Fixed", "md_CHANGELOG.html#autotoc_md35", null ]
       ] ]
     ] ],
     [ "Data Structures", "annotated.html", [
@@ -84,7 +85,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#abe0bc35132226b510196cd6d9de9a60f"
+"mizu__ext_8h.html#ab83e23693b4a75957eed9e2a24510f28"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

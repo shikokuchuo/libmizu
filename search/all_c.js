@@ -9,5 +9,8 @@ var searchData=
   ['n_5fworkers_6',['n_workers',['../structmizu__pool__dump__s.html#ad8d6f1df855f08b0ae2c2bb955c0e189',1,'mizu_pool_dump_s']]],
   ['na_7',['na',['../structmizu__ix__item__s.html#aeb4fb917ef35e83dd34b049441266b24',1,'mizu_ix_item_s']]],
   ['not_20exceptions_8',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]],
-  ['notes_9',['libmizu design notes',['../md_DESIGN.html',1,'']]]
+  ['notes_9',['libmizu design notes',['../md_DESIGN.html',1,'']]],
+  ['notify_10',['notify',['../structmizu__sub__slot__s.html#a612d66758bb75f4cc38756b638d5bce3',1,'mizu_sub_slot_s']]],
+  ['notify_20endpoints_11',['Notify endpoints',['../md_DESIGN.html#autotoc_md13',1,'']]],
+  ['notify_5fsends_12',['notify_sends',['../structmizu__channel__info__s.html#ac28cd9d01968ccbec36612edb9e56ad3',1,'mizu_channel_info_s::notify_sends'],['../structmizu__pool__dump__s.html#ad07edbf841678087a2507340a47ff709',1,'mizu_pool_dump_s::notify_sends']]]
 ];
