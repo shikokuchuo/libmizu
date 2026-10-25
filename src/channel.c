@@ -88,8 +88,22 @@ struct mizu_channel_s {
   intptr_t live_self, live_peer; /* kept liveness fds/handles; 0 = not open */
   char live_self_path[MIZU_PATH_BUF];
   char live_peer_path[MIZU_PATH_BUF];
+  char livedir[MIZU_PATH_BUF];   /* the recorded liveness dir (the notify
+                                    endpoint's path base on macOS) */
   _Atomic int peer_dead;         /* death-listener flag: wake trigger only */
   mizu_death_watch *watch;
+
+  /* notify endpoint (notify.c): the consumer half is created lazily at
+     the first arm/watch; the producer half opens at the first sighting
+     of the peer's armed bit. ntfy_dwatch chains the peer's death onto
+     the watch callback, so a dead peer wakes the drain too. */
+  mizu_notify_ep *ntfy_ep;
+  mizu_notify_watch *ntfy_watch;
+  mizu_death_watch *ntfy_dwatch;
+  void (*ntfy_cb)(void *);
+  void *ntfy_cb_ctx;
+  mizu_notify_tx *ntfy_tx;
+  uint64_t stat_notify_sends;
 
   /* Payload lifetime: the per-slot retain table (malloc'd, cap entries);
      the producer spill free list + lent-region ledger and the consumer
@@ -178,14 +192,47 @@ static void chan_wire(mizu_channel *c, const mizu_preamble *p) {
    that scrubs TMPDIR must not be able to split the death protocol). */
 static int chan_live_paths(mizu_channel *c, const char *livedir) {
   const char *suffix = c->shm.name + strlen(MIZU_PREFIX_LITERAL);
+  int n0 = snprintf(c->livedir, sizeof(c->livedir), "%s", livedir);
   int n1 = snprintf(c->live_self_path, sizeof(c->live_self_path),
                     "%s/mizu_%s.live.%s", livedir, suffix,
                     c->side == MIZU_ENTITY_HOST ? "host" : "peer");
   int n2 = snprintf(c->live_peer_path, sizeof(c->live_peer_path),
                     "%s/mizu_%s.live.%s", livedir, suffix,
                     c->side == MIZU_ENTITY_HOST ? "peer" : "host");
-  return (n1 > 0 && (size_t) n1 < sizeof(c->live_self_path) &&
+  return (n0 > 0 && (size_t) n0 < sizeof(c->livedir) &&
+          n1 > 0 && (size_t) n1 < sizeof(c->live_self_path) &&
           n2 > 0 && (size_t) n2 < sizeof(c->live_peer_path)) ? 0 : -1;
+}
+
+// Notify endpoint ------------------------------------------------------------------
+
+/* The consumer endpoint is named by its own side ("host" / "peer"); the
+   producer signals the peer's endpoint, named by the peer's side. */
+
+static mizu_notify_ep *chan_notify_ep(mizu_channel *c) {
+  if (c->ntfy_ep != NULL) return c->ntfy_ep;
+  const char *err = NULL;
+  c->ntfy_ep = mizu_notify_ep_open(c->livedir, c->shm.name,
+                                  c->side == MIZU_ENTITY_HOST ? "host" : "peer",
+                                  &err);
+  if (c->ntfy_ep == NULL)
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "%s", err);
+  return c->ntfy_ep;
+}
+
+/* Signal the peer's endpoint, claiming the edge by clearing its armed
+   bit: the winner of the clear sends (edge-triggered — one signal per
+   arm, never one per publish). */
+static void chan_notify_signal(mizu_channel *c) {
+  if ((atomic_fetch_and_explicit(c->peer_parked, ~MIZU_WAIT_NOTIFY,
+                                 memory_order_acq_rel) & MIZU_WAIT_NOTIFY) == 0)
+    return;
+  if (c->ntfy_tx == NULL)
+    c->ntfy_tx = mizu_notify_tx_open(c->livedir, c->shm.name,
+                                    c->side == MIZU_ENTITY_HOST ? "peer" : "host");
+  if (c->ntfy_tx == NULL) return;   /* the next armed sighting retries */
+  mizu_notify_tx_send(c->ntfy_tx);
+  c->stat_notify_sends++;
 }
 
 // Peer-death ----------------------------------------------------------------------
@@ -237,6 +284,25 @@ static void chan_release(mizu_channel *c, int unlink_names) {
   if (c->watch != NULL) {
     mizu_death_watch_stop(c->watch);
     c->watch = NULL;
+  }
+  /* notify teardown: the watch (and the death chain) stop before the
+     endpoint closes — the watch borrows its fd; the endpoint's macOS
+     socket path is ours, so it unlinks here */
+  if (c->ntfy_watch != NULL) {
+    mizu_notify_watch_stop(c->ntfy_watch);
+    c->ntfy_watch = NULL;
+  }
+  if (c->ntfy_dwatch != NULL) {
+    mizu_death_watch_stop(c->ntfy_dwatch);
+    c->ntfy_dwatch = NULL;
+  }
+  if (c->ntfy_ep != NULL) {
+    mizu_notify_ep_close(c->ntfy_ep, 1);
+    c->ntfy_ep = NULL;
+  }
+  if (c->ntfy_tx != NULL) {
+    mizu_notify_tx_close(c->ntfy_tx);
+    c->ntfy_tx = NULL;
   }
   if (c->pk_ok) {
     mizu_parker_detach(&c->self_pk);
@@ -419,10 +485,15 @@ static void chan_flush(mizu_channel *c) {
   if (!c->spin) {
     /* Dekker with the consumer's announce: its parked-flag store and our
        tail store are each fenced before the cross-check, so either it sees
-       the data in its re-check or we see the flag. */
+       the data in its re-check or we see the flag. The notify bit rides
+       the same word: the unarmed case is the load, the test, and the
+       not-taken branch exactly as without the feature. */
     atomic_thread_fence(memory_order_seq_cst);
-    if (atomic_load_explicit(c->peer_parked, memory_order_relaxed) != 0)
-      mizu_unpark(&c->peer_pk);
+    uint32_t w = atomic_load_explicit(c->peer_parked, memory_order_relaxed);
+    if (w != 0) {
+      if ((w & MIZU_WAIT_PARKED) != 0) mizu_unpark(&c->peer_pk);
+      if ((w & MIZU_WAIT_NOTIFY) != 0) chan_notify_signal(c);
+    }
   }
 }
 
@@ -607,25 +678,29 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
        epoch after our snapshot and the sleep returns immediately. A stale
        flag left by an abandoned wait costs one wasted wake. */
     uint32_t e = mizu_parker_snapshot(&c->self_pk);
-    atomic_store_explicit(c->self_parked, 1u, memory_order_relaxed);
+    atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_PARKED,
+                             memory_order_relaxed);
     atomic_thread_fence(memory_order_seq_cst);
     if (chan_rx_avail(c) ||
         atomic_load_explicit(c->closedw, memory_order_acquire) != 0 ||
         (!held &&
          atomic_load_explicit(&c->peer_dead, memory_order_acquire) != 0)) {
-      atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+      atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_PARKED,
+                              memory_order_relaxed);
       continue;
     }
     chan_publish_head(c);     /* always publish before parking */
     long ms = mizu_wait_ms(deadline);
     if (ms < 0) {
-      atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+      atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_PARKED,
+                              memory_order_relaxed);
       return MIZU_TIMEOUT;
     }
     mizu_park_bracket(&c->h.binding, 1);
     mizu_park(&c->self_pk, e, ms);
     mizu_park_bracket(&c->h.binding, 0);
-    atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+    atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_PARKED,
+                              memory_order_relaxed);
     if (mizu_check_interrupt(&c->h.binding)) return chan_intr(c);
     /* availability first: a wake that delivered a message returns OK at
        the loop top regardless of the clock, so skip the read for it */
@@ -1142,6 +1217,99 @@ mizu_status mizu_channel_recv_batch(mizu_channel *c, void **objs, size_t cap,
                                    (void *) objs, timeout_ms);
 }
 
+// Notify arm and watch ------------------------------------------------------------
+
+static mizu_status chan_notify_spin_err(mizu_channel *c) {
+  mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
+                 "a spin channel has no notify endpoint (its publish path "
+                 "skips the wake checkpoint)");
+  return MIZU_ERR;
+}
+
+mizu_status mizu_channel_notify_arm(mizu_channel *c, int on, int *avail_out) {
+  if (chan_get(c) == NULL) return MIZU_ERR;
+  if (c->spin) return chan_notify_spin_err(c);
+  if (avail_out != NULL) *avail_out = 0;
+  if (!on) {
+    atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_NOTIFY,
+                              memory_order_seq_cst);
+    return MIZU_OK;
+  }
+  if (chan_notify_ep(c) == NULL) return MIZU_ERR;
+  /* drop signals queued while disarmed: a stale datagram costs one empty
+     drain, never a spurious fresh signal */
+  mizu_notify_ep_drain(c->ntfy_ep);
+  /* announce -> fence -> report: either the peer's publish sees the bit
+     or this availability check sees the data — the parker protocol's
+     announce/re-check, transplanted */
+  atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_NOTIFY,
+                           memory_order_seq_cst);
+  atomic_thread_fence(memory_order_seq_cst);
+  if (avail_out != NULL) *avail_out = chan_rx_avail(c);
+  return MIZU_OK;
+}
+
+mizu_status mizu_channel_notify_watch(mizu_channel *c, void (*cb)(void *),
+                                     void *ctx) {
+  if (chan_get(c) == NULL) return MIZU_ERR;
+  if (c->spin) return chan_notify_spin_err(c);
+  if (cb == NULL) {
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "expected a notify callback");
+    return MIZU_ERR;
+  }
+  if (c->ntfy_watch != NULL) {
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
+                   "channel already has a notify watch");
+    return MIZU_ERR;
+  }
+  if (chan_notify_ep(c) == NULL) return MIZU_ERR;
+  uint64_t pid = c->side == MIZU_ENTITY_HOST ?
+    atomic_load_explicit(c->peer_pid, memory_order_acquire) : c->pre.host_pid;
+  if (pid == 0) {
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "channel has no peer yet");
+    return MIZU_ERR;
+  }
+  c->ntfy_watch =
+    mizu_notify_watch_start(mizu_notify_ep_handle(c->ntfy_ep), cb, ctx);
+  if (c->ntfy_watch == NULL) {
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "cannot start notify watch");
+    return MIZU_ERR;
+  }
+  c->ntfy_cb = cb;
+  c->ntfy_cb_ctx = ctx;
+  /* chain the peer's death onto the same callback: a dead peer publishes
+     nothing, so without this the drain would never run. The flag store
+     precedes the callback, so the callback's drain reads the verdict. */
+  c->ntfy_dwatch =
+    mizu_death_watch_start2((long) pid, &c->peer_dead, NULL, cb, ctx);
+  if (c->ntfy_dwatch == NULL) {
+    mizu_notify_watch_stop(c->ntfy_watch);
+    c->ntfy_watch = NULL;
+    c->ntfy_cb = NULL;
+    c->ntfy_cb_ctx = NULL;
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
+                   "cannot watch peer process %llu",
+                   (unsigned long long) pid);
+    return MIZU_ERR;
+  }
+  return MIZU_OK;
+}
+
+mizu_status mizu_channel_notify_unwatch(mizu_channel *c) {
+  if (chan_get(c) == NULL) return MIZU_ERR;
+  if (c->ntfy_watch != NULL) {
+    mizu_notify_watch_stop(c->ntfy_watch);
+    c->ntfy_watch = NULL;
+  }
+  if (c->ntfy_dwatch != NULL) {
+    mizu_death_watch_stop(c->ntfy_dwatch);
+    c->ntfy_dwatch = NULL;
+  }
+  c->ntfy_cb = NULL;
+  c->ntfy_cb_ctx = NULL;
+  return MIZU_OK;
+}
+
 // Close protocol ------------------------------------------------------------------
 
 /* The peer half of the protocol: flush, set our bit, wake the other side.
@@ -1154,6 +1322,7 @@ mizu_status mizu_channel_close_signal(mizu_channel *c) {
   atomic_fetch_or_explicit(c->closedw, chan_closed_bit(c),
                            memory_order_seq_cst);
   mizu_unpark(&c->peer_pk);
+  chan_notify_signal(c);   /* an armed consumer's drain must surface CLOSED */
   return MIZU_OK;
 }
 
@@ -1166,6 +1335,7 @@ mizu_status mizu_channel_close(mizu_channel *c, double timeout_ms) {
   chan_flush(c);
   atomic_fetch_or_explicit(c->closedw, own, memory_order_seq_cst);
   mizu_unpark(&c->peer_pk);
+  chan_notify_signal(c);
 
   /* 3. rendezvous: the other side's bit, or its death confirmed */
   double deadline = mizu_deadline(timeout_ms);
@@ -1239,6 +1409,7 @@ mizu_status mizu_channel_info_get(const mizu_channel *c, mizu_channel_info *out)
   out->ledger_entries = c->h.fl.led_n;
   out->zc_open_hits = 0;
   out->zc_open_misses = 0;
+  out->notify_sends = c->stat_notify_sends;
   return MIZU_OK;
 }
 
@@ -1275,17 +1446,20 @@ static void chan_drain_wait(mizu_channel *c) {
     /* snapshot -> announce -> re-check -> sleep bounded: the consumer's
        head publish unparks us, a peer death fires the listener */
     uint32_t e = mizu_parker_snapshot(&c->self_pk);
-    atomic_store_explicit(c->self_parked, 1u, memory_order_relaxed);
+    atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_PARKED,
+                             memory_order_relaxed);
     atomic_thread_fence(memory_order_seq_cst);
     if (atomic_load_explicit(c->tx.head, memory_order_acquire) >=
         atomic_load_explicit(c->tx.tail, memory_order_acquire)) {
-      atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+      atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_PARKED,
+                              memory_order_relaxed);
       return;
     }
     mizu_park_bracket(&c->h.binding, 1);
     mizu_park(&c->self_pk, e, ms);
     mizu_park_bracket(&c->h.binding, 0);
-    atomic_store_explicit(c->self_parked, 0u, memory_order_relaxed);
+    atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_PARKED,
+                              memory_order_relaxed);
   }
 }
 
@@ -1296,7 +1470,10 @@ void mizu_channel_destroy(mizu_channel *c) {
     if (c->base != NULL) {
       atomic_fetch_or_explicit(c->closedw, chan_closed_bit(c),
                                memory_order_seq_cst);
-      if (c->pk_ok) mizu_unpark(&c->peer_pk);
+      if (c->pk_ok) {
+        mizu_unpark(&c->peer_pk);
+        chan_notify_signal(c);
+      }
       /* the close protocol's rendezvous, payload half: a live peer reads
          the in-flight tail before either side's teardown unlinks its
          region — the drain is never raced */
@@ -1333,6 +1510,24 @@ void mizu_channel_abandon(mizu_channel *c) {
     if (c->watch != NULL) {
       mizu_death_watch_abandon(c->watch);
       c->watch = NULL;
+    }
+    /* the child's own copies: the watch structs and the fds — the
+       endpoint path stays (the creating process may still use it) */
+    if (c->ntfy_watch != NULL) {
+      mizu_notify_watch_abandon(c->ntfy_watch);
+      c->ntfy_watch = NULL;
+    }
+    if (c->ntfy_dwatch != NULL) {
+      mizu_death_watch_abandon(c->ntfy_dwatch);
+      c->ntfy_dwatch = NULL;
+    }
+    if (c->ntfy_ep != NULL) {
+      mizu_notify_ep_close(c->ntfy_ep, 0);
+      c->ntfy_ep = NULL;
+    }
+    if (c->ntfy_tx != NULL) {
+      mizu_notify_tx_close(c->ntfy_tx);
+      c->ntfy_tx = NULL;
     }
     mizu_stage_rollback(&c->h);
     mizu_keepers_teardown(&c->h, c->keepers, c->pre.cap);

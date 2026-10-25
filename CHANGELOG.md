@@ -13,6 +13,34 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- Notify endpoints: an event-driven wake for a binding's async
+  integration. An armed consumer owns a named, pollable endpoint (Linux
+  an abstract-namespace datagram socket, macOS a bound filesystem
+  datagram socket under the liveness dir — a path past the `sun_path`
+  budget fails the arm with a recorded error — Windows an auto-reset
+  named event); the publisher signals it at the same already-synchronized
+  checkpoint where it tests the parked announce. The flag is
+  edge-triggered and rides the word the publish already loads and tests
+  (the channel's `parked` word, now a `MIZU_WAIT_*` bitmask; the pool
+  result slot's `waiter_slot` as `MIZU_WS_NOTIFY`, coalesced per
+  submitter through the new `mizu_sub_slot.notify` word), so the unarmed
+  publish path is instruction-identical and an armed burst costs one
+  signal. The watch is a persistent pure-C callback registration on the
+  death-listener machinery (Linux's epoll thread, macOS dispatch sources,
+  Windows thread-pool waits); a channel watch additionally chains the
+  peer's death watch onto the same callback, and the close paths signal
+  the endpoint alongside the parker unpark, so an armed consumer's drain
+  also surfaces CLOSED and PEER_GONE. New ext-tier verbs:
+  `mizu_channel_notify_arm` / `mizu_channel_notify_watch` /
+  `mizu_channel_notify_unwatch`, `mizu_pool_notify_arm` /
+  `mizu_pool_notify_watch` / `mizu_pool_notify_unwatch`, and
+  `mizu_pool_task_notify` (the per-result-slot announce/withdraw a
+  binding needs to arm individual tasks). New dump counters
+  `notify_sends` on `mizu_channel_info` and `mizu_pool_dump`. No ABI
+  bump: the layouts are unchanged (bit semantics on existing words, a
+  word carved out of `mizu_sub_slot` pad) and pre-release pins move in
+  lockstep as usual.
+
 - The labeled attribute shapes (the new `MIZU_CAP_LABELED` capability
   bit, 7): a named atomic vector (attrs exactly `names`, NA elements
   carried), a dim array with `dimnames` — both the unnamed-axes list

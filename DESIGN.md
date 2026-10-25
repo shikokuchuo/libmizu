@@ -49,6 +49,25 @@ No watchdog sits behind it.
 On POSIX, each park is timed: an untimed wait restarts silently under SA_RESTART, and a Ctrl-C then surfaces only at the next genuine wake.
 An indefinite park uses `MIZU_PARK_NOMINAL_MS` and relies on directed unparks.
 
+## Notify endpoints
+
+A waiting entity can own a notify endpoint: a named, pollable wake object the publisher signals at the same fenced checkpoint where it tests the parked announce.
+On Linux the endpoint is an abstract-namespace datagram socket (no filesystem entry, no unlink races, auto-cleanup on close); on macOS a bound filesystem datagram socket under the liveness dir (a path past the `sun_path` budget fails the arm with a recorded error); on Windows an auto-reset named event (`SetEvent` while signaled coalesces, the wait consumes it).
+Notify endpoints are a second wake-trigger class: like the death listeners, they are triggers only, never a verdict.
+The consumer's drain-and-recheck decides.
+
+The arm is the parker protocol's announce/re-check transplanted: arm stores the flag with a seq_cst RMW, fences, and reports availability, so either the publisher sees the flag or the armer sees the data.
+The flag is edge-triggered.
+It rides the word the publish already loads and tests — the channel's `parked` word as `MIZU_WAIT_NOTIFY` beside the park announce, the pool's `waiter_slot` as `MIZU_WS_NOTIFY` beside the submitter index — so the unarmed publish path runs the same load, the same compare, and the same not-taken branch as without the feature.
+The publisher clears the bit as it signals (the winner of the clear sends), so one signal moves per idle-to-data transition, never one per publish.
+The pool coalesces per submitter: the slot's gate selects the endpoint wake, and the first publisher past it clears the submitter's `notify` word — one signal per burst, however many workers publish.
+Spurious and stale signals are absorbed by the drain-and-recheck; a datagram queued while disarmed is dropped at the next arm.
+
+A terminal that publishes nothing still wakes an armed consumer.
+The channel's watch chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark.
+A pool submitter needs no chain: a worker death is failed into result publishes by the reaper, which reach the armed submitter through the ordinary `waiter_slot` path.
+The watch itself is a persistent registration on the death-listener machinery (Linux's epoll thread, macOS dispatch sources, Windows thread-pool waits), firing a pure-C callback off-thread; a hard kill leaves the macOS socket path as residue beside the `.live.*` files — the reaper's exact region grammar never unlinks suffixed names, and unlink-before-bind absorbs the residue.
+
 ## Payload framing tiers
 
 A frame is a 16-byte `mizu_slot_hdr` plus payload bytes.

@@ -19,7 +19,9 @@
 #include <sys/syscall.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/socket.h>
 #include <pthread.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -69,9 +71,14 @@ void mizu_unpark(mizu_parker *pk) {
 
 // Death listener -----------------------------------------------------------------
 
+/* The epoll set holds both record kinds; data.ptr dispatches on the
+   shared first member. */
+enum { MIZU_DL_DEATH, MIZU_DL_NOTIFY };
 enum { MIZU_DW_ACTIVE, MIZU_DW_FIRED, MIZU_DW_STOPPED };
+enum { MIZU_NW_ACTIVE, MIZU_NW_STOPPED };
 
 struct mizu_death_watch_s {
+  int kind;                         /* MIZU_DL_DEATH: the event dispatch tag */
   int pidfd;
   int state;
   int listed;                       /* on the registry; freed by the thread */
@@ -83,6 +90,20 @@ struct mizu_death_watch_s {
   struct mizu_death_watch_s *prev, *next;
 };
 
+/* The notify watch (notify.c's endpoint): persistent where the death
+   watch is one-shot — readability drains the endpoint socket, then fires
+   cb; no EPOLL_CTL_DEL after fire. The fd is a dup of the endpoint's, so
+   the endpoint may close while a stopped watch awaits its reap. */
+struct mizu_notify_watch_s {
+  int kind;                         /* MIZU_DL_NOTIFY */
+  int fd;
+  int state;
+  int listed;
+  void (*cb)(void *);
+  void *cb_arg;
+  struct mizu_notify_watch_s *prev, *next;
+};
+
 static pthread_mutex_t mizu_dl_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t mizu_dl_thread;
 static int mizu_dl_running = 0;
@@ -92,6 +113,7 @@ static int mizu_dl_evfd = -1;
 static pid_t mizu_dl_pid = 0;
 static int mizu_dl_atexit_set = 0;
 static struct mizu_death_watch_s *mizu_dl_watches = NULL;
+static struct mizu_notify_watch_s *mizu_dl_nwatches = NULL;
 
 /* A forked child inherits the parent's bookkeeping but not its thread
    (and possibly a mutex held at fork time): abandon everything and start
@@ -106,6 +128,7 @@ static void mizu_dl_fork_guard(void) {
   mizu_dl_running = 0;
   mizu_dl_shutdown = 0;
   mizu_dl_watches = NULL;
+  mizu_dl_nwatches = NULL;
   mizu_dl_pid = 0;
   pthread_mutex_init(&mizu_dl_mu, NULL);
 }
@@ -135,6 +158,15 @@ static void *mizu_dl_main(void *arg) {
         (void) r;
         continue;
       }
+      if (*(int *) evs[i].data.ptr == MIZU_DL_NOTIFY) {
+        struct mizu_notify_watch_s *nw = evs[i].data.ptr;
+        if (nw->state == MIZU_NW_ACTIVE) {
+          char buf[256];
+          while (recv(nw->fd, buf, sizeof(buf), 0) > 0) { }
+          if (nw->cb != NULL) nw->cb(nw->cb_arg);
+        }
+        continue;
+      }
       struct mizu_death_watch_s *w = evs[i].data.ptr;
       if (w->state == MIZU_DW_ACTIVE) {
         mizu_dw_fire(w);
@@ -156,6 +188,18 @@ static void *mizu_dl_main(void *arg) {
         if (w->prev) w->prev->next = w->next; else mizu_dl_watches = w->next;
         if (w->next) w->next->prev = w->prev;
         free(w);
+      }
+    }
+    for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches, *next; nw;
+         nw = next) {
+      next = nw->next;
+      if (nw->state == MIZU_NW_STOPPED) {
+        epoll_ctl(mizu_dl_epfd, EPOLL_CTL_DEL, nw->fd, NULL);
+        close(nw->fd);
+        if (nw->prev) nw->prev->next = nw->next;
+        else mizu_dl_nwatches = nw->next;
+        if (nw->next) nw->next->prev = nw->prev;
+        free(nw);
       }
     }
     int shut = mizu_dl_shutdown;
@@ -184,6 +228,21 @@ static void *mizu_dl_main(void *arg) {
     }
   }
   mizu_dl_watches = NULL;
+  for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches, *next; nw;
+       nw = next) {
+    next = nw->next;
+    if (nw->state == MIZU_NW_STOPPED) {
+      close(nw->fd);
+      free(nw);
+    } else {
+      if (nw->cb != NULL) nw->cb(nw->cb_arg);   /* conservative: a wake
+          trigger only — the drain-and-recheck absorbs a spurious fire */
+      close(nw->fd);
+      nw->fd = -1;
+      nw->listed = 0;
+    }
+  }
+  mizu_dl_nwatches = NULL;
   close(mizu_dl_epfd);
   close(mizu_dl_evfd);
   mizu_dl_epfd = mizu_dl_evfd = -1;
@@ -235,6 +294,7 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
 
   struct mizu_death_watch_s *w = calloc(1, sizeof(*w));
   if (w == NULL) return NULL;
+  w->kind = MIZU_DL_DEATH;
   MIZU_DW_INIT_COMMON(w, flag, pk, cb, cb_arg);
 
   int pidfd = (int) syscall(SYS_pidfd_open, (pid_t) pid, 0);
@@ -299,6 +359,72 @@ void mizu_death_watch_abandon(mizu_death_watch *w) {
   free(w);
 }
 
+// Notify watch ----------------------------------------------------------------
+
+mizu_notify_watch *mizu_notify_watch_start(intptr_t ep_handle,
+                                         void (*cb)(void *), void *ctx) {
+  mizu_dl_fork_guard();
+
+  struct mizu_notify_watch_s *w = calloc(1, sizeof(*w));
+  if (w == NULL) return NULL;
+  w->kind = MIZU_DL_NOTIFY;
+  w->cb = cb;
+  w->cb_arg = ctx;
+  /* a dup keeps the registration valid while the endpoint closes under a
+     stopped watch's reap; CLOEXEC so spawned children hold neither */
+  w->fd = fcntl((int) ep_handle, F_DUPFD_CLOEXEC, 0);
+  if (w->fd < 0) {
+    free(w);
+    return NULL;
+  }
+
+  pthread_mutex_lock(&mizu_dl_mu);
+  if (mizu_dl_ensure_started() != 0) {
+    pthread_mutex_unlock(&mizu_dl_mu);
+    close(w->fd);
+    free(w);
+    return NULL;
+  }
+  w->state = MIZU_NW_ACTIVE;
+  w->listed = 1;
+  w->next = mizu_dl_nwatches;
+  if (mizu_dl_nwatches) mizu_dl_nwatches->prev = w;
+  mizu_dl_nwatches = w;
+  struct epoll_event ev = {.events = EPOLLIN, .data = {.ptr = w}};
+  if (epoll_ctl(mizu_dl_epfd, EPOLL_CTL_ADD, w->fd, &ev) != 0) {
+    if (w->next) w->next->prev = NULL;
+    mizu_dl_nwatches = w->next;
+    pthread_mutex_unlock(&mizu_dl_mu);
+    close(w->fd);
+    free(w);
+    return NULL;
+  }
+  pthread_mutex_unlock(&mizu_dl_mu);
+  return w;
+}
+
+void mizu_notify_watch_stop(mizu_notify_watch *w) {
+  mizu_dl_fork_guard();
+  if (w->listed && mizu_dl_running) {
+    /* as the death watch's stop: the mutex synchronizes with a callback
+       in flight; the listener reaps (DELs, closes the dup, frees) after
+       the poke */
+    pthread_mutex_lock(&mizu_dl_mu);
+    w->state = MIZU_NW_STOPPED;
+    pthread_mutex_unlock(&mizu_dl_mu);
+    mizu_dl_poke();
+    return;
+  }
+  if (w->fd >= 0) close(w->fd);
+  free(w);
+}
+
+void mizu_notify_watch_abandon(mizu_notify_watch *w) {
+  mizu_dl_fork_guard();
+  if (w->fd >= 0) close(w->fd);
+  free(w);
+}
+
 void mizu_death_listener_teardown(void) {
   mizu_dl_fork_guard();
   if (!mizu_dl_running) return;
@@ -321,6 +447,19 @@ void mizu_death_listener_teardown(void) {
     }
   }
   mizu_dl_watches = NULL;
+  for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches, *next; nw;
+       nw = next) {
+    next = nw->next;
+    if (nw->state == MIZU_NW_STOPPED) {
+      close(nw->fd);
+      free(nw);
+    } else {
+      close(nw->fd);
+      nw->fd = -1;
+      nw->listed = 0;
+    }
+  }
+  mizu_dl_nwatches = NULL;
   close(mizu_dl_epfd);
   close(mizu_dl_evfd);
   mizu_dl_epfd = mizu_dl_evfd = -1;

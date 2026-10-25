@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/socket.h>
 
 /* Darwin's private ulock syscalls have no public header: the reserved
    names are the ABI. */
@@ -154,6 +155,67 @@ void mizu_death_watch_abandon(mizu_death_watch *w) {
 }
 
 void mizu_death_listener_teardown(void) {
+}
+
+// Notify watch ----------------------------------------------------------------
+
+/* The notify endpoint watch: a DISPATCH_SOURCE_TYPE_READ on the endpoint
+   socket — persistent (no re-arm), each fire drains the socket then runs
+   the callback. The fd is the endpoint's own: unwatch precedes the
+   endpoint close by contract, and the stop sync guarantees no handler
+   touches it afterwards. */
+struct mizu_notify_watch_s {
+  dispatch_queue_t queue;            /* per-watch serial queue: the stop sync */
+  dispatch_source_t source;
+  int fd;                            /* borrowed from the endpoint */
+  void (*cb)(void *);
+  void *cb_arg;
+};
+
+static void mizu_nw_event(void *ctx) {
+  struct mizu_notify_watch_s *w = ctx;
+  char buf[256];
+  while (recv(w->fd, buf, sizeof(buf), 0) > 0) { }
+  if (w->cb != NULL) w->cb(w->cb_arg);
+}
+
+mizu_notify_watch *mizu_notify_watch_start(intptr_t ep_handle,
+                                         void (*cb)(void *), void *ctx) {
+  struct mizu_notify_watch_s *w = calloc(1, sizeof(*w));
+  if (w == NULL) return NULL;
+  w->fd = (int) ep_handle;
+  w->cb = cb;
+  w->cb_arg = ctx;
+  w->queue = dispatch_queue_create("mizu.notify", DISPATCH_QUEUE_SERIAL);
+  if (w->queue == NULL) {
+    free(w);
+    return NULL;
+  }
+  w->source = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ,
+                                     (uintptr_t) w->fd, 0, w->queue);
+  if (w->source == NULL) {
+    dispatch_release(w->queue);
+    free(w);
+    return NULL;
+  }
+  dispatch_set_context(w->source, w);
+  dispatch_source_set_event_handler_f(w->source, mizu_nw_event);
+  dispatch_resume(w->source);
+  return w;
+}
+
+void mizu_notify_watch_stop(mizu_notify_watch *w) {
+  dispatch_source_cancel(w->source);
+  /* the death watch's stop sync: once this returns, any in-flight
+     handler has completed and a cancelled source submits no more */
+  dispatch_sync_f(w->queue, NULL, mizu_dw_noop);
+  dispatch_release(w->source);
+  dispatch_release(w->queue);
+  free(w);
+}
+
+void mizu_notify_watch_abandon(mizu_notify_watch *w) {
+  free(w);
 }
 
 #endif /* __APPLE__ */

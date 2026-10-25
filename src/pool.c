@@ -130,6 +130,16 @@ struct mizu_pool_s {
 
   _Atomic int owner_dead;        /* death-listener flag: wake trigger only */
   mizu_death_watch *watch;
+
+  /* notify (notify.c): the submitter's endpoint is created lazily at the
+     first arm/watch; the sender cache is per submitter slot, opened on
+     the first armed announce this handle publishes past */
+  mizu_notify_ep *ntfy_ep;
+  mizu_notify_watch *ntfy_watch;
+  void (*ntfy_cb)(void *);
+  void *ntfy_cb_ctx;
+  mizu_notify_tx **ntfy_tx;    /* [max_submitters], lazily allocated */
+  uint64_t stat_notify_sends;
 };
 
 // Layout ----------------------------------------------------------------------------
@@ -394,6 +404,23 @@ static void pool_release(mizu_pool *p) {
         p->wk_watch[i] = NULL;
       }
   }
+  /* notify teardown: the watch stops before the endpoint closes (it
+     borrows the endpoint's fd); the endpoint's macOS socket path is ours,
+     so it unlinks here */
+  if (p->ntfy_watch != NULL) {
+    mizu_notify_watch_stop(p->ntfy_watch);
+    p->ntfy_watch = NULL;
+  }
+  if (p->ntfy_ep != NULL) {
+    mizu_notify_ep_close(p->ntfy_ep, 1);
+    p->ntfy_ep = NULL;
+  }
+  if (p->ntfy_tx != NULL) {
+    for (uint32_t j = 0; j < p->hdr.max_submitters; j++)
+      if (p->ntfy_tx[j] != NULL) mizu_notify_tx_close(p->ntfy_tx[j]);
+    free(p->ntfy_tx);
+    p->ntfy_tx = NULL;
+  }
   /* the submitter slot outlives its handle no longer than it has to:
        with nothing PENDING, FREE lets the next attach claim it outright
        (parkers still attached for the keeper-drop wakes) */
@@ -467,10 +494,9 @@ static void pool_shutdown_broadcast(mizu_pool *p) {
                                                 MIZU_RS_CANCEL,
                                                 memory_order_seq_cst,
                                                 memory_order_relaxed)) {
-      int32_t ws = atomic_load_explicit(&rs->waiter_slot,
-                                        memory_order_acquire);
-      if (ws >= 0 && (uint32_t) ws < p->hdr.max_submitters)
-        mizu_unpark(pool_sub_pk(p, (uint32_t) ws));
+      /* the wake logic lives once: plain announces unpark, NOTIFY ones
+         signal the armed submitter's endpoint */
+      pool_unpark_result_waiter(p, rs);
     }
   }
 }
@@ -854,6 +880,22 @@ void mizu_pool_abandon(mizu_pool *p) {
           mizu_death_watch_abandon(p->wk_watch[i]);
           p->wk_watch[i] = NULL;
         }
+    /* the child's own copies: the watch structs and the fds — the
+       endpoint path stays (the creating process may still use it) */
+    if (p->ntfy_watch != NULL) {
+      mizu_notify_watch_abandon(p->ntfy_watch);
+      p->ntfy_watch = NULL;
+    }
+    if (p->ntfy_ep != NULL) {
+      mizu_notify_ep_close(p->ntfy_ep, 0);
+      p->ntfy_ep = NULL;
+    }
+    if (p->ntfy_tx != NULL) {
+      for (uint32_t j = 0; j < p->hdr.max_submitters; j++)
+        if (p->ntfy_tx[j] != NULL) mizu_notify_tx_close(p->ntfy_tx[j]);
+      free(p->ntfy_tx);
+      p->ntfy_tx = NULL;
+    }
     mizu_stage_rollback(&p->h);
     mizu_keepers_teardown(&p->h, p->keepers, p->keepers_n);
     mizu_keepers_teardown(&p->h, p->sub_keepers, p->sub_keepers_n);
@@ -1454,10 +1496,50 @@ static int pool_seq_match(mizu_rs_hdr *rs, uint64_t seq) {
           MIZU_TASK_SEQ_MAX) == seq;
 }
 
+/* The submitter's notify endpoint, created lazily at the first arm or
+   watch and named by its slot: the publishers derive the same name. */
+static mizu_notify_ep *pool_notify_ep(mizu_pool *p) {
+  if (p->ntfy_ep != NULL) return p->ntfy_ep;
+  char tag[16];
+  snprintf(tag, sizeof(tag), "sub%d", p->sub_slot);
+  const char *err = NULL;
+  p->ntfy_ep = mizu_notify_ep_open(p->livedir, p->shm.name, tag, &err);
+  if (p->ntfy_ep == NULL)
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "%s", err);
+  return p->ntfy_ep;
+}
+
+/* One signal per burst: the coalescing word's clear admits exactly one
+   sender, however many workers publish to the armed submitter. */
+static void pool_notify_send(mizu_pool *p, uint32_t j) {
+  if (p->ntfy_tx == NULL) {
+    p->ntfy_tx = calloc(p->hdr.max_submitters, sizeof(*p->ntfy_tx));
+    if (p->ntfy_tx == NULL) return;
+  }
+  if (p->ntfy_tx[j] == NULL) {
+    char tag[16];
+    snprintf(tag, sizeof(tag), "sub%u", j);
+    p->ntfy_tx[j] = mizu_notify_tx_open(p->livedir, p->shm.name, tag);
+    if (p->ntfy_tx[j] == NULL) return;   /* the next armed sighting retries */
+  }
+  mizu_notify_tx_send(p->ntfy_tx[j]);
+  p->stat_notify_sends++;
+}
+
 static void pool_unpark_result_waiter(mizu_pool *p, mizu_rs_hdr *rs) {
   int32_t ws = atomic_load_explicit(&rs->waiter_slot, memory_order_acquire);
-  if (ws >= 0 && (uint32_t) ws < p->hdr.max_submitters)
-    mizu_unpark(pool_sub_pk(p, (uint32_t) ws));
+  if (ws < 0) return;
+  uint32_t j = (uint32_t) (ws & ~MIZU_WS_NOTIFY);
+  if (j >= p->hdr.max_submitters) return;
+  /* a NOTIFY announce wants the endpoint signal, a plain one the unpark;
+     the un-announced case is the load and the not-taken branch exactly
+     as without the feature */
+  if ((ws & MIZU_WS_NOTIFY) == 0) {
+    mizu_unpark(pool_sub_pk(p, j));
+  } else if ((atomic_fetch_and_explicit(&p->sub[j].notify, ~MIZU_WAIT_NOTIFY,
+                                        memory_order_acq_rel) & MIZU_WAIT_NOTIFY) != 0) {
+    pool_notify_send(p, j);
+  }
 }
 
 /* Keeper-drop wake for the worker that produced a freed result slot, gated
@@ -3822,6 +3904,110 @@ mizu_status mizu_pool_collect_all(mizu_pool *p, const mizu_task *tasks,
                                timeout_ms);
 }
 
+// Notify arm and watch -------------------------------------------------------------
+
+mizu_status mizu_pool_notify_arm(mizu_pool *p, int on) {
+  if (pool_get(p) == NULL) return MIZU_ERR;
+  if (p->sub_slot < 0) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "not a submitter's handle");
+    return MIZU_ERR;
+  }
+  mizu_sub_slot *s = &p->sub[p->sub_slot];
+  if (!on) {
+    atomic_fetch_and_explicit(&s->notify, ~MIZU_WAIT_NOTIFY,
+                              memory_order_seq_cst);
+    return MIZU_OK;
+  }
+  if (pool_notify_ep(p) == NULL) return MIZU_ERR;
+  /* drop signals queued while disarmed: a stale datagram costs one empty
+     drain, never a spurious fresh signal */
+  mizu_notify_ep_drain(p->ntfy_ep);
+  /* the task-slot announces are already in place (mizu_pool_task_notify
+     goes first): announce the coalescing word -> fence -> the caller's
+     terminal scan sees whatever was already published */
+  atomic_fetch_or_explicit(&s->notify, MIZU_WAIT_NOTIFY,
+                           memory_order_seq_cst);
+  atomic_thread_fence(memory_order_seq_cst);
+  return MIZU_OK;
+}
+
+mizu_status mizu_pool_task_notify(mizu_pool *p, const mizu_task *tasks,
+                                 size_t n, int on) {
+  if (pool_get(p) == NULL) return MIZU_ERR;
+  if (p->sub_slot < 0) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "not a submitter's handle");
+    return MIZU_ERR;
+  }
+  if (tasks == NULL && n > 0) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                   "expected a non-empty task array");
+    return MIZU_ERR;
+  }
+  const int32_t announce = (int32_t) p->sub_slot | MIZU_WS_NOTIFY;
+  for (size_t i = 0; i < n; i++) {
+    if (mizu_task_rs_index(&tasks[i]) >= p->hdr.result_slots) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "invalid task handle");
+      return MIZU_ERR;
+    }
+    mizu_rs_hdr *rs = pool_rs(p, mizu_task_rs_index(&tasks[i]));
+    if (!pool_seq_match(rs, mizu_task_seq(&tasks[i]))) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                     "task handle already collected or invalidated");
+      return MIZU_ERR;
+    }
+    if (on) {
+      /* O(1): the submitter owns the slot from submit — one writer, so
+         the announce stays a plain store */
+      atomic_store_explicit(&rs->waiter_slot, announce, memory_order_relaxed);
+    } else {
+      /* withdraw only our own announce: a consumed one (or a fresh
+         blocking waiter's) is left alone */
+      if (atomic_load_explicit(&rs->waiter_slot, memory_order_relaxed) ==
+          announce)
+        atomic_store_explicit(&rs->waiter_slot, -1, memory_order_relaxed);
+    }
+  }
+  return MIZU_OK;
+}
+
+mizu_status mizu_pool_notify_watch(mizu_pool *p, void (*cb)(void *),
+                                  void *ctx) {
+  if (pool_get(p) == NULL) return MIZU_ERR;
+  if (p->sub_slot < 0) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "not a submitter's handle");
+    return MIZU_ERR;
+  }
+  if (cb == NULL) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "expected a notify callback");
+    return MIZU_ERR;
+  }
+  if (p->ntfy_watch != NULL) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "pool already has a notify watch");
+    return MIZU_ERR;
+  }
+  if (pool_notify_ep(p) == NULL) return MIZU_ERR;
+  p->ntfy_watch =
+    mizu_notify_watch_start(mizu_notify_ep_handle(p->ntfy_ep), cb, ctx);
+  if (p->ntfy_watch == NULL) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "cannot start notify watch");
+    return MIZU_ERR;
+  }
+  p->ntfy_cb = cb;
+  p->ntfy_cb_ctx = ctx;
+  return MIZU_OK;
+}
+
+mizu_status mizu_pool_notify_unwatch(mizu_pool *p) {
+  if (pool_get(p) == NULL) return MIZU_ERR;
+  if (p->ntfy_watch != NULL) {
+    mizu_notify_watch_stop(p->ntfy_watch);
+    p->ntfy_watch = NULL;
+  }
+  p->ntfy_cb = NULL;
+  p->ntfy_cb_ctx = NULL;
+  return MIZU_OK;
+}
+
 /* Advisory and discard-only, never preemptive: a task already executing
    runs to completion and its result is dropped by the worker's failed
    publish CAS. Total — cancel runs from binding unwind paths, so a stale
@@ -4261,6 +4447,7 @@ mizu_status mizu_pool_dump_get(const mizu_pool *p, mizu_pool_dump *out) {
   out->ledger_entries = p->h.fl.led_n;
   out->help_wanted =
     (int32_t) atomic_load_explicit(p->help_wanted, memory_order_acquire);
+  out->notify_sends = p->stat_notify_sends;
   return MIZU_OK;
 }
 
@@ -4287,8 +4474,9 @@ mizu_status mizu_pool_tasks_get(const mizu_pool *p, mizu_rs_row *out,
         atomic_load_explicit(&rs->sequence, memory_order_relaxed);
       out[m].worker_slot =
         atomic_load_explicit(&rs->worker_slot, memory_order_acquire);
-      out[m].waiter_slot =
-        atomic_load_explicit(&rs->waiter_slot, memory_order_acquire);
+      int32_t ws = atomic_load_explicit(&rs->waiter_slot,
+                                        memory_order_acquire);
+      out[m].waiter_slot = ws < 0 ? ws : (ws & ~MIZU_WS_NOTIFY);
       m++;
     }
     total++;

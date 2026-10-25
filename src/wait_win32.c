@@ -120,4 +120,46 @@ void mizu_death_watch_abandon(mizu_death_watch *w) {
 void mizu_death_listener_teardown(void) {
 }
 
+// Notify watch ----------------------------------------------------------------
+
+/* The notify endpoint watch: a persistent thread-pool wait on the
+   endpoint event (no WT_EXECUTEONLYONCE) — no handle cap, no thread of
+   our own. The event is auto-reset: each fire consumes the signal. */
+struct mizu_notify_watch_s {
+  HANDLE wait;
+  void (*cb)(void *);
+  void *cb_arg;
+};
+
+static VOID CALLBACK mizu_nw_cb(PVOID ctx, BOOLEAN timed_out) {
+  (void) timed_out;
+  struct mizu_notify_watch_s *w = ctx;
+  if (w->cb != NULL) w->cb(w->cb_arg);
+}
+
+mizu_notify_watch *mizu_notify_watch_start(intptr_t ep_handle,
+                                         void (*cb)(void *), void *ctx) {
+  struct mizu_notify_watch_s *w = calloc(1, sizeof(*w));
+  if (w == NULL) return NULL;
+  w->cb = cb;
+  w->cb_arg = ctx;
+  if (!RegisterWaitForSingleObject(&w->wait, (HANDLE) ep_handle,
+                                   mizu_nw_cb, w, INFINITE, 0)) {
+    free(w);
+    return NULL;
+  }
+  return w;
+}
+
+void mizu_notify_watch_stop(mizu_notify_watch *w) {
+  /* blocking unregister, as the death watch's: returns only after any
+     in-flight callback has completed */
+  if (w->wait != NULL) UnregisterWaitEx(w->wait, INVALID_HANDLE_VALUE);
+  free(w);
+}
+
+void mizu_notify_watch_abandon(mizu_notify_watch *w) {
+  free(w);
+}
+
 #endif /* _WIN32 */

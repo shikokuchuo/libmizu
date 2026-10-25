@@ -267,6 +267,53 @@ mizu_death_watch *mizu_death_watch_start2(long pid, _Atomic int *flag,
    and the struct. */
 void mizu_death_watch_abandon(mizu_death_watch *w);
 
+// Notify endpoints (notify.c; the watches ride wait_*.c) -------------------------
+
+/* The contract is the ext-tier comment block on mizu_channel_notify_arm.
+   The endpoint/tx are heap records owned by one handle; the watch is the
+   listener machinery's persistent registration. Path/address derivation
+   takes the region name (the suffix discipline: both sides derive from
+   the recorded livedir + region, never resolve independently). */
+
+typedef struct mizu_notify_ep_s mizu_notify_ep;
+typedef struct mizu_notify_tx_s mizu_notify_tx;
+typedef struct mizu_notify_watch_s mizu_notify_watch;
+
+/* The consumer endpoint: create + bind. NULL + *err (static message) on
+   failure — on macOS a livedir-derived path past the sun_path budget. */
+mizu_notify_ep *mizu_notify_ep_open(const char *livedir, const char *region,
+                                  const char *tag, const char **err);
+/* The pollable OS handle the watch registers (socket fd / event HANDLE). */
+intptr_t mizu_notify_ep_handle(const mizu_notify_ep *ep);
+/* Drop queued signals (the arm path: a datagram that landed while
+   disarmed costs one empty drain, never a spurious fresh signal). */
+void mizu_notify_ep_drain(mizu_notify_ep *ep);
+/* Close; unlink_path != 0 also removes the macOS socket path. */
+void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path);
+
+/* The producer's sender to one peer endpoint, opened lazily on the first
+   armed sighting. send is fire-and-forget: a stale or absent endpoint
+   (ENOENT/ECONNREFUSED) and a full receive buffer (EAGAIN — a signal is
+   already queued) are absorbed. NULL on open failure (the sighting that
+   failed retries at the next one). */
+mizu_notify_tx *mizu_notify_tx_open(const char *livedir, const char *region,
+                                  const char *tag);
+void mizu_notify_tx_send(mizu_notify_tx *tx);
+void mizu_notify_tx_close(mizu_notify_tx *tx);
+
+/* The endpoint watch: a persistent registration beside the death watch —
+   every endpoint signal fires cb(ctx) on the listener's thread (the
+   POSIX implementations drain the socket first). cb is pure C, may run
+   on any thread, and its targets must stay valid until
+   mizu_notify_watch_stop returns: stop synchronizes with an in-flight
+   callback. NULL on failure. */
+mizu_notify_watch *mizu_notify_watch_start(intptr_t ep_handle,
+                                         void (*cb)(void *), void *ctx);
+void mizu_notify_watch_stop(mizu_notify_watch *w);
+/* The forked-child release (the abandon path): the child's own fd copy
+   and the struct; no listener interaction. */
+void mizu_notify_watch_abandon(mizu_notify_watch *w);
+
 // Liveness lock internals (liveness.c) ------------------------------------------
 
 /* Liveness path sizing: a lock path is "<livedir>/mizu_<name>...", and

@@ -56,7 +56,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_handle_keep_out);
   refs += sink((mizu_any_fn) &mizu_handle_spill_info);
 
-  /* Parker, death watch, liveness, preamble. */
+  /* Parker, death watch, notify, liveness, preamble. */
   refs += sink((mizu_any_fn) &mizu_parker_attach);
   refs += sink((mizu_any_fn) &mizu_parker_detach);
   refs += sink((mizu_any_fn) &mizu_park);
@@ -64,6 +64,13 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_death_watch_start);
   refs += sink((mizu_any_fn) &mizu_death_watch_stop);
   refs += sink((mizu_any_fn) &mizu_death_listener_teardown);
+  refs += sink((mizu_any_fn) &mizu_channel_notify_arm);
+  refs += sink((mizu_any_fn) &mizu_channel_notify_watch);
+  refs += sink((mizu_any_fn) &mizu_channel_notify_unwatch);
+  refs += sink((mizu_any_fn) &mizu_pool_notify_arm);
+  refs += sink((mizu_any_fn) &mizu_pool_notify_watch);
+  refs += sink((mizu_any_fn) &mizu_pool_notify_unwatch);
+  refs += sink((mizu_any_fn) &mizu_pool_task_notify);
   refs += sink((mizu_any_fn) &mizu_live_dir);
   refs += sink((mizu_any_fn) &mizu_live_open);
   refs += sink((mizu_any_fn) &mizu_live_try);
@@ -190,7 +197,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 124);
+  assert(refs == 131);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

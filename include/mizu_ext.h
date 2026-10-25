@@ -561,6 +561,59 @@ MIZU_API void mizu_death_watch_stop(mizu_death_watch *w);
    per-watch). */
 MIZU_API void mizu_death_listener_teardown(void);
 
+// Notify endpoints (notify.c; the watches ride the wait_*.c listener machinery) ---
+
+/** Event-driven wakes for a binding's async integration: an armed
+   consumer owns a named, pollable endpoint (Linux an abstract-namespace
+   datagram socket, macOS a bound filesystem datagram socket under the
+   liveness dir, Windows an auto-reset named event); the publisher
+   signals it at the same fenced checkpoint where it tests the parked
+   announce, so the arm/re-check discipline is the parker protocol
+   transplanted. The arm is edge-triggered: the publisher clears the bit
+   as it signals (one signal per idle-to-data transition, never one per
+   publish), and spurious or stale signals are absorbed by the consumer's
+   drain-and-recheck. The unarmed publish path is unchanged: the notify
+   bit rides the word the publish already loads and tests.
+   An endpoint is created lazily at the first arm or watch and lives
+   until the handle's destroy; a graceful destroy unlinks the macOS
+   socket path, a hard kill leaves it as residue beside the .live.*
+   files (unlink-before-bind absorbs it; the reaper's exact region
+   grammar never touches suffixed names).
+   arm on a MIZU_FLAG_SPIN channel fails MIZU_ERR: the spin publish path
+   skips the wake checkpoint by design.
+   The watch registers a persistent pure-C callback on the endpoint: it
+   may run on any thread and its targets must stay valid until unwatch
+   (or destroy) returns — stop synchronizes with an in-flight callback.
+   The channel watch additionally chains the peer's death watch onto the
+   same callback, and the close paths signal the endpoint alongside the
+   parker unpark, so an armed consumer's drain also surfaces CLOSED and
+   PEER_GONE, never only publishes. A pool submitter needs no chain: a
+   worker death is failed into result publishes by the reaper, which
+   reach the armed submitter through the ordinary waiter_slot path.
+   mizu_channel_notify_arm(on != 0) sets MIZU_WAIT_NOTIFY in the side's
+   parked word and reports availability in *avail_out (may be NULL): the
+   caller drains what is already there synchronously, then stays armed.
+   Re-arms are idempotent; on == 0 disarms.
+   mizu_pool_notify_arm is the submitter-half arm (the coalescing word);
+   mizu_pool_task_notify announces (on != 0) or withdraws (on == 0) the
+   MIZU_WS_NOTIFY gate on each task's result slot — announce before arming
+   the word, then re-check the tasks' terminal states (the sync scan
+   resolves whatever was already published). Withdrawing restores -1 on
+   slots still holding this submitter's announce; a publish racing it at
+   worst sends one absorbed signal or skips a wake nobody waits on. Both
+   pool verbs need a handle with a claimed submitter slot. */
+MIZU_API mizu_status mizu_channel_notify_arm(mizu_channel *, int on,
+                                          int *avail_out);
+MIZU_API mizu_status mizu_channel_notify_watch(mizu_channel *,
+                                            void (*cb)(void *), void *ctx);
+MIZU_API mizu_status mizu_channel_notify_unwatch(mizu_channel *);
+MIZU_API mizu_status mizu_pool_notify_arm(mizu_pool *, int on);
+MIZU_API mizu_status mizu_pool_notify_watch(mizu_pool *,
+                                         void (*cb)(void *), void *ctx);
+MIZU_API mizu_status mizu_pool_notify_unwatch(mizu_pool *);
+MIZU_API mizu_status mizu_pool_task_notify(mizu_pool *, const mizu_task *,
+                                        size_t n, int on);
+
 // Liveness lock (liveness.c) ---------------------------------------------------
 
 /** Exclusive flock (POSIX) / LockFileEx (Windows) held for a process's

@@ -187,6 +187,14 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 #define MIZU_ENTITY_EPOCH   0
 #define MIZU_ENTITY_PARKED  4
 #define MIZU_ENTITY_REG     8
+/** The entity block's parked word (MIZU_ENTITY_PARKED) is a bitmask: bit 0
+   is the park announce (the publisher's `!= 0` test keeps its meaning);
+   bit 1 arms the side's notify endpoint ("signal my endpoint when data is
+   published for me" — the publisher clears it as it signals, so one signal
+   per idle transition); bit 2 is reserved. The word has two writers (the
+   side itself and the publisher's clear): every store is an RMW. */
+#define MIZU_WAIT_PARKED  1u
+#define MIZU_WAIT_NOTIFY  2u
 /** Offset 16 of the 64-byte entity block: the side's identity word
    (MIZU_IDENT in mizu_ext.h — language byte, reader-capability mask).
    The host writes it at create, before the token exists; the peer at
@@ -440,16 +448,27 @@ typedef struct mizu_sub_slot_s {
   uint64_t         live_ino;
   MIZU_ATOMIC(uint64_t) stat_spills;
   MIZU_ATOMIC(uint64_t) stat_spill_reuse;
-  uint8_t          pad[8];
+  MIZU_ATOMIC(uint32_t) notify;  /**< the submitter's notify-arm bitmask
+      (MIZU_WAIT_*; the coalescing word the first publisher per burst
+      clears as it signals the submitter's endpoint) */
+  uint8_t          pad[4];
 } mizu_sub_slot;
 
 MIZU_STATIC_ASSERT(sizeof(mizu_sub_slot) == 64, "mizu_sub_slot is the wire format");
+
+/** Bit 30 of mizu_rs_hdr.waiter_slot: the waiter wants a signal on the
+   submitter's notify endpoint instead of an unpark. The value stays
+   non-negative, so the publisher's `>= 0` test is unchanged; the taken
+   branch masks the bit to find the submitter. One writer regime per slot
+   (the submitter), so announce and withdraw stay plain stores. */
+#define MIZU_WS_NOTIFY  (INT32_C(1) << 30)
 
 /** Result slot header; the payload framing header sits at offset 24 and
    payload bytes at 40. */
 typedef struct mizu_rs_hdr_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_RS_* */
-  MIZU_ATOMIC(int32_t)  waiter_slot;   /**< submitter slot parked on this (-1) */
+  MIZU_ATOMIC(int32_t)  waiter_slot;   /**< submitter slot parked on this (-1;
+      MIZU_WS_NOTIFY OR'd when the wake is a notify signal) */
   MIZU_ATOMIC(uint64_t) sequence;      /**< increments on reuse: stale-handle check */
   MIZU_ATOMIC(int32_t)  worker_slot;   /**< executing worker (-1 until claimed) */
   uint32_t         pad;
@@ -691,6 +710,8 @@ typedef struct mizu_channel_info_s {
   uint64_t ledger_entries;                      /**< process-local */
   uint64_t zc_open_hits, zc_open_misses;        /**< binding-owned view cache;
    the core fills 0 */
+  uint64_t notify_sends;                        /**< process-local: notify
+   endpoint signals sent (armed peers only) */
 } mizu_channel_info;
 
 MIZU_API mizu_status mizu_channel_info_get(const mizu_channel *,
@@ -985,6 +1006,8 @@ typedef struct mizu_pool_dump_s {
   uint64_t collect_parks;                       /**< handle-local */
   uint64_t ledger_entries;                      /**< handle-local */
   int32_t help_wanted;
+  uint64_t notify_sends;                        /**< handle-local: notify
+   endpoint signals sent (armed submitters only) */
 } mizu_pool_dump;
 
 /** One non-FREE result-slot row (a dump's task table). */

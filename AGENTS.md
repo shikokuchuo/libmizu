@@ -27,9 +27,10 @@ RngStreams, doxygen-awesome-css).
   conventions, and the repo layout.
 - `CITATION.cff` — citation metadata; same author block as the bindings'.
 - `DESIGN.md` — design authority: invariants the implementation maintains
-  (wire format, parker protocol, payload tiers, binding seam, retain table,
-  zero-copy, crash atomicity, pool mechanics, ABI discipline). Code comments
-  reference it.
+  (wire format, parker protocol, notify endpoints, payload tiers, the 'I'
+  interchange codec — the byte authority for every cross-language format —
+  binding seam, retain table, zero-copy, crash atomicity, pool mechanics,
+  ABI discipline). Code comments reference it.
 - `src/` — implementation. Every TU is platform-guarded internally, so all
   sources compile on every platform (a foreign platform's file is empty).
   Main pieces: region layer (`shm.c`, `shm_rw.c`, `preamble.c`,
@@ -42,18 +43,33 @@ RngStreams, doxygen-awesome-css).
   `mizu_pool_task_release`, `mizu_pool_submit_batch_fn`), the raw-tier
   staging reservation (`stage_raw.c` — `mizu_stage_raw` /
   `mizu_stage_raw_spill`), the map morsel-claim protocol (`morsel.c` —
-  `mizu_morsel_*`), and the Arrow frame writer (`arrow.c` — the Arrow C
-  Data Interface → MIZL writer, promoted from pymizu's shmframe.c:
+  `mizu_morsel_*`), the 'I' interchange cursor (`interop.c` — the
+  validating pull cursor `mizu_ix_open` / `_next` / `_end`, ext tier,
+  plus the exported-only task-stream decode shim `mizu_ixt_open` /
+  `_want_code` / `_want_list` / `_want_dict`; the emit half is the
+  `mizu_ix_put_*` dual-form helpers in `mizu_ext.h`, and the byte-shape
+  helpers `mizu_ix_utf8_valid` / `mizu_ix_tag_of` / `mizu_ix_write_err` /
+  `mizu_ix_skip` / `mizu_ix_attr_reserved` single-source the rules both
+  bindings share), the notify endpoints (`notify.c` —
+  `mizu_channel_notify_arm` / `_watch` / `_unwatch`,
+  `mizu_pool_notify_arm` / `_watch` / `_unwatch`,
+  `mizu_pool_task_notify`), and the Arrow frame writer (`arrow.c` — the
+  Arrow C Data Interface → MIZL writer, promoted from pymizu's shmframe.c:
   `mizu_arrow_open` / `_remote` / `_root_blob` / `_tz` / `_size` /
   `_stage` / `_close` / `_col_info` plus the `mizu_cvt_*` conversion
-  kernels; the ABI structs live in `mizu_ext.h` under the spec's two
-  include guards. The writer borrows the caller's ArrowArray structs
+  kernels, the inline small-table form `mizu_arrow_write_ix` /
+  `_write_ix_col` (one complete 'I' stream off the Arrow buffers), the
+  per-column ext writers `mizu_arrow_col_body` / `_col_blob`, and the
+  dual-form accessors `mizu_arrow_valid` / `mizu_arrow_str_at`; the ABI
+  structs live in `mizu_ext.h` under the spec's two include guards. The
+  writer borrows the caller's ArrowArray structs
   AND the batches pointer array — both must outlive the handle until
   `mizu_arrow_close`; the size pass is lazy-memoized, re-running after
   an override). Also: `ext.c`
   (exported half of `mizu_ext.h`; excluded from the amalgamation, which
   already carries the inlines), `err.c` (handle-bound error recorders),
-  `rng_jump.c` (L'Ecuyer MRG32k3a stream jumping, for a future mizu_map),
+  `rng_jump.c` (L'Ecuyer MRG32k3a stream jumping, the mizu_map seed
+  kernel),
   `tune.c` (`mizu_tune` — glibc malloc thresholds, called by the binding
   at load; GLIBC_TUNABLES wins).
   Platform waiters: `wait_linux.c` (futex), `wait_macos.c` (`__ulock`),
@@ -65,7 +81,14 @@ RngStreams, doxygen-awesome-css).
   and creates are born huge on kernel >= 6.1 (one fault per extent +
   MADV_COLLAPSE, MADV_POPULATE_WRITE as the failure fallback and over a
   non-extent tail); the free-list-insert collapse remains as the heal
-  path for fallback-created regions.
+  path for fallback-created regions. The spill free list scales for
+  GC-batched recycling; on Linux, a spill pop miss with outstanding lent
+  bytes past `MIZU_ZC_LENT_BUDGET` (256 MB) latches the handle's `churn`
+  flag, degrading zc staging to the copy tiers until reclaims drop below
+  the budget (a submit-time quota sweep lifts it on churned pool
+  submitters); `mizu_channel_destroy` waits (bounded, verdict-gated) for
+  the peer to drain our tx ring before teardown unlinks any payload
+  region, so nothing in flight references a lent region at unlink.
 - `src/internal.h` — internals; unit tests may include it, integration tests
   must not.
 - `tests/unit/` — in-process, deterministic tier (one binary per `.c` file).
@@ -80,7 +103,15 @@ RngStreams, doxygen-awesome-css).
   `MIZU_SOAK_SECONDS` overrides the duration).
 - `tests/fuzz/` — libFuzzer harnesses for the wire parsers a crashed peer
   can leave torn (preamble, pool header, REF/SHM_RAW identifier, the MIZL
-  directory); built with clang, run as fixed-seed ASan+UBSan bursts.
+  directory, the 'I' cursor, the Arrow open); built with clang, run as
+  fixed-seed ASan+UBSan bursts.
+- `tests/interop/` — the golden byte-conformance corpus for the 'I'
+  codec: `cases.txt` (hand-written cases) → `corpus.txt` (generated
+  golden bytes) via `tools/interop_corpus.py` (the spec-derived stdlib
+  reference; deterministic — regenerate with `python3
+  tools/interop_corpus.py`, CI runs `--check` and asserts a clean diff).
+  `tests/unit/test_interop.c` drives the corpus through the cursor and
+  re-emits it byte-for-byte.
 - `bench/` — report-only microbenchmarks (no timing asserts); records are
   appended to `bench/notes.md` with the commit SHA.
 - `libmizu.pc.in` — pkg-config template; `make install` sed-substitutes it
@@ -159,6 +190,37 @@ these.
   register callbacks (`stage`, `read`, `exec`, `check`, `park`, `sweep`,
   `drop`) at create/attach/join. Staging is transactional — a binding may
   abandon mid-stage (R longjmp) and leave the handle consistent.
+- Cross-language wire contract: each handle publishes an identity word
+  (`MIZU_IDENT()` — language in bits 0-7 from the `MIZU_LANG_*` registry,
+  reader capabilities in bits 32-63 from the `MIZU_CAP_*` bits, a zero
+  language byte rejected at create/attach/join; getters
+  `mizu_channel_peer_ident()` / `mizu_pool_worker_ident()`). A capability
+  bit names a byte layout: bits are append-only, never reassigned, and
+  adding one is explicitly no ABI bump — writers gate every gated
+  emission on the peer's bit (decline, never strip) and pre-cap readers
+  fail loud. The 'I' interchange stream (`MIZU_INTEROP_MAGIC` 0x49) joins
+  the first-byte codec registry readers dispatch on; the err tag 0x11,
+  task tag 0x12, ref leaf 0x13, and MIZL remote leaf (directory tag 33)
+  formats are normative in DESIGN.md's interchange codec section, as are
+  the MIZH/MIZS/MIZL layout headers (also documented in `mizu.h`) and the
+  validity-as-data section semantics.
+- Notify endpoints (`notify.c`, DESIGN.md's section) are edge-triggered
+  named wakes (Linux abstract datagram socket, macOS filesystem datagram
+  socket, Windows auto-reset event) signaled at the same already-fenced
+  checkpoint where a publish tests the parked announce: the notify bit
+  rides a word the publish already loads (the channel `parked` word, now
+  a `MIZU_WAIT_*` bitmask; the pool `waiter_slot` with `MIZU_WS_NOTIFY`,
+  coalesced per submitter through `mizu_sub_slot.notify`), so the unarmed
+  path is instruction-identical. Watches are persistent pure-C callback
+  registrations on the death-listener machinery (no new thread); close
+  and peer death also signal the endpoint, so an armed consumer's drain
+  surfaces CLOSED / PEER_GONE.
+- `mizu_channel_abandon` / `mizu_pool_abandon` are the forked-child
+  teardown for an inherited handle: each releases only the process-local
+  half (the child's mappings, fds and heap) and writes no cross-process
+  word, so the creator's handle and the wire state are untouched. Calling
+  abandon in the owning process is a contract violation, as destroy on an
+  inherited handle was and remains.
 - Soname tracks `MIZU_VERSION_MAJOR`; release tags (`v*`) must match the
   `MIZU_VERSION_*` macros in `include/mizu.h` (enforced by release CI).
 - Comments are concise and to the point: state the invariant or the

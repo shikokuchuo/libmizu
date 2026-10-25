@@ -30,6 +30,9 @@ mizu_channel_drop
 mizu_channel_errcat
 mizu_channel_error
 mizu_channel_info_get
+mizu_channel_notify_arm
+mizu_channel_notify_unwatch
+mizu_channel_notify_watch
 mizu_channel_opts_init
 mizu_channel_peer_ident
 mizu_channel_ready_set
@@ -131,6 +134,9 @@ mizu_pool_help_once
 mizu_pool_lame_duck
 mizu_pool_leave
 mizu_pool_map_caps
+mizu_pool_notify_arm
+mizu_pool_notify_unwatch
+mizu_pool_notify_watch
 mizu_pool_opts_init
 mizu_pool_ready_wait
 mizu_pool_retire
@@ -143,6 +149,7 @@ mizu_pool_submit
 mizu_pool_submit_batch
 mizu_pool_submit_batch_fn
 mizu_pool_submit_flags
+mizu_pool_task_notify
 mizu_pool_task_release
 mizu_pool_task_state
 mizu_pool_tasks_get
