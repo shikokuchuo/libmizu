@@ -99,6 +99,10 @@ factor | rt | R | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor"))
 py-factor | dec | PY | attr(intv[2,1,1], levels=strv["b","a"], class=str("factor")) => list(str("a"),str("b"),str("b")) | a standalone factor -> a list of str-or-None; the re-encode is the strv form, not the factor
 factor-na | rt | R | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) | a factor with an NA code
 py-factor-na | dec | PY | attr(intv[1,na,2], levels=strv["x","y"], class=str("factor")) => list(str("x"),nil,str("y")) | the re-encode is the strv form, not the factor
+ordered-factor | rt | R | attr(intv[2,1,1], levels=strv["b","a"], class=strv["ordered","factor"]) | an ordered factor: the two-element class (MIZU_CAP_ORDERED)
+py-ordered-factor | dec | PY | attr(intv[2,1,1], levels=strv["b","a"], class=strv["ordered","factor"]) => list(str("a"),str("b"),str("b")) | a standalone ordered factor -> a list of str-or-None, as a plain factor
+ordered-factor-na | rt | R | attr(intv[1,na,2], levels=strv["x","y"], class=strv["ordered","factor"]) | an ordered factor with an NA code
+frame-ordered-col | rt | all | attr(list(attr(intv[2,1,1], levels=strv["b","a"], class=strv["ordered","factor"]), realv[1.5,2.5,3.5]), names=strv["o","x"], class=str("data.frame"), row.names=intv[na,-3]) | an ordered factor column inside a frame
 frame-1col | rt | all | attr(list(realv[1,2]), names=str("x"), class=str("data.frame"), row.names=intv[na,-2]) | a one-column frame, automatic row names
 frame-0row | rt | all | attr(list(intv[],strv[]), names=strv["a","b"], class=str("data.frame"), row.names=intv[na,0]) | a zero-row frame: c(NA, 0)
 frame-3col | rt | all | attr(list(realv[1.5,2.5], attr(intv[1,na], levels=str("f"), class=str("factor")), i64v[5,na]), names=strv["n","f","i"], class=str("data.frame"), row.names=intv[na,-2]) | a three-column frame with a factor and an integer64 column

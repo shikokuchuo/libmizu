@@ -17,7 +17,9 @@
    slots, patched in the copy (Arrow NaN is a value and stays NaN). A
    uint8 column's nulls decline (R raw has no NA). Dictionary columns of
    strings cross as factors (1-based INT32 codes + a levels blob; an
-   ordered dictionary declines). date32 / timestamp / duration cross as
+   ordered dictionary crosses as an ordered factor — the class strv's
+   two-element form — for a peer advertising MIZU_CAP_ORDERED, and
+   declines for one without). date32 / timestamp / duration cross as
    REAL leaves + the Date / POSIXct / difftime blobs. Strings take the
    producer's UTF-8 on its word (Arrow's contract); the catastrophic cases
    (negative or non-monotonic offsets, a view's buffer index past the
@@ -100,7 +102,7 @@ static double half_to_double(uint16_t h) {
    element-misaligned — np.frombuffer with a byte offset); fixed-size
    memcpys compile to single load/store pairs. */
 /* The widening rows are one shape: fixed-size memcpys (single load/store
-   pairs) around a per-lane conversion. U64_REAL (the range check + warn),
+   pairs) around a per-lane conversion. U64_INT64 (the range check + warn),
    BOOL8_LGL, C64_CPLX and COPY stay explicit below. */
 #define ARROW_CVT_WIDEN(NAME, ST, SW, DT, DW, CONV)                          \
   case NAME:                                                                 \
@@ -122,15 +124,16 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
   ARROW_CVT_WIDEN(MIZU_CVT_I16_INT, int16_t, 2, int32_t, 4, v)
   ARROW_CVT_WIDEN(MIZU_CVT_U16_INT, uint16_t, 2, int32_t, 4, v)
   ARROW_CVT_WIDEN(MIZU_CVT_U32_REAL, uint32_t, 4, double, 8, (double) v)
-  case MIZU_CVT_U64_REAL:
+  case MIZU_CVT_U64_INT64:
     for (size_t i = 0; i < n; i++) {
       uint64_t v;
       memcpy(&v, src + 8 * i, 8);
-      if (v > 9007199254740992ULL) {
-        mizu_store_na_real(dst + 8 * i);
+      if (v > (uint64_t) INT64_MAX) {
+        const int64_t na = MIZU_NA_INT64;
+        memcpy(dst + 8 * i, &na, 8);
         warn->n_range++;
       } else {
-        double o = (double) v;
+        const int64_t o = (int64_t) v;
         memcpy(dst + 8 * i, &o, 8);
       }
     }
@@ -292,7 +295,7 @@ static const mizu_cvt_row CVT_ROW_I32 = { MIZU_TYPE_INT, MIZU_CVT_COPY, 4, 4 };
 static const mizu_cvt_row CVT_ROW_U32 = { MIZU_TYPE_REAL, MIZU_CVT_U32_REAL, 4, 8 };
 static const mizu_cvt_row CVT_ROW_I64 = { MIZU_TYPE_INT64, MIZU_CVT_COPY, 8, 8 };
 static const mizu_cvt_row CVT_ROW_I64_V = { MIZU_TYPE_INT64, MIZU_CVT_COPY, 8, 8 };
-static const mizu_cvt_row CVT_ROW_U64 = { MIZU_TYPE_REAL, MIZU_CVT_U64_REAL, 8, 8 };
+static const mizu_cvt_row CVT_ROW_U64 = { MIZU_TYPE_INT64, MIZU_CVT_U64_INT64, 8, 8 };
 static const mizu_cvt_row CVT_ROW_F16 = { MIZU_TYPE_REAL, MIZU_CVT_F16_REAL, 2, 8 };
 static const mizu_cvt_row CVT_ROW_F32 = { MIZU_TYPE_REAL, MIZU_CVT_F32_REAL, 4, 8 };
 static const mizu_cvt_row CVT_ROW_F64 = { MIZU_TYPE_REAL, MIZU_CVT_COPY, 8, 8 };
@@ -541,6 +544,9 @@ typedef struct {
   const char *tz_o;     /* TS: the tzone override (NULL: the classified) */
   int idx_w;            /* DICT: the index width */
   int idx_signed;       /* DICT */
+  int ordered;          /* DICT: the ORDERED flag's class-strv verdict,
+                           resolved at classify (a cap-less peer declined
+                           there, so this is never a strip) */
   int64_t nlev;         /* DICT: the canonical level count (batch 0's) */
   int64_t str_bytes;    /* STR: the packed byte total (the open's walk) */
   int u64_verbatim;     /* CVT 'L': the MIZU_CAP_MIZL_U64V verdict,
@@ -593,10 +599,12 @@ struct mizu_arrow {
 };
 
 
-/* The factor dict {levels, class = "factor"} — the inline attr shape's
-   form exactly. The levels walk batch 0's dictionary (validated at open:
-   every record resolves, so the arrow_str_at verdict is exactly == 1);
-   a zero-batch column writes the empty strv. */
+/* The factor dict {levels, class} — the inline attr shape's form exactly:
+   class the scalar "factor", or the two-element strv c("ordered",
+   "factor") when the column classified ordered. The levels walk batch 0's
+   dictionary (validated at open: every record resolves, so the
+   arrow_str_at verdict is exactly == 1); a zero-batch column writes the
+   empty strv. */
 static size_t arrow_factor_dict(uint8_t *dst, const mizu_arrow *a, int col) {
   const arrow_pcol *pc = &a->cols[col];
   const ArrowArray *dict = a->nb != 0 ?
@@ -625,7 +633,9 @@ static size_t arrow_factor_dict(uint8_t *dst, const mizu_arrow *a, int col) {
   arrow_ixe_key(&e, MIZU_IX_ATTR_CLASS);
   {
     static const char *cls[1] = { MIZU_IX_CLASS_FACTOR };
-    arrow_ixe_class(&e, cls, 1);
+    static const char *ocls[2] = { MIZU_IX_CLASS_ORDERED,
+                                   MIZU_IX_CLASS_FACTOR };
+    arrow_ixe_class(&e, pc->ordered ? ocls : cls, pc->ordered ? 2 : 1);
   }
   return e.total;
 }
@@ -657,11 +667,17 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
   }
   if (sc->dictionary != NULL) {
     if (sc->flags & MIZU_ARROW_FLAG_DICTIONARY_ORDERED) {
-      mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                          "column '%s': an ordered dictionary column has no "
-                          "portable home (polars Enum: cast to "
-                          "pl.Categorical)", nm);
-      return -1;
+      /* ordered factors: metadata is data — a peer short of the
+         capability gets the decline, never a stripped class */
+      if ((a->peer_caps & MIZU_CAP_ORDERED) == 0) {
+        mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                            "column '%s': an ordered dictionary column "
+                            "needs a peer with the ordered factor "
+                            "capability (polars Enum: cast to "
+                            "pl.Categorical)", nm);
+        return -1;
+      }
+      pc->ordered = 1;
     }
     const char *vf = sc->dictionary->format;
     if (vf == NULL ||
@@ -740,7 +756,8 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
   }
   if (f[0] == 'L' && f[1] == '\0') {
     /* uint64: verbatim (an INT64 leaf + the u64 blob attr) for a peer
-       advertising MIZU_CAP_MIZL_U64V, else the REAL conversion */
+       advertising MIZU_CAP_MIZL_U64V, else the integer64 conversion
+       (in-range exact, the int64 NA sentinel past INT64_MAX) */
     pc->kind = MIZU_ARROW_CVT;
     pc->row = &CVT_ROW_U64;
     pc->u64_verbatim = (a->peer_caps & MIZU_CAP_MIZL_U64V) != 0;

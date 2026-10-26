@@ -215,7 +215,7 @@ static void test_cvt_types(void) {
   const int32_t i32[3] = { -70000, 0, 8 };
   const uint32_t u32[3] = { 3000000000u, 0, 9 };
   const int64_t i64[3] = { -5000000000LL, 0, 10 };
-  const uint64_t u64[3] = { 9007199254740993ULL, 0, 11 };   /* > 2^53 */
+  const uint64_t u64[3] = { 9223372036854775808ULL, 0, 9007199254740993ULL };   /* > INT64_MAX; > 2^53 */
   const uint16_t f16[3] = { 0x3C00, 0, 0xC000 };            /* 1.0, -2.0 */
   const float f32[3] = { 1.5f, 0, -2.5f };
   const void *bufs[11][3] = {
@@ -246,7 +246,7 @@ static void test_cvt_types(void) {
 
   const int tags[11] = { MIZU_TYPE_LGL, MIZU_TYPE_INT, MIZU_TYPE_INT,
                          MIZU_TYPE_INT, MIZU_TYPE_RAW, MIZU_TYPE_INT,
-                         MIZU_TYPE_REAL, MIZU_TYPE_INT64, MIZU_TYPE_REAL,
+                         MIZU_TYPE_REAL, MIZU_TYPE_INT64, MIZU_TYPE_INT64,
                          MIZU_TYPE_REAL, MIZU_TYPE_REAL };
   mizu_mizl_entry e;
   for (int i = 0; i < 11; i++) {
@@ -255,7 +255,8 @@ static void test_cvt_types(void) {
     if (i == 4) assert(e.valid[0] == 0 && e.valid[1] == -1);
     else assert(e.valid[1] == 1);
   }
-  /* spot values: bool {1, NA, 1}, u16 widened, u64 past 2^53 -> NA */
+  /* spot values: bool {1, NA, 1}, u16 widened, u64 past INT64_MAX -> the
+     int64 NA sentinel, a past-2^53 lane exact */
   assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
   const int32_t *lgl = (const int32_t *) (buf + e.data_offset);
   assert(lgl[0] == 1 && lgl[1] == MIZU_NA_INT32 && lgl[2] == 1);
@@ -265,11 +266,9 @@ static void test_cvt_types(void) {
   assert(mizu_mizl_elem(buf, total, 4, &e) == 0);
   assert(memcmp(buf + e.data_offset, u8, 3) == 0);
   assert(mizu_mizl_elem(buf, total, 8, &e) == 0);
-  const double *du64 = (const double *) (buf + e.data_offset);
-  uint64_t bits;
-  memcpy(&bits, &du64[0], 8);
-  assert(bits == MIZU_NA_REAL_BITS);   /* past 2^53: the NA payload */
-  assert(du64[2] == 11.0);
+  const int64_t *iu64 = (const int64_t *) (buf + e.data_offset);
+  assert(iu64[0] == MIZU_NA_INT64);   /* past INT64_MAX: the NA sentinel */
+  assert(iu64[2] == 9007199254740993LL);   /* past 2^53 converts exact */
   assert(mizu_mizl_elem(buf, total, 9, &e) == 0);
   const double *dh = (const double *) (buf + e.data_offset);
   assert(dh[0] == 1.0 && dh[2] == -2.0);
@@ -1016,10 +1015,35 @@ static void test_dict_declines(void) {
   assert(strstr(mizu_last_error_message(), "differ across batches") !=
          NULL);
 
-  /* an ordered dictionary declines */
+  /* an ordered dictionary: a cap-less peer declines (metadata is data,
+     never a strip); a peer advertising the bit opens, the blob carrying
+     the two-element class */
   mk_schema(&cd, "c", "d", NULL, 0, &lv, MIZU_ARROW_FLAG_DICTIONARY_ORDERED);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
-  assert(strstr(mizu_last_error_message(), "pl.Categorical") != NULL);
+  assert(strstr(mizu_last_error_message(), "ordered factor capability") !=
+         NULL);
+  /* a clean ordered frame writes the two-element class */
+  ArrowArray cdict, ca, cb2;
+  ArrowArray *ck[1] = { &ca };
+  const void *cdb[3] = { NULL, levoffs, levbytes };
+  const void *ccodes[2] = { NULL, codes };
+  mk_array(&cdict, 2, 0, 0, 3, cdb, NULL, NULL);
+  mk_array(&ca, 2, 0, 0, 2, ccodes, NULL, &cdict);
+  mk_array(&cb2, 2, 0, 0, 1, NULL, ck, NULL);
+  cb2.n_children = 1;
+  const ArrowArray *cbatches[1] = { &cb2 };
+  size_t ototal;
+  mizu_arrow_warn owarn;
+  uint8_t *obuf = frame_write(&root, cbatches, 1, MIZU_CAP_ORDERED, &ototal,
+                              &owarn, &a);
+  mizu_mizl_entry oe;
+  assert(mizu_mizl_elem(obuf, ototal, 0, &oe) == 0);
+  const uint8_t *oblob = obuf + oe.data_offset + oe.data_size - oe.attrs_size;
+  assert(find_span(oblob, (size_t) oe.attrs_size, "ordered", 7) != NULL);
+  assert(find_span(oblob, (size_t) oe.attrs_size, "factor", 6) != NULL);
+  blob_check(oblob, (size_t) oe.attrs_size);
+  free(obuf);
+  mizu_arrow_close(a);
   mk_schema(&cd, "c", "d", NULL, 0, &lv, 0);
 
   /* an out-of-range index declines */
@@ -1303,15 +1327,17 @@ static void test_uint64_verbatim(void) {
   free(buf);
   mizu_arrow_close(a);
 
-  /* a peer word short of the bit: the REAL conversion, the attr absent */
+  /* a peer word short of the bit: the integer64 conversion, the attr
+     absent */
   buf = frame_write(&root, batches, 1, 0, &total, &warn, &a);
   assert(warn.n_range == 1 && warn.n_int64 == 1 && warn.n_intmin == 0);
   assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
-  assert(e.sexptype == MIZU_TYPE_REAL && e.attrs_size == 0);
-  const double *d = (const double *) (buf + e.data_offset);
-  assert(d[0] == 42.0);
+  assert(e.sexptype == MIZU_TYPE_INT64 && e.attrs_size == 0);
+  const int64_t *d = (const int64_t *) (buf + e.data_offset);
+  assert(d[0] == 42);
   memcpy(&bits, &d[2], 8);
-  assert(bits == MIZU_NA_REAL_BITS);   /* 2^63 is past 2^53: the NA fill */
+  assert(bits == 0x8000000000000000ULL);   /* 2^63 past INT64_MAX: the NA
+                                              sentinel's bits */
   free(buf);
   mizu_arrow_close(a);
 
@@ -1538,13 +1564,26 @@ static void test_cvt_kernels(void) {
   assert(dst[0] == MIZU_NA_INT32 && dst[1] == 1 && dst[62] == 62);
   assert(dst[63] == MIZU_NA_INT32 && dst[64] == 64);
 
+  /* the uint64 row: exact through INT64_MAX, the sentinel and the count
+     past it */
+  const mizu_cvt_row *u64 = mizu_cvt_for_arrow("L");
+  const uint64_t us[5] = { 0, 9007199254740993ULL, 9223372036854775807ULL,
+                           9223372036854775808ULL, 18446744073709551615ULL };
+  int64_t uo[5];
+  mizu_cvt_convert((uint8_t *) uo, (const uint8_t *) us, NULL, 0, 5, u64,
+                   &warn);
+  assert(warn.n_range == 2);
+  assert(uo[0] == 0 && uo[1] == 9007199254740993LL &&
+         uo[2] == 9223372036854775807LL);
+  assert(uo[3] == MIZU_NA_INT64 && uo[4] == MIZU_NA_INT64);
+
   /* the format table: unknown and multi-char formats miss; 'L' resolves
      (classify's special case never consults the table for it) */
   assert(mizu_cvt_for_arrow("") == NULL);
   assert(mizu_cvt_for_arrow("xx") == NULL);
   assert(mizu_cvt_for_arrow("?") == NULL);
   assert(mizu_cvt_for_arrow("L") != NULL);
-  assert(mizu_cvt_for_arrow("L")->wire == MIZU_TYPE_REAL);
+  assert(mizu_cvt_for_arrow("L")->wire == MIZU_TYPE_INT64);
 }
 
 /* Open-time declines the frame tests have no shape for. */
@@ -2430,10 +2469,11 @@ static void test_col_writers(void) {
   assert(zn != 0);
   assert(find_span(buf + 16, zn, "tscale", 6) == NULL);
   assert(find_span(buf + 16, zn, "UTC", 3) != NULL);
-  /* the u64 column: 8 bytes of double, no blob */
+  /* the u64 column: 8 bytes of int64, no blob */
   assert(mizu_arrow_col_body(a, 1, buf, &warn) == 8);
-  memcpy(&sec, buf, 8);
-  assert(sec == 42.0);
+  int64_t sv2;
+  memcpy(&sv2, buf, 8);
+  assert(sv2 == 42);
   assert(mizu_arrow_col_blob(a, 1, NULL) == 0);
   free(buf);
   mizu_arrow_close(a);
@@ -2552,7 +2592,7 @@ static void test_write_ix(void) {
 
 static void test_write_ix_kinds(void) {
   /* one column per remaining kind: a dictionary, date32, timestamp[ms]
-     with a zone, duration[s], int64, uint64 past 2^53, string_view */
+     with a zone, duration[s], int64, uint64 past INT64_MAX, string_view */
   ArrowSchema lv, cd, cdt, cts, ctd, ci, cu, cv, root;
   ArrowSchema *kids[7] = { &cd, &cdt, &cts, &ctd, &ci, &cu, &cv };
   mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
@@ -2573,7 +2613,7 @@ static void test_write_ix_kinds(void) {
   const int64_t tsv[2] = { 1000, 2000 };
   const int64_t tdv[2] = { 60, 120 };
   const int64_t i64v[2] = { 5, -7 };
-  const uint64_t u64v[2] = { 9007199254740993ULL, 3 };
+  const uint64_t u64v[2] = { 18446744073709551615ULL, 3 };
   uint8_t views[32];
   memset(views, 0, sizeof views);
   int32_t l0 = 2, l1 = 20;
@@ -2667,12 +2707,11 @@ static void test_write_ix_kinds(void) {
   int64_t lanes[2];
   memcpy(lanes, s + 9, 16);
   assert(lanes[0] == 5 && lanes[1] == -7);
-  /* u: the REAL conversion, past-2^53 -> NA */
+  /* u: the integer64 conversion, past-INT64_MAX -> the NA sentinel */
   s += csz[4];
-  assert(s[0] == MIZU_IX_TAG_REALV);
-  memcpy(dv, s + 9, 16);
-  memcpy(&dbits, &dv[0], 8);
-  assert(dbits == MIZU_NA_REAL_BITS && dv[1] == 3.0);
+  assert(s[0] == MIZU_IX_TAG_I64V);
+  memcpy(lanes, s + 9, 16);
+  assert(lanes[0] == MIZU_NA_INT64 && lanes[1] == 3);
   /* v: strv, the inline short string and the buffered long one */
   s += csz[5];
   assert(s[0] == MIZU_IX_TAG_STRV);

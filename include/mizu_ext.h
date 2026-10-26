@@ -145,6 +145,10 @@ extern "C" {
    shapes: a 1-D names vector, a dim + dimnames array (the table class
    included), and the extended frame dict (a class vector ending
    "data.frame" plus extra attributes) */
+#define MIZU_CAP_ORDERED (1u << 8)  /**< reads ordered factors: the
+   factor attr shape whose class is the two-element strv
+   c("ordered", "factor") — on the 'I' inline form, the layout attribute
+   blob, and an Arrow frame's dictionary column */
 
 /** The identity word: the language in bits 0-7, the 32-bit capability mask
    in bits 32-63, bits 8-31 reserved — written zero and ignored by readers
@@ -1615,6 +1619,7 @@ MIZU_API mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 #define MIZU_IX_ATTR_TSP      "tsp"
 
 #define MIZU_IX_CLASS_FACTOR    "factor"
+#define MIZU_IX_CLASS_ORDERED   "ordered"
 #define MIZU_IX_CLASS_DATE      "Date"
 #define MIZU_IX_CLASS_POSIXCT   "POSIXct"
 #define MIZU_IX_CLASS_POSIXT    "POSIXt"
@@ -2260,7 +2265,8 @@ enum {
   MIZU_CVT_I16_INT,
   MIZU_CVT_U16_INT,   /**< zero-widen */
   MIZU_CVT_U32_REAL,  /**< exact */
-  MIZU_CVT_U64_REAL,
+  MIZU_CVT_U64_INT64, /**< in-range exact; past INT64_MAX the int64 NA
+   sentinel, counted in n_range */
   MIZU_CVT_F16_REAL,  /**< exact (half decodes into double's wider fields) */
   MIZU_CVT_F32_REAL,  /**< exact */
   MIZU_CVT_BOOL8_LGL, /**< one byte per source lane (numpy '?') -> int32 0/1 */
@@ -2279,7 +2285,7 @@ typedef struct mizu_cvt_row_s {
    frame writer; the binding raises them after the stage returns, never
    mid-stage. */
 typedef struct mizu_arrow_warn_s {
-  uint64_t n_range;   /**< uint64 past 2^53 -> NA_real_ */
+  uint64_t n_range;   /**< uint64 past INT64_MAX -> the int64 NA sentinel */
   uint64_t n_intmin;  /**< a genuine int32 INT32_MIN: reads as NA in R */
   uint64_t n_int64;   /**< a genuine int64 INT64_MIN: reads as NA in R */
 } mizu_arrow_warn;

@@ -13,6 +13,17 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
+- Ordered factors (the new `MIZU_CAP_ORDERED` capability bit, 8): the
+  factor attr shape whose `class` is the two-element strv
+  `["ordered", "factor"]`, on the inline attr form, the layout attribute
+  blob, and the Arrow frame writer — an Arrow dictionary column with
+  `ARROW_FLAG_DICTIONARY_ORDERED` set no longer declines for a peer
+  advertising the bit, its blob carrying the two-element class. New
+  upstream surface: the `MIZU_CAP_ORDERED` and `MIZU_IX_CLASS_ORDERED`
+  constants. Writers gate every emission on the peer's bit (decline,
+  never strip); pre-cap readers fail loud on their exact-set guards. No
+  ABI bump: caps are negotiated.
+
 - Notify endpoints: an event-driven wake for a binding's async
   integration. An armed consumer owns a named, pollable endpoint (Linux
   an abstract-namespace datagram socket, macOS a bound filesystem
@@ -367,6 +378,17 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   the lost-set scan — extracted from mizu's and pymizu's map modules.
 
 ### Changed
+
+- uint64 conversion: values up to `INT64_MAX` now cross exactly as
+  integer64 (an INT64 leaf / the `i64v` form) instead of double with
+  past-2^53 lanes reading as `NA_real_`; only values past `INT64_MAX`
+  keep the loss event, now the `INT64_MIN` sentinel, still counted in
+  `mizu_arrow_warn.n_range`. The conversion-table row
+  `MIZU_CVT_U64_REAL` is replaced by `MIZU_CVT_U64_INT64` (same table
+  slot); the fallback's wire type is baseline (`MIZU_TYPE_INT64`), so no
+  capability bit gates it and pre-existing readers home the more exact
+  form natively. The verbatim uint64 form (`MIZU_CAP_MIZL_U64V`) is
+  unchanged.
 
 - **Wire format (pool):** the injection/deque
   entry header carries the result slot's incarnation sequence
