@@ -199,6 +199,9 @@ Macros</h2></td></tr>
 <tr class="memitem:ace620049e87f54ac6f2810ecb15b9501" id="r_ace620049e87f54ac6f2810ecb15b9501"><td class="memItemLeft" align="right" valign="top"><a id="ace620049e87f54ac6f2810ecb15b9501" name="ace620049e87f54ac6f2810ecb15b9501"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_LABELED</b>&#160;&#160;&#160;(1u &lt;&lt; 7)</td></tr>
 <tr class="memdesc:ace620049e87f54ac6f2810ecb15b9501"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads the labeled attribute shapes: a 1-D names vector, a dim + dimnames array (the table class included), and the extended frame dict (a class vector ending "data.frame" plus extra attributes) <br /></td></tr>
+<tr class="memitem:a98482f75d4b846bce9bab808001504fd" id="r_a98482f75d4b846bce9bab808001504fd"><td class="memItemLeft" align="right" valign="top"><a id="a98482f75d4b846bce9bab808001504fd" name="a98482f75d4b846bce9bab808001504fd"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CAP_ORDERED</b>&#160;&#160;&#160;(1u &lt;&lt; 8)</td></tr>
+<tr class="memdesc:a98482f75d4b846bce9bab808001504fd"><td class="mdescLeft">&#160;</td><td class="mdescRight">reads ordered factors: the factor attr shape whose class is the two-element strv c("ordered", "factor") — on the 'I' inline form, the layout attribute blob, and an Arrow frame's dictionary column <br /></td></tr>
 <tr class="memitem:a5b840ab0de642c2462a22c967295f6e2" id="r_a5b840ab0de642c2462a22c967295f6e2"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a5b840ab0de642c2462a22c967295f6e2">MIZU_IDENT</a>(lang,  caps)</td></tr>
 <tr class="memdesc:a5b840ab0de642c2462a22c967295f6e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">The identity word: the language in bits 0-7, the 32-bit capability mask in bits 32-63, bits 8-31 reserved — written zero and ignored by readers (a negotiation word, so a later field needs no reader taught to skip it).  <br /></td></tr>
 <tr class="memitem:a8b5190cadbc71574f32687e4ab3d94b9" id="r_a8b5190cadbc71574f32687e4ab3d94b9"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a8b5190cadbc71574f32687e4ab3d94b9">MIZU_READ_CONSUME</a>&#160;&#160;&#160;1u</td></tr>
@@ -253,6 +256,8 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_ATTR_TSP</b>&#160;&#160;&#160;&quot;tsp&quot;</td></tr>
 <tr class="memitem:a845b6a0165d0d69a7f5a185859df4419" id="r_a845b6a0165d0d69a7f5a185859df4419"><td class="memItemLeft" align="right" valign="top"><a id="a845b6a0165d0d69a7f5a185859df4419" name="a845b6a0165d0d69a7f5a185859df4419"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_FACTOR</b>&#160;&#160;&#160;&quot;factor&quot;</td></tr>
+<tr class="memitem:ad977dc589422fba536ffd16895671a4d" id="r_ad977dc589422fba536ffd16895671a4d"><td class="memItemLeft" align="right" valign="top"><a id="ad977dc589422fba536ffd16895671a4d" name="ad977dc589422fba536ffd16895671a4d"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_ORDERED</b>&#160;&#160;&#160;&quot;ordered&quot;</td></tr>
 <tr class="memitem:a4429e0df19c20a92786ac0b408d0d49e" id="r_a4429e0df19c20a92786ac0b408d0d49e"><td class="memItemLeft" align="right" valign="top"><a id="a4429e0df19c20a92786ac0b408d0d49e" name="a4429e0df19c20a92786ac0b408d0d49e"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_IX_CLASS_DATE</b>&#160;&#160;&#160;&quot;Date&quot;</td></tr>
 <tr class="memitem:a0c77014b72edb2673d0a467714f1dd39" id="r_a0c77014b72edb2673d0a467714f1dd39"><td class="memItemLeft" align="right" valign="top"><a id="a0c77014b72edb2673d0a467714f1dd39" name="a0c77014b72edb2673d0a467714f1dd39"></a>
@@ -430,7 +435,7 @@ Enumerations</h2></td></tr>
 , <a class="el" href="#aed2a35867b0efb23c718fcff6f1aa9eea18b7df4bc021ecfe0d94b0c6fc3ece5c">MIZU_CVT_U16_INT</a>
 , <br />
 &#160;&#160;<a class="el" href="#aed2a35867b0efb23c718fcff6f1aa9eea7620385fecc7d007ee3bf4eb9b8d0ddb">MIZU_CVT_U32_REAL</a>
-, <b>MIZU_CVT_U64_REAL</b>
+, <a class="el" href="#aed2a35867b0efb23c718fcff6f1aa9eea909165a0bec041b390032edd88b1fa0d">MIZU_CVT_U64_INT64</a>
 , <a class="el" href="#aed2a35867b0efb23c718fcff6f1aa9eead186e594d9ba41fa7bdad5f40c8fc42e">MIZU_CVT_F16_REAL</a>
 , <a class="el" href="#aed2a35867b0efb23c718fcff6f1aa9eea840ed29e6e7ac7452b9b2f062cb5c01e">MIZU_CVT_F32_REAL</a>
 , <br />
@@ -1448,6 +1453,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 <tr><td class="fieldname"><a id="aed2a35867b0efb23c718fcff6f1aa9eea18b7df4bc021ecfe0d94b0c6fc3ece5c" name="aed2a35867b0efb23c718fcff6f1aa9eea18b7df4bc021ecfe0d94b0c6fc3ece5c"></a>MIZU_CVT_U16_INT&#160;</td><td class="fielddoc"><p>zero-widen </p>
 </td></tr>
 <tr><td class="fieldname"><a id="aed2a35867b0efb23c718fcff6f1aa9eea7620385fecc7d007ee3bf4eb9b8d0ddb" name="aed2a35867b0efb23c718fcff6f1aa9eea7620385fecc7d007ee3bf4eb9b8d0ddb"></a>MIZU_CVT_U32_REAL&#160;</td><td class="fielddoc"><p>exact </p>
+</td></tr>
+<tr><td class="fieldname"><a id="aed2a35867b0efb23c718fcff6f1aa9eea909165a0bec041b390032edd88b1fa0d" name="aed2a35867b0efb23c718fcff6f1aa9eea909165a0bec041b390032edd88b1fa0d"></a>MIZU_CVT_U64_INT64&#160;</td><td class="fielddoc"><p>in-range exact; past INT64_MAX the int64 NA sentinel, counted in n_range </p>
 </td></tr>
 <tr><td class="fieldname"><a id="aed2a35867b0efb23c718fcff6f1aa9eead186e594d9ba41fa7bdad5f40c8fc42e" name="aed2a35867b0efb23c718fcff6f1aa9eead186e594d9ba41fa7bdad5f40c8fc42e"></a>MIZU_CVT_F16_REAL&#160;</td><td class="fielddoc"><p>exact (half decodes into double's wider fields) </p>
 </td></tr>
