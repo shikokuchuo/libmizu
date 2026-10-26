@@ -7,16 +7,12 @@
 libmizu is a C library for lock-free shared-memory IPC.
 
 libmizu is for runtimes that parallelize with processes rather than threads.
-It makes the communication between those processes fast enough to divide work at thread granularity.
+It uses shared memory to make the communication between those processes fast enough to divide work at thread granularity.
 
-libmizu uses shared memory as the fastest IPC transport.
-Processes read and write into shared memory directly, with no kernel involvement and no data copies through system sockets.
-This means round trips drop from tens of microseconds over sockets to under a microsecond (see [Performance](#performance)).
+Round trips drop from tens of microseconds over sockets to under a microsecond (see [Performance](#performance)).
+The hot path never enters the kernel and data is never copied through a system socket.
 
-Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows).
-The hot path stays in user space.
-Data moves through single-producer single-consumer rings with batched publication.
-Waiting is spin-then-park, and peer death arrives as an OS event.
+Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting, and peer death delivered as an OS event.
 
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R and [pymizu](https://github.com/shikokuchuo/pymizu) for Python.
@@ -24,6 +20,7 @@ The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R a
 
 - Lock-free SPSC rings and work-stealing deques over shared memory
 - Bounded, microsecond-latency waiting: futex, `__ulock`, or `WaitOnAddress` per platform
+- Event-driven wakeups: edge-triggered notify endpoints signaled on the publish path, with no polling threads
 - Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling
 - Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue
 - FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
