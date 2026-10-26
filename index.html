@@ -96,13 +96,14 @@ $(function(){initNavTree('index.html','',''); });
 <div class="textblock"><p><a class="anchor" id="md_README"></a></p>
 <p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE)</p>
 <p>libmizu is a C library for lock-free shared-memory IPC.</p>
-<p>libmizu is for runtimes that parallelize with processes rather than threads. It makes the communication between those processes fast enough to divide work at thread granularity.</p>
-<p>libmizu uses shared memory as the fastest IPC transport. Processes read and write into shared memory directly, with no kernel involvement and no data copies through system sockets. This means round trips drop from tens of microseconds over sockets to under a microsecond (see Performance).</p>
-<p>Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows). The hot path stays in user space. Data moves through single-producer single-consumer rings with batched publication. Waiting is spin-then-park, and peer death arrives as an OS event.</p>
+<p>libmizu is for runtimes that parallelize with processes rather than threads. It uses shared memory to make the communication between those processes fast enough to divide work at thread granularity.</p>
+<p>Round trips drop from tens of microseconds over sockets to under a microsecond (see Performance). The hot path never enters the kernel and data is never copied through a system socket.</p>
+<p>Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting, and peer death delivered as an OS event.</p>
 <p>Bindings share one wire format, so processes in different languages can exchange data over the same channel. The first-party bindings are <a href="https://github.com/shikokuchuo/mizu">mizu</a> for R and <a href="https://github.com/shikokuchuo/pymizu">pymizu</a> for Python. Writing a binding covers other languages.</p>
 <ul>
 <li>Lock-free SPSC rings and work-stealing deques over shared memory</li>
 <li>Bounded, microsecond-latency waiting: futex, <span class="tt">__ulock</span>, or <span class="tt">WaitOnAddress</span> per platform</li>
+<li>Event-driven wakeups: edge-triggered notify endpoints signaled on the publish path, with no polling threads</li>
 <li>Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling</li>
 <li>Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue</li>
 <li>FFI-safe ABI: opaque handles, exported functions only, <span class="tt"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578" title="The verb result.">mizu_status</a></span> sentinels on hot paths</li>
