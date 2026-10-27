@@ -82,6 +82,8 @@ struct mizu_death_watch_s {
   int pidfd;
   int state;
   int listed;                       /* on the registry; freed by the thread */
+  int stop_wait;                    /* a stop is waiting a callback out:
+                                       the reap holds the struct (mutex) */
   _Atomic int in_flight;            /* cb running off-lock: stop waits it out */
   _Atomic int *flag;
   mizu_parker pk;
@@ -100,6 +102,7 @@ struct mizu_notify_watch_s {
   int fd;
   int state;
   int listed;
+  int stop_wait;                    /* as the death watch's */
   _Atomic int in_flight;            /* as the death watch's */
   void (*cb)(void *);
   void *cb_arg;
@@ -221,7 +224,7 @@ static void *mizu_dl_main(void *arg) {
       for (struct mizu_death_watch_s *w = mizu_dl_watches, *next; w;
            w = next) {
         next = w->next;
-        if (w->state == MIZU_DW_STOPPED) {
+        if (w->state == MIZU_DW_STOPPED && !w->stop_wait) {
           if (w->pidfd >= 0) {
             epoll_ctl(mizu_dl_epfd, EPOLL_CTL_DEL, w->pidfd, NULL);
             close(w->pidfd);
@@ -234,7 +237,7 @@ static void *mizu_dl_main(void *arg) {
       for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches, *next; nw;
            nw = next) {
         next = nw->next;
-        if (nw->state == MIZU_NW_STOPPED) {
+        if (nw->state == MIZU_NW_STOPPED && !nw->stop_wait) {
           epoll_ctl(mizu_dl_epfd, EPOLL_CTL_DEL, nw->fd, NULL);
           close(nw->fd);
           if (nw->prev) nw->prev->next = nw->next;
@@ -393,13 +396,25 @@ void mizu_death_watch_stop(mizu_death_watch *w) {
   mizu_dl_fork_guard();
   if (w->listed && mizu_dl_running) {
     /* Taking the mutex synchronizes with a fire in flight: after it is
-       released, the thread never touches this watch's flag/parker again. */
+       released, the thread never touches this watch's flag/parker again.
+       in_flight is read inside the same critical section (the callback
+       snapshot mutates it only there), so the stop knows exactly whether
+       a callback is running; stop_wait holds the reap off the struct for
+       the whole wait — the free can never race the wait loop, whose own
+       last touch is the release. */
     pthread_mutex_lock(&mizu_dl_mu);
     w->state = MIZU_DW_STOPPED;
+    w->stop_wait = 1;
+    mizu_dl_reap_pending = 1;
+    int inflight = atomic_load_explicit(&w->in_flight, memory_order_relaxed);
+    pthread_mutex_unlock(&mizu_dl_mu);
+    mizu_dl_poke();
+    if (inflight) mizu_dl_wait_inflight(&w->in_flight);
+    pthread_mutex_lock(&mizu_dl_mu);
+    w->stop_wait = 0;
     mizu_dl_reap_pending = 1;
     pthread_mutex_unlock(&mizu_dl_mu);
     mizu_dl_poke();
-    mizu_dl_wait_inflight(&w->in_flight);
     return;
   }
   if (w->pidfd >= 0) close(w->pidfd);
@@ -464,13 +479,20 @@ void mizu_notify_watch_stop(mizu_notify_watch *w) {
   if (w->listed && mizu_dl_running) {
     /* as the death watch's stop: the mutex synchronizes with a callback
        in flight; the listener reaps (DELs, closes the dup, frees) after
-       the poke */
+       the wait's release poke */
     pthread_mutex_lock(&mizu_dl_mu);
     w->state = MIZU_NW_STOPPED;
+    w->stop_wait = 1;
+    mizu_dl_reap_pending = 1;
+    int inflight = atomic_load_explicit(&w->in_flight, memory_order_relaxed);
+    pthread_mutex_unlock(&mizu_dl_mu);
+    mizu_dl_poke();
+    if (inflight) mizu_dl_wait_inflight(&w->in_flight);
+    pthread_mutex_lock(&mizu_dl_mu);
+    w->stop_wait = 0;
     mizu_dl_reap_pending = 1;
     pthread_mutex_unlock(&mizu_dl_mu);
     mizu_dl_poke();
-    mizu_dl_wait_inflight(&w->in_flight);
     return;
   }
   if (w->fd >= 0) close(w->fd);
