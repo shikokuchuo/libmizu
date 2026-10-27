@@ -527,6 +527,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_death_listener_t
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_notify_watch</b> (mizu_channel *, void(*cb)(void *), void *ctx)</td></tr>
 <tr class="memitem:afae1329513efdd57600b769a4596aeef" id="r_afae1329513efdd57600b769a4596aeef"><td class="memItemLeft" align="right" valign="top"><a id="afae1329513efdd57600b769a4596aeef" name="afae1329513efdd57600b769a4596aeef"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_channel_notify_unwatch</b> (mizu_channel *)</td></tr>
+<tr class="memitem:a7c99b90c8684c7dc3bdffb18aa83949c" id="r_a7c99b90c8684c7dc3bdffb18aa83949c"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7c99b90c8684c7dc3bdffb18aa83949c">mizu_channel_avail</a> (mizu_channel *)</td></tr>
+<tr class="memdesc:a7c99b90c8684c7dc3bdffb18aa83949c"><td class="mdescLeft">&#160;</td><td class="mdescRight">The consumer's published-not-yet-consumed message count: one acquire load on a local-cache miss, otherwise the cached tail.  <br /></td></tr>
 <tr class="memitem:a32f1ff9e30d30c5525db234682c90d3c" id="r_a32f1ff9e30d30c5525db234682c90d3c"><td class="memItemLeft" align="right" valign="top"><a id="a32f1ff9e30d30c5525db234682c90d3c" name="a32f1ff9e30d30c5525db234682c90d3c"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_notify_arm</b> (mizu_pool *, int on)</td></tr>
 <tr class="memitem:a478c9ab890d677df71fcda8b03b83a5e" id="r_a478c9ab890d677df71fcda8b03b83a5e"><td class="memItemLeft" align="right" valign="top"><a id="a478c9ab890d677df71fcda8b03b83a5e" name="a478c9ab890d677df71fcda8b03b83a5e"></a>
@@ -1830,6 +1832,26 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 
 <p>Event-driven wakes for a binding's async integration: an armed consumer owns a named, pollable endpoint (Linux an abstract-namespace datagram socket, macOS a bound filesystem datagram socket under the liveness dir, Windows an auto-reset named event); the publisher signals it at the same fenced checkpoint where it tests the parked announce, so the arm/re-check discipline is the parker protocol transplanted. </p>
 <p>The arm is edge-triggered: the publisher clears the bit as it signals (one signal per idle-to-data transition, never one per publish), and spurious or stale signals are absorbed by the consumer's drain-and-recheck. The unarmed publish path is unchanged: the notify bit rides the word the publish already loads and tests. An endpoint is created lazily at the first arm or watch and lives until the handle's destroy; a graceful destroy unlinks the macOS socket path, a hard kill leaves it as residue beside the .live.* files (unlink-before-bind absorbs it; the reaper's exact region grammar never touches suffixed names). arm on a MIZU_FLAG_SPIN channel fails MIZU_ERR: the spin publish path skips the wake checkpoint by design. The watch registers a persistent pure-C callback on the endpoint: it may run on any thread and its targets must stay valid until unwatch (or destroy) returns — stop synchronizes with an in-flight callback. The channel watch additionally chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark, so an armed consumer's drain also surfaces CLOSED and PEER_GONE, never only publishes. A pool submitter needs no chain: a worker death is failed into result publishes by the reaper, which reach the armed submitter through the ordinary waiter_slot path. mizu_channel_notify_arm(on != 0) sets MIZU_WAIT_NOTIFY in the side's parked word and reports availability in *avail_out (may be NULL): the caller drains what is already there synchronously, then stays armed. Re-arms are idempotent; on == 0 disarms. mizu_pool_notify_arm is the submitter-half arm (the coalescing word); mizu_pool_task_notify announces (on != 0) or withdraws (on == 0) the MIZU_WS_NOTIFY gate on each task's result slot — announce before arming the word, then re-check the tasks' terminal states (the sync scan resolves whatever was already published). Withdrawing restores -1 on slots still holding this submitter's announce; a publish racing it at worst sends one absorbed signal or skips a wake nobody waits on. Both pool verbs need a handle with a claimed submitter slot. </p>
+
+</div>
+</div>
+<a id="a7c99b90c8684c7dc3bdffb18aa83949c" name="a7c99b90c8684c7dc3bdffb18aa83949c"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a7c99b90c8684c7dc3bdffb18aa83949c">&#9670;&#160;</a></span>mizu_channel_avail()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t mizu_channel_avail </td>
+          <td>(</td>
+          <td class="paramtype">mizu_channel *</td>          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The consumer's published-not-yet-consumed message count: one acquire load on a local-cache miss, otherwise the cached tail. </p>
+<p>Only this consumer shrinks the count, so a caller sizing a receive buffer from it never over-allocates on a producer's later publish. Exported only (the ring locals are internal). </p>
 
 </div>
 </div>
