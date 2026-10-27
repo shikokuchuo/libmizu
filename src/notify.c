@@ -66,10 +66,15 @@ static int notify_addr(const char *livedir, const char *region,
 }
 
 static int notify_socket(void) {
+#ifdef __linux__
+  int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  if (fd < 0) return -1;
+#else
   int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
   if (fd < 0) return -1;
   (void) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
   (void) fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
+#endif
 #ifdef SO_NOSIGPIPE
   int one = 1;
   (void) setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));

@@ -222,15 +222,19 @@ static mizu_notify_ep *chan_notify_ep(mizu_channel *c) {
 
 /* Signal the peer's endpoint, claiming the edge by clearing its armed
    bit: the winner of the clear sends (edge-triggered — one signal per
-   arm, never one per publish). */
+   arm, never one per publish). The tx opens BEFORE the clear: an open
+   failure leaves the announce in place and the next armed sighting
+   retries — claiming first could consume the edge without sending.
+   Single-producer: the flush callsite serializes the lazy open. */
 static void chan_notify_signal(mizu_channel *c) {
+  if (c->ntfy_tx == NULL) {
+    c->ntfy_tx = mizu_notify_tx_open(c->livedir, c->shm.name,
+                                    c->side == MIZU_ENTITY_HOST ? "peer" : "host");
+    if (c->ntfy_tx == NULL) return;
+  }
   if ((atomic_fetch_and_explicit(c->peer_parked, ~MIZU_WAIT_NOTIFY,
                                  memory_order_acq_rel) & MIZU_WAIT_NOTIFY) == 0)
     return;
-  if (c->ntfy_tx == NULL)
-    c->ntfy_tx = mizu_notify_tx_open(c->livedir, c->shm.name,
-                                    c->side == MIZU_ENTITY_HOST ? "peer" : "host");
-  if (c->ntfy_tx == NULL) return;   /* the next armed sighting retries */
   mizu_notify_tx_send(c->ntfy_tx);
   c->stat_notify_sends++;
 }
@@ -504,6 +508,16 @@ static int chan_rx_avail(mizu_channel *c) {
   if (r->lhead < r->cached_tail) return 1;
   r->cached_tail = atomic_load_explicit(r->tail, memory_order_acquire);
   return r->lhead < r->cached_tail;
+}
+
+/* ext tier: the count form of chan_rx_avail (a drain sizes its receive
+   buffer from it — only this consumer shrinks it, so it never
+   over-allocates on a producer's later publish). */
+size_t mizu_channel_avail(mizu_channel *c) {
+  mizu_chan_ring *r = &c->rx;
+  if (r->lhead < r->cached_tail) return (size_t) (r->cached_tail - r->lhead);
+  r->cached_tail = atomic_load_explicit(r->tail, memory_order_acquire);
+  return (size_t) (r->cached_tail - r->lhead);
 }
 
 /* Publication is what signals the sender "keepers may drop"; the tx-keeper
@@ -1236,14 +1250,20 @@ mizu_status mizu_channel_notify_arm(mizu_channel *c, int on, int *avail_out) {
     return MIZU_OK;
   }
   if (chan_notify_ep(c) == NULL) return MIZU_ERR;
-  /* drop signals queued while disarmed: a stale datagram costs one empty
-     drain, never a spurious fresh signal */
-  mizu_notify_ep_drain(c->ntfy_ep);
   /* announce -> fence -> report: either the peer's publish sees the bit
      or this availability check sees the data — the parker protocol's
-     announce/re-check, transplanted */
-  atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_NOTIFY,
-                           memory_order_seq_cst);
+     announce/re-check, transplanted. A re-arm of a continuously armed
+     word needs neither the drain (a datagram exists only once a publish
+     clears the bit, and it never moved) nor the RMW (the announce
+     stands). */
+  if ((atomic_load_explicit(c->self_parked, memory_order_seq_cst) &
+       MIZU_WAIT_NOTIFY) == 0) {
+    /* drop signals queued while disarmed: a stale datagram costs one
+       empty drain, never a spurious fresh signal */
+    mizu_notify_ep_drain(c->ntfy_ep);
+    atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_NOTIFY,
+                             memory_order_seq_cst);
+  }
   atomic_thread_fence(memory_order_seq_cst);
   if (avail_out != NULL) *avail_out = chan_rx_avail(c);
   return MIZU_OK;

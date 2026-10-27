@@ -22,6 +22,7 @@ mizu_bytes_free
 mizu_channel_abandon
 mizu_channel_alive
 mizu_channel_attach
+mizu_channel_avail
 mizu_channel_close
 mizu_channel_close_signal
 mizu_channel_create

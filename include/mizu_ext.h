@@ -611,6 +611,13 @@ MIZU_API mizu_status mizu_channel_notify_arm(mizu_channel *, int on,
 MIZU_API mizu_status mizu_channel_notify_watch(mizu_channel *,
                                             void (*cb)(void *), void *ctx);
 MIZU_API mizu_status mizu_channel_notify_unwatch(mizu_channel *);
+
+/** The consumer's published-not-yet-consumed message count: one acquire
+   load on a local-cache miss, otherwise the cached tail. Only this
+   consumer shrinks the count, so a caller sizing a receive buffer from
+   it never over-allocates on a producer's later publish. Exported only
+   (the ring locals are internal). */
+MIZU_API size_t mizu_channel_avail(mizu_channel *);
 MIZU_API mizu_status mizu_pool_notify_arm(mizu_pool *, int on);
 MIZU_API mizu_status mizu_pool_notify_watch(mizu_pool *,
                                          void (*cb)(void *), void *ctx);

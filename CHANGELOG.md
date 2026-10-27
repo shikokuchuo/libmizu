@@ -445,6 +445,39 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- A notify signal can no longer be lost to a sender-side open failure:
+  both the channel's `chan_notify_signal` and the pool's
+  `pool_notify_send` now open the cached tx before claiming the edge,
+  where claiming first cleared the consumer's announce and then could
+  return without sending — the announce stayed cleared until the next
+  wake, which would never come (a missed wake on fd exhaustion). An
+  open failure now leaves the announce in place and the next armed
+  sighting retries. The pool's lazily allocated tx table is also
+  serialized now: concurrent first-signals from worker publishes and
+  the off-thread reaper raced the calloc and the per-submitter open
+  (a leaked fd and a lost tx).
+- Notify efficiency, three parts. (1) The pool's per-result publish to
+  an armed submitter load-gates the coalescing-word RMW: a burst's
+  first publisher wins the edge, every later one pays one shared
+  acquire load instead of a locked RMW on the submitter's cache line.
+  (2) Re-arming a continuously armed word skips the endpoint drain and
+  the announce RMW — a datagram exists only once a publish clears the
+  bit — so the steady-state re-arm is one load plus the protocol fence;
+  the announce/re-check ordering is unchanged. (3) On Linux the
+  endpoint socket is born `SOCK_NONBLOCK | SOCK_CLOEXEC`, dropping the
+  four fcntls per endpoint.
+- The Linux death listener no longer runs watch callbacks under its
+  registry mutex: fired watches are snapshot under the lock and their
+  callbacks invoked unlocked, so a slow callback (a binding's drain
+  that takes its runtime's lock) no longer serializes every watch
+  registration and callback in the process — a cross-lock deadlock
+  against a registration holding that runtime lock is gone — and a
+  callback may stop watches, its own included, without self-deadlock.
+  Stop waits out an in-flight callback before returning, so the
+  "nothing touches the watch after stop" guarantee teardown relies on
+  is unchanged; a callback landing after a concurrent stop is the
+  absorbed-stale-signal case the drains are built for. The per-batch
+  registry reap sweeps are now gated on a stop having posted work.
 - `mizu_channel_destroy` no longer unlinks in-flight payload regions
   under a live peer: a producer exiting right after publishing stranded
   the consumer's resolve with "payload region vanished" whenever the

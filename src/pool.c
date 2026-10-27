@@ -139,6 +139,8 @@ struct mizu_pool_s {
   void (*ntfy_cb)(void *);
   void *ntfy_cb_ctx;
   mizu_notify_tx **ntfy_tx;    /* [max_submitters], lazily allocated */
+  _Atomic int ntfy_lock;       /* serializes the lazy tx open (worker
+                                  publishes and the reaper race here) */
   uint64_t stat_notify_sends;
 };
 
@@ -1510,18 +1512,28 @@ static mizu_notify_ep *pool_notify_ep(mizu_pool *p) {
 }
 
 /* One signal per burst: the coalescing word's clear admits exactly one
-   sender, however many workers publish to the armed submitter. */
+   sender, however many workers publish to the armed submitter. The tx
+   opens BEFORE the edge is claimed — an open failure leaves the announce
+   in place and the next publish retries (claiming first could consume
+   the edge without sending) — and the lazy open is serialized, with
+   worker publishes and the off-thread reaper racing here. */
 static void pool_notify_send(mizu_pool *p, uint32_t j) {
-  if (p->ntfy_tx == NULL) {
-    p->ntfy_tx = calloc(p->hdr.max_submitters, sizeof(*p->ntfy_tx));
-    if (p->ntfy_tx == NULL) return;
+  if (p->ntfy_tx == NULL || p->ntfy_tx[j] == NULL) {
+    while (atomic_exchange_explicit(&p->ntfy_lock, 1, memory_order_acquire))
+      { }
+    if (p->ntfy_tx == NULL)
+      p->ntfy_tx = calloc(p->hdr.max_submitters, sizeof(*p->ntfy_tx));
+    if (p->ntfy_tx != NULL && p->ntfy_tx[j] == NULL) {
+      char tag[16];
+      snprintf(tag, sizeof(tag), "sub%u", j);
+      p->ntfy_tx[j] = mizu_notify_tx_open(p->livedir, p->shm.name, tag);
+    }
+    atomic_store_explicit(&p->ntfy_lock, 0, memory_order_release);
+    if (p->ntfy_tx == NULL || p->ntfy_tx[j] == NULL) return;
   }
-  if (p->ntfy_tx[j] == NULL) {
-    char tag[16];
-    snprintf(tag, sizeof(tag), "sub%u", j);
-    p->ntfy_tx[j] = mizu_notify_tx_open(p->livedir, p->shm.name, tag);
-    if (p->ntfy_tx[j] == NULL) return;   /* the next armed sighting retries */
-  }
+  if ((atomic_fetch_and_explicit(&p->sub[j].notify, ~MIZU_WAIT_NOTIFY,
+                                 memory_order_acq_rel) & MIZU_WAIT_NOTIFY) == 0)
+    return;
   mizu_notify_tx_send(p->ntfy_tx[j]);
   p->stat_notify_sends++;
 }
@@ -1536,8 +1548,11 @@ static void pool_unpark_result_waiter(mizu_pool *p, mizu_rs_hdr *rs) {
      as without the feature */
   if ((ws & MIZU_WS_NOTIFY) == 0) {
     mizu_unpark(pool_sub_pk(p, j));
-  } else if ((atomic_fetch_and_explicit(&p->sub[j].notify, ~MIZU_WAIT_NOTIFY,
-                                        memory_order_acq_rel) & MIZU_WAIT_NOTIFY) != 0) {
+  } else if ((atomic_load_explicit(&p->sub[j].notify, memory_order_acquire) &
+              MIZU_WAIT_NOTIFY) != 0) {
+    /* load-first: a burst's first publish clears the announce, so the
+       steady state here is one shared load per result, not a locked RMW;
+       the clear inside pool_notify_send keeps the single-winner edge */
     pool_notify_send(p, j);
   }
 }
@@ -3919,14 +3934,20 @@ mizu_status mizu_pool_notify_arm(mizu_pool *p, int on) {
     return MIZU_OK;
   }
   if (pool_notify_ep(p) == NULL) return MIZU_ERR;
-  /* drop signals queued while disarmed: a stale datagram costs one empty
-     drain, never a spurious fresh signal */
-  mizu_notify_ep_drain(p->ntfy_ep);
-  /* the task-slot announces are already in place (mizu_pool_task_notify
-     goes first): announce the coalescing word -> fence -> the caller's
-     terminal scan sees whatever was already published */
-  atomic_fetch_or_explicit(&s->notify, MIZU_WAIT_NOTIFY,
-                           memory_order_seq_cst);
+  /* a re-arm of a continuously armed word needs neither the drain (a
+     datagram exists only once a publish clears the bit, and it never
+     moved) nor the RMW (the announce stands): fence and let the caller's
+     terminal scan see whatever was already published */
+  if ((atomic_load_explicit(&s->notify, memory_order_seq_cst) &
+       MIZU_WAIT_NOTIFY) == 0) {
+    /* drop signals queued while disarmed: a stale datagram costs one
+       empty drain, never a spurious fresh signal */
+    mizu_notify_ep_drain(p->ntfy_ep);
+    /* the task-slot announces are already in place (mizu_pool_task_notify
+       goes first): announce the coalescing word -> fence */
+    atomic_fetch_or_explicit(&s->notify, MIZU_WAIT_NOTIFY,
+                             memory_order_seq_cst);
+  }
   atomic_thread_fence(memory_order_seq_cst);
   return MIZU_OK;
 }
