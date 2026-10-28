@@ -41,6 +41,20 @@
      death-watch callbacks run on OS listener threads; stage/read/drop
      and the check/park hooks run on the verb-calling thread.
      Documented per-function below.
+   - Handle threading: confine each handle role to one thread at a
+     time. The roles: a channel side (all of its send/recv verbs, both
+     directions), a pool submitter's producing half (the submit
+     family), a pool submitter's waiting half (the collect family),
+     and a pool worker's driver (mizu_pool_worker_run, the help path
+     of a nested collect). A role may
+     migrate threads across a happens-before edge, and one submitter's
+     two halves may live on two threads. Safe from any thread:
+     mizu_pool_cancel, mizu_pool_task_release, mizu_pool_task_state,
+     and the introspection reads. Anything else run concurrently
+     within one role races the single-writer words (ring tails, the
+     staging checkout, waiter announces) — silently, by design: the
+     wire structs carry no mutex. destroy/leave/close must not race
+     verbs in flight on the same handle; bindings pin them.
 
    Not here: the binding seam (mizu_binding, the mizu_stage_* services,
    result publish, the bytes binding) and the promoted internals

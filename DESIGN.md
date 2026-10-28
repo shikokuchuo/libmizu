@@ -699,6 +699,18 @@ An entry a dead claimant left queued is a zombie: bound to a terminated incarnat
 On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper — the flock re-acquire on one OFD is not a mutual exclusion.
 On Linux a region create fails fast when a statvfs probe shows the region cannot fit in tmpfs; the reservation itself (a one-fault-per-extent touch + `MADV_COLLAPSE` huge-folio create on kernels >= 6.1, `MADV_POPULATE_WRITE`, `posix_fallocate` on kernels < 5.14) remains the enforcement point, so no later write fault can SIGBUS.
 
+## Threading contract
+
+Each handle role is confined to one thread at a time (`include/mizu.h` states the contract; this section is its rationale).
+The roles: a channel side (all of its send/recv verbs, both directions), a pool submitter's producing half (the submit family), a pool submitter's waiting half (the collect family), and a pool worker's driver (worker_run, the help path of a nested collect).
+A role may migrate threads across a happens-before edge, and one submitter's two halves may live on two threads.
+The single-writer words the confinement protects: the producer-side ring tails and handle-local cursors, the staging checkout and spill free list, the result-slot scan and mint, the waiter announces, the deque owner side.
+They carry no CAS by design — a mutex on the hot path would void the lock-free proposition — so concurrent verbs within one role race them, and most outcomes are silent: torn ring entries, double keeper surrenders aliasing the free list, duplicated or dropped channel messages.
+The guards that do exist (the terminal-to-FREE collect CAS, the zombie incarnation check, the claimant CASes) catch a violation only after the damage is staged, or not at all.
+Safe from any thread: `mizu_pool_cancel`, `mizu_pool_task_release`, `mizu_pool_task_state`, and the introspection reads — the status-word CAS verbs, deliberately so (GC finalizers and racy probes).
+Destroy/leave/close must not race verbs in flight on the same handle; bindings pin them (pymizu's in-flight count, a free-threaded build needing a real one).
+Bindings answer for the contract in their own idiom: pymizu raises `ConcurrentUseError` from a non-blocking guard on the producer and channel-side verbs; R is single-threaded per session.
+
 ## Pool mechanics
 
 The pool has per-submitter SPSC injection rings, per-worker Chase-Lev deques, and result slots.
