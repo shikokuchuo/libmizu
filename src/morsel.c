@@ -2,11 +2,11 @@
    a binding's parallel map (mizu's map.c and pymizu's map.c kept two copies
    in sync by convention). The region format and protocol invariants are
    mizu_ext.h's morsel section; this TU is the header layout/validation, the
-   morsel-state word arithmetic, the generation-fenced claim + AIMD batch
-   sizing + cursor issue of a batch transition, the reset/trim/cancel words,
-   and the lost-set scan. It sees no language object: the descriptor codec,
-   the x-section element I/O, the batch loop, and the gather stay with the
-   binding. */
+   morsel-state word arithmetic, the generation-fenced claim + proportional
+   batch sizing + cursor issue of a batch transition, the reset/trim/cancel
+   words, and the lost-set scan. It sees no language object: the descriptor
+   codec, the x-section element I/O, the batch loop, and the gather stay
+   with the binding. */
 
 #include <stdlib.h>
 #include <string.h>
