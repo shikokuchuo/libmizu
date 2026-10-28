@@ -8,5 +8,6 @@ var searchData=
   ['the_20format_5',['The format',['../md_DESIGN.html#autotoc_md19',1,'']]],
   ['the_20identity_20word_6',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
   ['the_20keeperless_20claim_7',['The keeperless claim',['../md_DESIGN.html#autotoc_md16',1,'']]],
-  ['tiers_8',['tiers',['../index.html#autotoc_md4',1,'API tiers'],['../md_DESIGN.html#autotoc_md14',1,'Payload framing tiers']]]
+  ['threading_20contract_8',['Threading contract',['../md_DESIGN.html#autotoc_md29',1,'']]],
+  ['tiers_9',['tiers',['../index.html#autotoc_md4',1,'API tiers'],['../md_DESIGN.html#autotoc_md14',1,'Payload framing tiers']]]
 ];

@@ -4,7 +4,7 @@ var searchData=
   ['map_20morsel_20protocol_1',['Map morsel protocol',['../md_DESIGN.html#autotoc_md25',1,'']]],
   ['max_5fsubmitters_2',['max_submitters',['../structmizu__pool__hdr__s.html#acc5844158c4d1a70e43c335f20d2f117',1,'mizu_pool_hdr_s::max_submitters'],['../structmizu__pool__opts__s.html#a1a52a7c30e013b83b4d01093ed74a271',1,'mizu_pool_opts_s::max_submitters']]],
   ['max_5fworkers_3',['max_workers',['../structmizu__pool__hdr__s.html#aa76fa2662b933075df094b4c78eff272',1,'mizu_pool_hdr_s::max_workers'],['../structmizu__pool__opts__s.html#a2f3bbbe7f4e964fb348d88c1c10c8025',1,'mizu_pool_opts_s::max_workers']]],
-  ['mechanics_4',['Pool mechanics',['../md_DESIGN.html#autotoc_md29',1,'']]],
+  ['mechanics_4',['Pool mechanics',['../md_DESIGN.html#autotoc_md30',1,'']]],
   ['mizu_2eh_5',['mizu.h',['../mizu_8h.html',1,'']]],
   ['mizu_5fapi_6',['MIZU_API',['../mizu_8h.html#a6973c25542477c3446b37ed2622245cd',1,'mizu.h']]],
   ['mizu_5farrow_7',['mizu_arrow',['../mizu__ext_8h.html#a6062d72c93653f952fc9d52fe0788658',1,'mizu_ext.h']]],

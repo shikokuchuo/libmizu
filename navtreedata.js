@@ -50,14 +50,15 @@ var NAVTREE =
       [ "Retain table", "md_DESIGN.html#autotoc_md26", null ],
       [ "Zero-copy views", "md_DESIGN.html#autotoc_md27", null ],
       [ "Crash atomicity", "md_DESIGN.html#autotoc_md28", null ],
-      [ "Pool mechanics", "md_DESIGN.html#autotoc_md29", null ],
-      [ "ABI discipline", "md_DESIGN.html#autotoc_md30", null ]
+      [ "Threading contract", "md_DESIGN.html#autotoc_md29", null ],
+      [ "Pool mechanics", "md_DESIGN.html#autotoc_md30", null ],
+      [ "ABI discipline", "md_DESIGN.html#autotoc_md31", null ]
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
-      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md32", [
-        [ "Added", "md_CHANGELOG.html#autotoc_md33", null ],
-        [ "Changed", "md_CHANGELOG.html#autotoc_md34", null ],
-        [ "Fixed", "md_CHANGELOG.html#autotoc_md35", null ]
+      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", [
+        [ "Added", "md_CHANGELOG.html#autotoc_md34", null ],
+        [ "Changed", "md_CHANGELOG.html#autotoc_md35", null ],
+        [ "Fixed", "md_CHANGELOG.html#autotoc_md36", null ]
       ] ]
     ] ],
     [ "Data Structures", "annotated.html", [
@@ -85,7 +86,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d"
+"mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

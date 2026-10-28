@@ -8,7 +8,7 @@ var searchData=
   ['design_20notes_5',['libmizu design notes',['../md_DESIGN.html',1,'']]],
   ['died_5fpid_6',['died_pid',['../structmizu__read__ctx__s.html#a4f8fb3f448de665d6f446a0b61f1722a',1,'mizu_read_ctx_s']]],
   ['died_5fslot_7',['died_slot',['../structmizu__read__ctx__s.html#a495be19250d2c5400b9b6357d8961f83',1,'mizu_read_ctx_s']]],
-  ['discipline_8',['ABI discipline',['../md_DESIGN.html#autotoc_md30',1,'']]],
+  ['discipline_8',['ABI discipline',['../md_DESIGN.html#autotoc_md31',1,'']]],
   ['done_9',['done',['../structmizu__ix__s.html#a8c94770757595a0c73777237b3c6ab66',1,'mizu_ix_s']]],
   ['drop_10',['drop',['../structmizu__channel__opts__s.html#a08f4e2d5cf9ea35a48a7191a765e60ec',1,'mizu_channel_opts_s::drop'],['../structmizu__binding__s.html#a7963cae0c64984f66d1d3f18aa535303',1,'mizu_binding_s::drop']]],
   ['drop_5foffset_11',['drop_offset',['../structmizu__preamble__s.html#adf2db93cae8923f93a9c75224cb0feb6',1,'mizu_preamble_s']]],
