@@ -25,20 +25,23 @@ jobs:
       - name: generate the amalgamation
         run: tools/amalgamate.sh dist
 
-      # The artifact's contract: mizu.c + mizu.h alone, no defines.
+      # The artifact's contract: mizu.c + mizu.h + mizu_ext.h alone, no
+      # defines.
       - name: smoke test
         run: |
-          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Idist -Isrc \
-            tests/unit/test_region.c dist/mizu.c -o test_amalg
+          mkdir smoke
+          cp dist/mizu.c dist/mizu.h dist/mizu_ext.h smoke/
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Ismoke -Isrc \
+            tests/unit/test_region.c smoke/mizu.c -o test_amalg
           ./test_amalg
           printf '#include "mizu.h"\nint main(void){return mizu_version()==0;}\n' \
-            > public_only.c
-          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Idist \
-            public_only.c dist/mizu.c -o public_only
+            > smoke/public_only.c
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -Ismoke \
+            smoke/public_only.c smoke/mizu.c -o public_only
           ./public_only
 
       - name: checksums
-        run: cd dist && sha256sum mizu.c mizu.h > SHA256SUMS.txt
+        run: cd dist && sha256sum mizu.c mizu.h mizu_ext.h > SHA256SUMS.txt
 
       - name: attach to the release
         env:
@@ -47,4 +50,4 @@ jobs:
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" --clobber \
-            dist/mizu.c dist/mizu.h dist/SHA256SUMS.txt
+            dist/mizu.c dist/mizu.h dist/mizu_ext.h dist/SHA256SUMS.txt
