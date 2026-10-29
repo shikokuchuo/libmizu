@@ -465,6 +465,20 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- Pool and listener hygiene, four parts. (1) A reclaimed submitter slot
+  now resets its notify word at claim — a slot whose previous holder
+  died armed no longer hands the next claimant one stray endpoint
+  signal. (2) `pool_open_common` validates the per-slot geometry the
+  header implies (the worker deque offsets and a live submitter slot's
+  result range) at attach/join, where the deque walk and the submitter
+  reaper trusted them without a bound — a hostile region could point
+  them outside their section. (3) The pool's notify tx cache slots are
+  atomic, closing the formal race between the armed fast-path read and
+  a concurrent lazy open under the lock (benign on the targets, UB on
+  paper). (4) The Linux death listener's abnormal epoll-exit path no
+  longer frees watches a stop is waiting out, and fires the
+  conservative callbacks off the registry mutex one at a time, matching
+  the normal loop's discipline (both practically unreachable).
 - A hard-killed armed consumer's notify socket path no longer leaks:
   the survivor cleanup (the channel's `chan_survivor_unlink`, the
   pool's live-file removal on both the unlink and the orphan paths)

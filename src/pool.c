@@ -142,7 +142,9 @@ struct mizu_pool_s {
   mizu_death_watch *ntfy_dwatch;
   void (*ntfy_cb)(void *);
   void *ntfy_cb_ctx;
-  mizu_notify_tx **ntfy_tx;    /* [max_submitters], lazily allocated */
+  _Atomic(mizu_notify_tx *) *_Atomic ntfy_tx;
+                             /* [max_submitters], lazily allocated; atomic
+                                slots keep the racing lazy open lock-free */
   _Atomic int ntfy_lock;       /* serializes the lazy tx open (worker
                                   publishes and the reaper race here) */
   uint64_t stat_notify_sends;
@@ -1006,6 +1008,38 @@ static mizu_pool *pool_open_common(const char *token, const mizu_binding *b,
   p->keepers_n = klen;
 
   pool_wire(p);
+
+  /* The per-slot geometry the header implies, trusted without a bound by
+     the deque walk and the submitter reaper: a hostile region must not
+     point it outside its section (the fuzz tier covers the header, this
+     is the slots). The worker fields are written once at create and
+     immutable; a submitter slot's are rewritten at every claim, so only
+     a slot reading live is checked. */
+  size_t deques_off = (size_t) (p->deques - p->base);
+  for (uint32_t i = 0; i < p->hdr.max_workers; i++) {
+    int64_t want = (int64_t) deques_off +
+      (int64_t) i * (int64_t) p->hdr.deque_cap * (int64_t) p->hdr.slot;
+    if (p->wk[i].deque_buf_off != want ||
+        p->wk[i].deque_cap != (int32_t) p->hdr.deque_cap) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                     "invalid pool region: worker slot geometry mismatch");
+      pool_failed(p, 0);
+      return NULL;
+    }
+  }
+  uint32_t per = p->hdr.result_slots / p->hdr.max_submitters;
+  for (uint32_t j = 0; j < p->hdr.max_submitters; j++) {
+    if (atomic_load_explicit(&p->sub[j].status, memory_order_acquire) ==
+        MIZU_SUB_FREE)
+      continue;
+    if (p->sub[j].rs_start != j * per || p->sub[j].rs_count != per) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                     "invalid pool region: submitter slot geometry mismatch");
+      pool_failed(p, 0);
+      return NULL;
+    }
+  }
+
   memcpy(p->livedir, p->base + p->hdr.livedir_offset,
          (size_t) p->hdr.livedir_size);
   p->livedir[p->hdr.livedir_size] = '\0';
@@ -1109,6 +1143,9 @@ static mizu_status pool_claim_sub_slot(mizu_pool *p, intptr_t *lock_out) {
   me->rs_count = per;
   atomic_store_explicit(&me->stat_spills, 0, memory_order_relaxed);
   atomic_store_explicit(&me->stat_spill_reuse, 0, memory_order_relaxed);
+  /* a previous holder's armed bit dies with it — hand the next claimant
+     no stray signal */
+  atomic_store_explicit(&me->notify, 0, memory_order_relaxed);
   mizu_live_ident(*lock_out, &me->live_dev, &me->live_ino);
   return MIZU_OK;
 }
@@ -1549,25 +1586,41 @@ static mizu_notify_ep *pool_notify_ep(mizu_pool *p) {
    opens BEFORE the edge is claimed — an open failure leaves the announce
    in place and the next publish retries (claiming first could consume
    the edge without sending) — and the lazy open is serialized, with
-   worker publishes and the off-thread reaper racing here. */
+   worker publishes and the off-thread reaper racing here: the cache
+   slots are atomic so the armed fast path stays lock-free. */
 static void pool_notify_send(mizu_pool *p, uint32_t j) {
-  if (p->ntfy_tx == NULL || p->ntfy_tx[j] == NULL) {
+  _Atomic(mizu_notify_tx *) *txs =
+    atomic_load_explicit(&p->ntfy_tx, memory_order_acquire);
+  mizu_notify_tx *tx = txs != NULL ?
+    atomic_load_explicit(&txs[j], memory_order_acquire) : NULL;
+  if (tx == NULL) {
     while (atomic_exchange_explicit(&p->ntfy_lock, 1, memory_order_acquire))
       { }
-    if (p->ntfy_tx == NULL)
-      p->ntfy_tx = calloc(p->hdr.max_submitters, sizeof(*p->ntfy_tx));
-    if (p->ntfy_tx != NULL && p->ntfy_tx[j] == NULL) {
-      char tag[16];
-      snprintf(tag, sizeof(tag), "sub%u", j);
-      p->ntfy_tx[j] = mizu_notify_tx_open(p->livedir, p->shm.name, tag);
+    txs = atomic_load_explicit(&p->ntfy_tx, memory_order_relaxed);
+    if (txs == NULL) {
+      txs = calloc(p->hdr.max_submitters, sizeof(*txs));
+      if (txs != NULL) {
+        for (uint32_t k = 0; k < p->hdr.max_submitters; k++)
+          atomic_init(&txs[k], NULL);
+        atomic_store_explicit(&p->ntfy_tx, txs, memory_order_release);
+      }
+    }
+    if (txs != NULL) {
+      tx = atomic_load_explicit(&txs[j], memory_order_relaxed);
+      if (tx == NULL) {
+        char tag[16];
+        snprintf(tag, sizeof(tag), "sub%u", j);
+        tx = mizu_notify_tx_open(p->livedir, p->shm.name, tag);
+        atomic_store_explicit(&txs[j], tx, memory_order_release);
+      }
     }
     atomic_store_explicit(&p->ntfy_lock, 0, memory_order_release);
-    if (p->ntfy_tx == NULL || p->ntfy_tx[j] == NULL) return;
+    if (tx == NULL) return;
   }
   if ((atomic_fetch_and_explicit(&p->sub[j].notify, ~MIZU_WAIT_NOTIFY,
                                  memory_order_acq_rel) & MIZU_WAIT_NOTIFY) == 0)
     return;
-  mizu_notify_tx_send(p->ntfy_tx[j]);
+  mizu_notify_tx_send(tx);
   p->stat_notify_sends++;
 }
 

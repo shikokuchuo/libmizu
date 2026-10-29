@@ -280,14 +280,59 @@ static void *mizu_dl_main(void *arg) {
      frees directly, and reset the state so the next registration starts
      a fresh listener. Detach: a restart overwrites mizu_dl_thread, and
      teardown joins only the thread it pokes. */
-  pthread_mutex_lock(&mizu_dl_mu);
+  /* Fire phase: the normal loop's discipline — flag/unpark under the
+     lock, callbacks off-lock one at a time (a callback may stop watches),
+     re-walking the registry after each. A fired notify watch's closed fd
+     is its done marker. */
+  for (;;) {
+    void (*cb)(void *) = NULL;
+    void *cb_arg = NULL;
+    _Atomic int *inflight = NULL;
+    pthread_mutex_lock(&mizu_dl_mu);
+    for (struct mizu_death_watch_s *w = mizu_dl_watches; w; w = w->next) {
+      if (w->state != MIZU_DW_ACTIVE) continue;
+      atomic_store_explicit(w->flag, 1, memory_order_release);
+      if (w->has_pk) mizu_unpark(&w->pk);
+      w->state = MIZU_DW_FIRED;
+      if (w->cb != NULL) {
+        atomic_store_explicit(&w->in_flight, 1, memory_order_relaxed);
+        cb = w->cb;
+        cb_arg = w->cb_arg;
+        inflight = &w->in_flight;
+        break;
+      }
+    }
+    if (cb == NULL) {
+      for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches; nw;
+           nw = nw->next) {
+        if (nw->state == MIZU_NW_ACTIVE && nw->fd >= 0 && nw->cb != NULL) {
+          close(nw->fd);
+          nw->fd = -1;
+          atomic_store_explicit(&nw->in_flight, 1, memory_order_relaxed);
+          cb = nw->cb;
+          cb_arg = nw->cb_arg;
+          inflight = &nw->in_flight;
+          break;
+        }
+      }
+    }
+    if (cb == NULL) break;   /* nothing left to fire; the lock stays held */
+    pthread_mutex_unlock(&mizu_dl_mu);
+    cb(cb_arg);                     /* conservative: a wake trigger only —
+        the drain-and-recheck absorbs a spurious fire */
+    atomic_store_explicit(inflight, 0, memory_order_release);
+  }
+  /* The sweep, still under the lock: STOPPED watches a stop is waiting
+     on stay (their tail is the stopper's — leak the struct rather than
+     free it under the wait); everything live unlists so a later stop
+     frees directly. */
   for (struct mizu_death_watch_s *w = mizu_dl_watches, *next; w; w = next) {
     next = w->next;
     if (w->state == MIZU_DW_STOPPED) {
+      if (w->stop_wait) continue;
       if (w->pidfd >= 0) close(w->pidfd);
       free(w);
     } else {
-      if (w->state == MIZU_DW_ACTIVE) mizu_dw_fire(w);
       if (w->pidfd >= 0) close(w->pidfd);
       w->pidfd = -1;
       w->listed = 0;
@@ -298,12 +343,11 @@ static void *mizu_dl_main(void *arg) {
        nw = next) {
     next = nw->next;
     if (nw->state == MIZU_NW_STOPPED) {
-      close(nw->fd);
+      if (nw->stop_wait) continue;
+      if (nw->fd >= 0) close(nw->fd);
       free(nw);
     } else {
-      if (nw->cb != NULL) nw->cb(nw->cb_arg);   /* conservative: a wake
-          trigger only — the drain-and-recheck absorbs a spurious fire */
-      close(nw->fd);
+      if (nw->fd >= 0) close(nw->fd);
       nw->fd = -1;
       nw->listed = 0;
     }
