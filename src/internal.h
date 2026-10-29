@@ -170,7 +170,11 @@ static inline MIZU_MAYBE_UNUSED uint64_t mizu_spin_learn(double gap_ns, uint64_t
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 #  define MIZU_PAUSE() __builtin_ia32_pause()
 #elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
-#  define MIZU_PAUSE() __asm__ __volatile__("yield" ::: "memory")
+/* isb, not yield: the ARM ARM makes yield a hint and Apple cores retire it
+   as a NOP, so a yield spin free-runs at predicate speed and saturates the
+   load path to the shared line. isb stalls the pipeline ~10-40 cycles — a
+   pause-shaped throttle (Rust's spin_loop and Folly emit it here). */
+#  define MIZU_PAUSE() __asm__ __volatile__("isb sy" ::: "memory")
 #else
 #  define MIZU_PAUSE() do { } while (0)
 #endif
