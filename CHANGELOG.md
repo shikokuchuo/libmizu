@@ -379,6 +379,25 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Changed
 
+- **Wire format (128-byte cache-line discipline):** no two words
+  written by different processes now share a 128-byte span in any region
+  layout (Apple Silicon's line size; Intel's adjacent-line prefetcher
+  couples 128-byte sibling pairs too). The channel's ring indices re-pair
+  by writer — [256,384) is host-written only (`MIZU_OFF_HP_TAIL`,
+  `MIZU_OFF_PH_HEAD`), [384,512) peer-written only (`MIZU_OFF_PH_TAIL`,
+  `MIZU_OFF_HP_HEAD`) — at zero cost. The pool layouts widen: the
+  injection ring meta to 256 B (`MIZU_INJ_HEAD_OFF` 128), the tier words
+  to 256 B (`MIZU_TIER_FULL_OFF` 128), `mizu_wk_slot` to 256 B (admin +
+  owner-written words on the first span, the thief-CAS'd `deque_top` on
+  the second), `mizu_sub_slot` to 128 B (one submitter per span), and the
+  control block to 384 B (`MIZU_CTRL_PARKED_OFF` 128,
+  `MIZU_CTRL_HELP_OFF` 256); every section base in the pool region rounds
+  to 128 so the widened structs never straddle. The channel `arena_size`
+  contract tightens to a multiple of 128 to keep the second arena's base
+  aligned. Pre-release: `MIZU_ABI_VERSION` stays 1 (peers are
+  same-build) — the standing exception to the bump-on-any-wire-change
+  rule; both bindings re-vendor.
+
 - uint64 conversion: values up to `INT64_MAX` now cross exactly as
   integer64 (an INT64 leaf / the `i64v` form) instead of double with
   past-2^53 lanes reading as `NA_real_`; only values past `INT64_MAX`

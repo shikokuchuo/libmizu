@@ -57,6 +57,7 @@ struct mizu_pool_s {
   _Atomic uint64_t *parked_workers;
   _Atomic uint32_t *help_wanted;
   unsigned char *rings;
+  unsigned char *deques;
   unsigned char *results;
 
   mizu_parker *pks;               /* every entity: workers, then submitters */
@@ -150,17 +151,32 @@ static uint64_t pool_ring_bytes(const mizu_pool_hdr *h) {
   return MIZU_INJ_META_SIZE + (uint64_t) h->inj_cap * h->slot;
 }
 
+/* Every section base is 128-aligned so the widened (128-byte discipline)
+   structs never straddle a 128-byte span; under the validated capacity
+   constraints every section size is already a multiple of 128, so the
+   round-ups are the header's 64 and nothing else. */
+static uint64_t pool_align128(uint64_t off) {
+  return (off + 127) & ~(uint64_t) 127;
+}
+
 /* Region size implied by a header; the create sizes with it and the attach
    validator checks against it, so both sides share one piece of offset math. */
 static uint64_t pool_fixed_size(const mizu_pool_hdr *h) {
-  return 64 +
-    (uint64_t) h->max_workers * sizeof(mizu_wk_slot) +
-    (uint64_t) h->max_submitters * sizeof(mizu_sub_slot) +
-    128 +
-    (uint64_t) h->max_submitters * pool_ring_bytes(h) +
-    (uint64_t) h->max_workers * ((uint64_t) h->deque_cap * h->slot) +
-    (uint64_t) h->result_slots * h->slot +
-    192;
+  uint64_t off = pool_align128(sizeof(mizu_pool_hdr));
+  off += (uint64_t) h->max_workers * sizeof(mizu_wk_slot);
+  off = pool_align128(off);
+  off += (uint64_t) h->max_submitters * sizeof(mizu_sub_slot);
+  off = pool_align128(off);
+  off += MIZU_TIER_SIZE;
+  off = pool_align128(off);
+  off += (uint64_t) h->max_submitters * pool_ring_bytes(h);
+  off = pool_align128(off);
+  off += (uint64_t) h->max_workers * ((uint64_t) h->deque_cap * h->slot);
+  off = pool_align128(off);
+  off += (uint64_t) h->result_slots * h->slot;
+  off = pool_align128(off);
+  off += MIZU_CTRL_SIZE;
+  return off;
 }
 
 static void pool_wire(mizu_pool *p) {
@@ -170,19 +186,26 @@ static void pool_wire(mizu_pool *p) {
   p->inline_entry = h->slot - (uint32_t) sizeof(mizu_entry_hdr);
   p->inline_rs = h->slot - (uint32_t) sizeof(mizu_rs_hdr);
 
-  size_t off = 64;
+  size_t off = (size_t) pool_align128(sizeof(mizu_pool_hdr));
   p->wk = (mizu_wk_slot *) (b + off);
-  off += (size_t) h->max_workers * sizeof(mizu_wk_slot);
+  off = (size_t) pool_align128(
+    (uint64_t) off + (uint64_t) h->max_workers * sizeof(mizu_wk_slot));
   p->sub = (mizu_sub_slot *) (b + off);
-  off += (size_t) h->max_submitters * sizeof(mizu_sub_slot);
+  off = (size_t) pool_align128(
+    (uint64_t) off + (uint64_t) h->max_submitters * sizeof(mizu_sub_slot));
   p->inj_ready = (_Atomic uint64_t *) (b + off + MIZU_TIER_READY_OFF);
   p->full_waiters = (_Atomic uint64_t *) (b + off + MIZU_TIER_FULL_OFF);
-  off += 128;
+  off = (size_t) pool_align128((uint64_t) off + MIZU_TIER_SIZE);
   p->rings = b + off;
-  off += (size_t) h->max_submitters * pool_ring_bytes(h);
-  off += (size_t) h->max_workers * ((size_t) h->deque_cap * h->slot);
+  off = (size_t) pool_align128(
+    (uint64_t) off + (uint64_t) h->max_submitters * pool_ring_bytes(h));
+  p->deques = b + off;
+  off = (size_t) pool_align128(
+    (uint64_t) off +
+    (uint64_t) h->max_workers * ((uint64_t) h->deque_cap * h->slot));
   p->results = b + off;
-  off += (size_t) h->result_slots * h->slot;
+  off = (size_t) pool_align128(
+    (uint64_t) off + (uint64_t) h->result_slots * h->slot);
   p->shutdown = (_Atomic uint32_t *) (b + off + MIZU_CTRL_SHUTDOWN_OFF);
   p->parked_workers = (_Atomic uint64_t *) (b + off + MIZU_CTRL_PARKED_OFF);
   p->help_wanted = (_Atomic uint32_t *) (b + off + MIZU_CTRL_HELP_OFF);
@@ -678,8 +701,7 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
   /* Host-assigned worker-slot geometry, written once before any spawn. The
      deque space feeds the stealing tier; a fresh region is zero-filled, so
      every status word starts FREE and every index at 0. */
-  size_t deques_off = (size_t) (p->rings - base) +
-    (size_t) h.max_submitters * pool_ring_bytes(&h);
+  size_t deques_off = (size_t) (p->deques - base);
   for (uint32_t i = 0; i < h.max_workers; i++) {
     p->wk[i].id = (int32_t) i;
     p->wk[i].deque_buf_off = (int64_t) deques_off +

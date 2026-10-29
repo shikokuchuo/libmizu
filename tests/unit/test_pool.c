@@ -838,7 +838,7 @@ static void test_probe_streak(void) {
   mizu_shm *shm = mizu_shm_open_rw_heap(name, 0);
   assert(shm != NULL);
   unsigned char *base = shm->addr;
-  mizu_wk_slot *w1 = (mizu_wk_slot *) (base + 64) + 1;
+  mizu_wk_slot *w1 = (mizu_wk_slot *) (base + 128) + 1;
   mizu_entry_hdr *eh = (mizu_entry_hdr *) (base + w1->deque_buf_off);
   eh->rs_index = UINT32_MAX;
   mizu_pool_destroy(wk2);   /* no leave: exactly a crash */
@@ -1542,9 +1542,9 @@ static void test_zombie_entry(void) {
   unsigned char *base = shm->addr;
   mizu_pool_hdr h;
   memcpy(&h, base, sizeof(h));
-  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
-  size_t results_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
-    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 128);
+  size_t results_off = 128 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + MIZU_TIER_SIZE +
     (size_t) h.max_submitters *
       (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
     (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot);
@@ -3519,8 +3519,8 @@ static void test_rawspill_pool(void) {
   unsigned char *base = mizu_shm_addr(shm);
   mizu_pool_hdr h;
   memcpy(&h, base, sizeof(h));
-  size_t rings_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
-    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128;
+  size_t rings_off = 128 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + MIZU_TIER_SIZE;
   size_t ring_bytes = MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot;
   size_t deques_off = rings_off +
     (size_t) h.max_submitters * ring_bytes;
@@ -3634,7 +3634,7 @@ static void test_reap_paths(void) {
   mizu_shm *shm = NULL;
   assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
   mizu_wk_slot *w0 = (mizu_wk_slot *) ((unsigned char *) mizu_shm_addr(shm) +
-                                       64);
+                                       128);
   atomic_store(&w0->status, MIZU_WK_CLAIMING);
   mizu_shm_close(shm, 0);
   mizu_pool *x = NULL;
@@ -3691,11 +3691,11 @@ static void test_unpark_idle(void) {
   mizu_shm *shm = NULL;
   assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
   unsigned char *base = mizu_shm_addr(shm);
-  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 128);
   mizu_pool_hdr h;
   memcpy(&h, base, sizeof(h));
-  size_t ctrl_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
-    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+  size_t ctrl_off = 128 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + MIZU_TIER_SIZE +
     (size_t) h.max_submitters *
       (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
     (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot) +
@@ -3742,11 +3742,11 @@ static void test_unpark_waking(void) {
   mizu_shm *shm = NULL;
   assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
   unsigned char *base = mizu_shm_addr(shm);
-  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 64);
+  mizu_wk_slot *w0 = (mizu_wk_slot *) (base + 128);
   mizu_pool_hdr h;
   memcpy(&h, base, sizeof(h));
-  size_t ctrl_off = 64 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
-    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + 128 +
+  size_t ctrl_off = 128 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + MIZU_TIER_SIZE +
     (size_t) h.max_submitters *
       (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
     (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot) +

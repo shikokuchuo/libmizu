@@ -167,7 +167,7 @@ typedef struct mizu_preamble_s {
   uint32_t cap;              /**< slots per ring, power of two */
   uint32_t slot;             /**< slot size in bytes, power of two */
   uint64_t host_pid;         /**< the peer death listener's watch target */
-  uint64_t arena_size;       /**< bytes per direction, multiple of 64, 0 disables */
+  uint64_t arena_size;       /**< bytes per direction, multiple of 128, 0 disables */
   uint64_t drop_offset;      /**< peer bootstrap bytes, exact-sized (opaque */
   uint64_t drop_size;        /**<   to the core; tagged — see MIZU_DROP_*) */
   uint64_t livedir_offset;   /**< directory holding the two liveness files */
@@ -186,7 +186,10 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 
 /** Fixed channel layout: preamble (0), rendezvous line (64), one entity
    block per side (128 host, 192 peer), then the four ring index lines
-   from 256 — one full cache line per shared index. */
+   from 256 — one full cache line per shared index, and the lines paired
+   by writer so no 128-byte span carries two processes' stores: [256,384)
+   is host-written only (HP tail, PH head), [384,512) peer-written only
+   (PH tail, HP head). */
 #define MIZU_ENTITY_HOST  0
 #define MIZU_ENTITY_PEER  1
 #define MIZU_ENTITY_OFFSET(i)  ((size_t) 128 + 64 * (size_t) (i))
@@ -217,9 +220,14 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 #define MIZU_ENTITY_IDENT   16
 
 #define MIZU_OFF_HP_TAIL    ((size_t) 256)
-#define MIZU_OFF_HP_HEAD    ((size_t) 320)
+#define MIZU_OFF_PH_HEAD    ((size_t) 320)
 #define MIZU_OFF_PH_TAIL    ((size_t) 384)
-#define MIZU_OFF_PH_HEAD    ((size_t) 448)
+#define MIZU_OFF_HP_HEAD    ((size_t) 448)
+
+MIZU_STATIC_ASSERT(MIZU_OFF_HP_TAIL / 128 == MIZU_OFF_PH_HEAD / 128 &&
+                   MIZU_OFF_PH_TAIL / 128 == MIZU_OFF_HP_HEAD / 128 &&
+                   MIZU_OFF_HP_TAIL / 128 != MIZU_OFF_PH_TAIL / 128,
+                   "ring indices pair by writer on a 128-byte span");
 
 // Wire format: payload framing -------------------------------------------------
 
@@ -423,10 +431,11 @@ typedef struct mizu_pool_hdr_s {
 
 MIZU_STATIC_ASSERT(sizeof(mizu_pool_hdr) == 64, "mizu_pool_hdr is the wire format");
 
-/** Worker registry slot: two cache lines — admin + owner-written fields on
-   line 0, thief-CAS'd deque_top apart on line 1. in_flight_rs/_seq are
-   announced before any claim and read only post-mortem by a reaper
-   serialized by the liveness lock. */
+/** Worker registry slot: two 128-byte spans — admin + owner-written fields
+   on the first, the thief-CAS'd deque_top apart on the second, so no span
+   carries two processes' stores. in_flight_rs/_seq are announced before
+   any claim and read only post-mortem by a reaper serialized by the
+   liveness lock. */
 typedef struct mizu_wk_slot_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_WK_* */
   int32_t          id;
@@ -440,6 +449,7 @@ typedef struct mizu_wk_slot_s {
   MIZU_ATOMIC(int64_t)  deque_bottom;
   MIZU_ATOMIC(int32_t)  retire;
   uint8_t          pad0[4];
+  uint8_t          pad1[64];      /**< deque_top off the owner's span */
   MIZU_ATOMIC(int64_t)  deque_top;
   uint64_t         live_dev;      /**< liveness-file identity, written once */
   uint64_t         live_ino;      /**<  at join before LIVE */
@@ -448,10 +458,14 @@ typedef struct mizu_wk_slot_s {
   MIZU_ATOMIC(uint64_t) stat_inj;
   MIZU_ATOMIC(uint64_t) stat_parks;
   MIZU_ATOMIC(uint64_t) stat_helps;
+  uint8_t          pad2[64];
 } mizu_wk_slot;
 
-MIZU_STATIC_ASSERT(sizeof(mizu_wk_slot) == 128, "mizu_wk_slot is the wire format");
+MIZU_STATIC_ASSERT(sizeof(mizu_wk_slot) == 256, "mizu_wk_slot is the wire format");
 
+/** Submitter registry slot: one 128-byte span per submitter — stat_spills
+   is a per-checkout RMW and notify the publishers' clear, so adjacent
+   submitters must not share one. */
 typedef struct mizu_sub_slot_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_SUB_* */
   MIZU_ATOMIC(uint32_t) park_epoch;
@@ -465,10 +479,10 @@ typedef struct mizu_sub_slot_s {
   MIZU_ATOMIC(uint32_t) notify;  /**< the submitter's notify-arm bitmask
       (MIZU_WAIT_*; the coalescing word the first publisher per burst
       clears as it signals the submitter's endpoint) */
-  uint8_t          pad[4];
+  uint8_t          pad[68];
 } mizu_sub_slot;
 
-MIZU_STATIC_ASSERT(sizeof(mizu_sub_slot) == 64, "mizu_sub_slot is the wire format");
+MIZU_STATIC_ASSERT(sizeof(mizu_sub_slot) == 128, "mizu_sub_slot is the wire format");
 
 /** Bit 30 of mizu_rs_hdr.waiter_slot: the waiter wants a signal on the
    submitter's notify endpoint instead of an unpark. The value stays
@@ -527,16 +541,26 @@ typedef enum mizu_rs_status_e { MIZU_RS_FREE = 0, MIZU_RS_PENDING, MIZU_RS_OK,
 typedef enum mizu_park_state_e { MIZU_WPK_RUNNING = 0, MIZU_WPK_IDLE,
                                 MIZU_WPK_PARKED, MIZU_WPK_WAKING } mizu_park_state;
 
-/** Injection tier metadata (128 B) and control block (192 B) offsets:
-   unrelated hot words, one cache line each. */
-#define MIZU_INJ_META_SIZE     ((size_t) 128)
+/** Injection ring metadata (256 B), tier words (256 B) and control block
+   (384 B): unrelated hot words, one 128-byte span each — tail and head,
+   inj_ready and full_waiters, shutdown and the park/help words are written
+   by different processes. */
+#define MIZU_INJ_META_SIZE     ((size_t) 256)
 #define MIZU_INJ_TAIL_OFF      ((size_t) 0)
-#define MIZU_INJ_HEAD_OFF      ((size_t) 64)
+#define MIZU_INJ_HEAD_OFF      ((size_t) 128)
+#define MIZU_TIER_SIZE         ((size_t) 256)
 #define MIZU_TIER_READY_OFF    ((size_t) 0)
-#define MIZU_TIER_FULL_OFF     ((size_t) 64)
+#define MIZU_TIER_FULL_OFF     ((size_t) 128)
+#define MIZU_CTRL_SIZE         ((size_t) 384)
 #define MIZU_CTRL_SHUTDOWN_OFF ((size_t) 0)
-#define MIZU_CTRL_PARKED_OFF   ((size_t) 64)
-#define MIZU_CTRL_HELP_OFF     ((size_t) 128)
+#define MIZU_CTRL_PARKED_OFF   ((size_t) 128)
+#define MIZU_CTRL_HELP_OFF     ((size_t) 256)
+
+MIZU_STATIC_ASSERT(MIZU_INJ_HEAD_OFF % 128 == 0 &&
+                   MIZU_TIER_FULL_OFF % 128 == 0 &&
+                   MIZU_CTRL_PARKED_OFF % 128 == 0 &&
+                   MIZU_CTRL_HELP_OFF % 128 == 0,
+                   "cross-writer words sit on distinct 128-byte spans");
 
 // Regions (mizu_shm) ----------------------------------------------------------------
 

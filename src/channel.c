@@ -783,9 +783,9 @@ mizu_status mizu_channel_create(mizu_channel **out,
                        "slot_size must be a power of two between 64 and 2^20");
     return MIZU_ERR;
   }
-  if (arena % 64 != 0 || arena > ((uint64_t) 1.1e12)) {
+  if (arena % 128 != 0 || arena > ((uint64_t) 1.1e12)) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "arena_size must be a non-negative multiple of 64 "
+                       "arena_size must be a non-negative multiple of 128 "
                        "and at most 1.1e12");
     return MIZU_ERR;
   }
