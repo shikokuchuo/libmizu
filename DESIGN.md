@@ -52,7 +52,7 @@ An indefinite park uses `MIZU_PARK_NOMINAL_MS` and relies on directed unparks.
 ## Notify endpoints
 
 A waiting entity can own a notify endpoint: a named, pollable wake object the publisher signals at the same fenced checkpoint where it tests the parked announce.
-On Linux the endpoint is an abstract-namespace datagram socket (no filesystem entry, no unlink races, auto-cleanup on close); on macOS a bound filesystem datagram socket under the liveness dir (a path past the `sun_path` budget fails the arm with a recorded error); on Windows an auto-reset named event (`SetEvent` while signaled coalesces, the wait consumes it).
+On POSIX the endpoint is a bound filesystem datagram socket under the liveness dir — `/dev/shm` on Linux, so the endpoint shares the regions' visibility scope exactly and the async surface has no precondition the sync surface lacks (a path past the `sun_path` budget fails the arm with a recorded error; unlink-before-bind absorbs a dead holder's residue); on Windows an auto-reset named event (`SetEvent` while signaled coalesces, the wait consumes it).
 Notify endpoints are a second wake-trigger class: like the death listeners, they are triggers only, never a verdict.
 The consumer's drain-and-recheck decides.
 

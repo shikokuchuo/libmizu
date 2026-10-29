@@ -568,9 +568,10 @@ MIZU_API void mizu_death_listener_teardown(void);
 // Notify endpoints (notify.c; the watches ride the wait_*.c listener machinery) ---
 
 /** Event-driven wakes for a binding's async integration: an armed
-   consumer owns a named, pollable endpoint (Linux an abstract-namespace
-   datagram socket, macOS a bound filesystem datagram socket under the
-   liveness dir, Windows an auto-reset named event); the publisher
+   consumer owns a named, pollable endpoint (POSIX a bound filesystem
+   datagram socket under the liveness dir — /dev/shm on Linux, so the
+   endpoint shares the regions' visibility scope exactly — Windows an
+   auto-reset named event); the publisher
    signals it at the same fenced checkpoint where it tests the parked
    announce, so the arm/re-check discipline is the parker protocol
    transplanted. The arm is edge-triggered: the publisher clears the bit
@@ -579,8 +580,8 @@ MIZU_API void mizu_death_listener_teardown(void);
    drain-and-recheck. The unarmed publish path is unchanged: the notify
    bit rides the word the publish already loads and tests.
    An endpoint is created lazily at the first arm or watch and lives
-   until the handle's destroy; a graceful destroy unlinks the macOS
-   socket path, a hard kill leaves it as residue beside the .live.*
+   until the handle's destroy; a graceful destroy unlinks the socket
+   path, a hard kill leaves it as residue beside the .live.*
    files (unlink-before-bind absorbs it; the reaper's exact region
    grammar never touches suffixed names).
    arm on a MIZU_FLAG_SPIN channel fails MIZU_ERR: the spin publish path

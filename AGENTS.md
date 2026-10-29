@@ -205,8 +205,8 @@ these.
   the MIZH/MIZS/MIZL layout headers (also documented in `mizu.h`) and the
   validity-as-data section semantics.
 - Notify endpoints (`notify.c`, DESIGN.md's section) are edge-triggered
-  named wakes (Linux abstract datagram socket, macOS filesystem datagram
-  socket, Windows auto-reset event) signaled at the same already-fenced
+  named wakes (a filesystem datagram socket under the liveness dir on
+  POSIX, an auto-reset event on Windows) signaled at the same already-fenced
   checkpoint where a publish tests the parked announce: the notify bit
   rides a word the publish already loads (the channel `parked` word, now
   a `MIZU_WAIT_*` bitmask; the pool `waiter_slot` with `MIZU_WS_NOTIFY`,

@@ -434,19 +434,26 @@ static void test_endpoint_paths(void) {
   char path[MIZU_PATH_BUF];
   int n = snprintf(path, sizeof(path), "%s/mizu_1_2.ntfy.host", livedir);
   assert(n > 0 && (size_t) n < sizeof(path));
-#ifdef __APPLE__
+#ifndef _WIN32
   /* the filesystem socket is unlinked by the graceful close */
   assert(access(path, F_OK) != 0);
+  /* a stale path of any kind never blocks a fresh endpoint */
+  int fd = open(path, O_CREAT | O_WRONLY, 0600);
+  assert(fd >= 0);
+  close(fd);
+  mizu_notify_ep *ep4 = mizu_notify_ep_open(livedir, region, "host", &err);
+  assert(ep4 != NULL);
+  mizu_notify_ep_close(ep4, 1);
 #endif
 
-  /* the sun_path budget: macOS records the failure; the abstract name
-     (Linux) and the named event (Windows) ignore livedir */
+  /* the sun_path budget: POSIX records the failure; the named event
+     (Windows) ignores livedir */
   char longdir[160];
   memset(longdir, 'a', sizeof(longdir) - 1);
   longdir[0] = '/';
   longdir[sizeof(longdir) - 1] = '\0';
   mizu_notify_ep *ep3 = mizu_notify_ep_open(longdir, region, "host", &err);
-#ifdef __APPLE__
+#ifndef _WIN32
   assert(ep3 == NULL);
   assert(err != NULL && strstr(err, "livedir too long") != NULL);
 #else

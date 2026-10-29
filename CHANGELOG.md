@@ -25,11 +25,12 @@ to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
   ABI bump: caps are negotiated.
 
 - Notify endpoints: an event-driven wake for a binding's async
-  integration. An armed consumer owns a named, pollable endpoint (Linux
-  an abstract-namespace datagram socket, macOS a bound filesystem
-  datagram socket under the liveness dir — a path past the `sun_path`
-  budget fails the arm with a recorded error — Windows an auto-reset
-  named event); the publisher signals it at the same already-synchronized
+  integration. An armed consumer owns a named, pollable endpoint (a
+  bound filesystem datagram socket under the liveness dir on POSIX —
+  `/dev/shm` on Linux, so the endpoint shares the regions' visibility
+  scope exactly — a path past the `sun_path` budget fails the arm with a
+  recorded error; an auto-reset named event on Windows); the publisher
+  signals it at the same already-synchronized
   checkpoint where it tests the parked announce. The flag is
   edge-triggered and rides the word the publish already loads and tests
   (the channel's `parked` word, now a `MIZU_WAIT_*` bitmask; the pool
