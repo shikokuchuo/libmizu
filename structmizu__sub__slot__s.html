@@ -93,6 +93,11 @@ $(function(){initNavTree('structmizu__sub__slot__s.html','',''); });
   <div class="headertitle"><div class="title">mizu_sub_slot_s Struct Reference</div></div>
 </div><!--header-->
 <div class="contents">
+
+<p>Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one.  
+ <a href="#details">More...</a></p>
+
+<p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 id="header-pub-attribs" class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
 Data Fields</h2></td></tr>
@@ -120,10 +125,12 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_spill_reuse<
 <tr class="memitem:a612d66758bb75f4cc38756b638d5bce3" id="r_a612d66758bb75f4cc38756b638d5bce3"><td class="memItemLeft" align="right" valign="top"><a id="a612d66758bb75f4cc38756b638d5bce3" name="a612d66758bb75f4cc38756b638d5bce3"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>notify</b></td></tr>
 <tr class="memdesc:a612d66758bb75f4cc38756b638d5bce3"><td class="mdescLeft">&#160;</td><td class="mdescRight">the submitter's notify-arm bitmask (MIZU_WAIT_*; the coalescing word the first publisher per burst clears as it signals the submitter's endpoint) <br /></td></tr>
-<tr class="memitem:afc85c1ecf978feef1cb917acb2d3df23" id="r_afc85c1ecf978feef1cb917acb2d3df23"><td class="memItemLeft" align="right" valign="top"><a id="afc85c1ecf978feef1cb917acb2d3df23" name="afc85c1ecf978feef1cb917acb2d3df23"></a>
-uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad</b> [4]</td></tr>
+<tr class="memitem:a3344d6f97cda68d6b5ba70e9855f63a0" id="r_a3344d6f97cda68d6b5ba70e9855f63a0"><td class="memItemLeft" align="right" valign="top"><a id="a3344d6f97cda68d6b5ba70e9855f63a0" name="a3344d6f97cda68d6b5ba70e9855f63a0"></a>
+uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad</b> [68]</td></tr>
 </table>
-<hr/>The documentation for this struct was generated from the following file:<ul>
+<a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
+<div class="textblock"><p>Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one. </p>
+</div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>
 </div><!-- contents -->

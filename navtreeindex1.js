@@ -1,5 +1,6 @@
 var NAVTREEINDEX1 =
 {
+"mizu__ext_8h.html#aad8d5822cd30234e761c62abea32206b":[4,0,0,1,79],
 "mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806":[4,0,0,1,152],
 "mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d":[4,0,0,1,157],
 "mizu__ext_8h.html#ab76ac0a4c96d06f733bc4a41cd65f206":[4,0,0,1,34],
@@ -220,8 +221,9 @@ var NAVTREEINDEX1 =
 "structmizu__wk__slot__s.html":[3,0,34],
 "structmizu__wk__slot__s.html#a5c8ea5bd812556cef1f9eb6fe3d99f82":[3,0,34,0],
 "structmizu__wk__slot__s.html#a5d310891f1f929039cb0d13bd3e0990e":[3,0,34,1],
-"structmizu__wk__slot__s.html#a7245c6f5901460c212bd006443e87eb9":[3,0,34,4],
-"structmizu__wk__slot__s.html#a899475cd38f826b6cd04ab77b56350f9":[3,0,34,3],
+"structmizu__wk__slot__s.html#a60273667a6ad21510a071e19df2918c0":[3,0,34,3],
+"structmizu__wk__slot__s.html#a7245c6f5901460c212bd006443e87eb9":[3,0,34,5],
+"structmizu__wk__slot__s.html#a899475cd38f826b6cd04ab77b56350f9":[3,0,34,4],
 "structmizu__wk__slot__s.html#aed743cfd1208c0117e77c58080eadec5":[3,0,34,2],
 "structmizu__worker__stat__s.html":[3,0,35]
 };

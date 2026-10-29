@@ -94,7 +94,7 @@ $(function(){initNavTree('structmizu__wk__slot__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>Worker registry slot: two cache lines — admin + owner-written fields on line 0, thief-CAS'd deque_top apart on line 1.  
+<p>Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores.  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
@@ -128,6 +128,9 @@ int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>deque_bottom</b></
 int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>retire</b></td></tr>
 <tr class="memitem:a615a0307f44babd9e97fa3324dc745b2" id="r_a615a0307f44babd9e97fa3324dc745b2"><td class="memItemLeft" align="right" valign="top"><a id="a615a0307f44babd9e97fa3324dc745b2" name="a615a0307f44babd9e97fa3324dc745b2"></a>
 uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad0</b> [4]</td></tr>
+<tr class="memitem:a60273667a6ad21510a071e19df2918c0" id="r_a60273667a6ad21510a071e19df2918c0"><td class="memItemLeft" align="right" valign="top"><a id="a60273667a6ad21510a071e19df2918c0" name="a60273667a6ad21510a071e19df2918c0"></a>
+uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad1</b> [64]</td></tr>
+<tr class="memdesc:a60273667a6ad21510a071e19df2918c0"><td class="mdescLeft">&#160;</td><td class="mdescRight">deque_top off the owner's span <br /></td></tr>
 <tr class="memitem:affc37e34fdc1e30b81ff05f9cf0ca190" id="r_affc37e34fdc1e30b81ff05f9cf0ca190"><td class="memItemLeft" align="right" valign="top"><a id="affc37e34fdc1e30b81ff05f9cf0ca190" name="affc37e34fdc1e30b81ff05f9cf0ca190"></a>
 int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>deque_top</b></td></tr>
 <tr class="memitem:a899475cd38f826b6cd04ab77b56350f9" id="r_a899475cd38f826b6cd04ab77b56350f9"><td class="memItemLeft" align="right" valign="top"><a id="a899475cd38f826b6cd04ab77b56350f9" name="a899475cd38f826b6cd04ab77b56350f9"></a>
@@ -146,9 +149,11 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_inj</b></td>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_parks</b></td></tr>
 <tr class="memitem:af64b18af2104e1ab578516c56082bca0" id="r_af64b18af2104e1ab578516c56082bca0"><td class="memItemLeft" align="right" valign="top"><a id="af64b18af2104e1ab578516c56082bca0" name="af64b18af2104e1ab578516c56082bca0"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_helps</b></td></tr>
+<tr class="memitem:a22042ebf313e918c2b1dd03510d77191" id="r_a22042ebf313e918c2b1dd03510d77191"><td class="memItemLeft" align="right" valign="top"><a id="a22042ebf313e918c2b1dd03510d77191" name="a22042ebf313e918c2b1dd03510d77191"></a>
+uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad2</b> [64]</td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Worker registry slot: two cache lines — admin + owner-written fields on line 0, thief-CAS'd deque_top apart on line 1. </p>
+<div class="textblock"><p>Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores. </p>
 <p>in_flight_rs/_seq are announced before any claim and read only post-mortem by a reaper serialized by the liveness lock. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>

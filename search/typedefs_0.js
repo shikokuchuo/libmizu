@@ -30,9 +30,10 @@ var searchData=
   ['mizu_5fstage_5ffn_27',['mizu_stage_fn',['../mizu__ext_8h.html#a8c89ea30f29af0375b6a64a1092a05b2',1,'mizu_ext.h']]],
   ['mizu_5fstatus_28',['mizu_status',['../mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578',1,'mizu.h']]],
   ['mizu_5fstep_5fresult_29',['mizu_step_result',['../mizu_8h.html#af9f8c150ff5a025b09119c7c7fa0d615',1,'mizu.h']]],
-  ['mizu_5ftask_30',['mizu_task',['../mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2',1,'mizu.h']]],
-  ['mizu_5ftrace_5fevent_31',['mizu_trace_event',['../mizu_8h.html#a48550d9d6d7b6fcdf2606c5611fe824d',1,'mizu.h']]],
-  ['mizu_5ftype_32',['mizu_type',['../mizu_8h.html#a48ef91b9cfead9ad559199629a26bef5',1,'mizu.h']]],
-  ['mizu_5fwk_5fslot_33',['mizu_wk_slot',['../mizu_8h.html#a69827f4ec2240db25fe09766d7b3554e',1,'mizu.h']]],
-  ['mizu_5fworker_5fexit_34',['mizu_worker_exit',['../mizu_8h.html#a14ba11cfd46dc11f210a19a45b8f3706',1,'mizu.h']]]
+  ['mizu_5fsub_5fslot_30',['mizu_sub_slot',['../mizu_8h.html#a621b0f03ca6ee8f7919453ddf2fa4ebc',1,'mizu.h']]],
+  ['mizu_5ftask_31',['mizu_task',['../mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2',1,'mizu.h']]],
+  ['mizu_5ftrace_5fevent_32',['mizu_trace_event',['../mizu_8h.html#a48550d9d6d7b6fcdf2606c5611fe824d',1,'mizu.h']]],
+  ['mizu_5ftype_33',['mizu_type',['../mizu_8h.html#a48ef91b9cfead9ad559199629a26bef5',1,'mizu.h']]],
+  ['mizu_5fwk_5fslot_34',['mizu_wk_slot',['../mizu_8h.html#a69827f4ec2240db25fe09766d7b3554e',1,'mizu.h']]],
+  ['mizu_5fworker_5fexit_35',['mizu_worker_exit',['../mizu_8h.html#a14ba11cfd46dc11f210a19a45b8f3706',1,'mizu.h']]]
 ];

@@ -118,8 +118,9 @@ Data Structures</h2></td></tr>
 <tr class="memitem:mizu_5Fslot_5Fhdr_5Fs" id="r_mizu_5Fslot_5Fhdr_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__slot__hdr__s.html">mizu_slot_hdr_s</a></td></tr>
 <tr class="memitem:mizu_5Fpool_5Fhdr_5Fs" id="r_mizu_5Fpool_5Fhdr_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__pool__hdr__s.html">mizu_pool_hdr_s</a></td></tr>
 <tr class="memitem:mizu_5Fwk_5Fslot_5Fs" id="r_mizu_5Fwk_5Fslot_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__wk__slot__s.html">mizu_wk_slot_s</a></td></tr>
-<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Worker registry slot: two cache lines — admin + owner-written fields on line 0, thief-CAS'd deque_top apart on line 1.  <a href="structmizu__wk__slot__s.html#details">More...</a><br /></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores.  <a href="structmizu__wk__slot__s.html#details">More...</a><br /></td></tr>
 <tr class="memitem:mizu_5Fsub_5Fslot_5Fs" id="r_mizu_5Fsub_5Fslot_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__sub__slot__s.html">mizu_sub_slot_s</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one.  <a href="structmizu__sub__slot__s.html#details">More...</a><br /></td></tr>
 <tr class="memitem:mizu_5Frs_5Fhdr_5Fs" id="r_mizu_5Frs_5Fhdr_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__rs__hdr__s.html">mizu_rs_hdr_s</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Result slot header; the payload framing header sits at offset 24 and payload bytes at 40.  <a href="structmizu__rs__hdr__s.html#details">More...</a><br /></td></tr>
 <tr class="memitem:mizu_5Fentry_5Fhdr_5Fs" id="r_mizu_5Fentry_5Fhdr_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__entry__hdr__s.html">mizu_entry_hdr_s</a></td></tr>
@@ -164,7 +165,7 @@ Macros</h2></td></tr>
 <tr class="memdesc:aaca5c755ec2e11f00f6338072e46af19"><td class="mdescLeft">&#160;</td><td class="mdescRight">'S' <br /></td></tr>
 <tr class="memitem:a5f2a2eff12cecbe41a8a65a23cbba3de" id="r_a5f2a2eff12cecbe41a8a65a23cbba3de"><td class="memItemLeft" align="right" valign="top"><a id="a5f2a2eff12cecbe41a8a65a23cbba3de" name="a5f2a2eff12cecbe41a8a65a23cbba3de"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTITY_HOST</b>&#160;&#160;&#160;0</td></tr>
-<tr class="memdesc:a5f2a2eff12cecbe41a8a65a23cbba3de"><td class="mdescLeft">&#160;</td><td class="mdescRight">Fixed channel layout: preamble (0), rendezvous line (64), one entity block per side (128 host, 192 peer), then the four ring index lines from 256 — one full cache line per shared index. <br /></td></tr>
+<tr class="memdesc:a5f2a2eff12cecbe41a8a65a23cbba3de"><td class="mdescLeft">&#160;</td><td class="mdescRight">Fixed channel layout: preamble (0), rendezvous line (64), one entity block per side (128 host, 192 peer), then the four ring index lines from 256 — one full cache line per shared index, and the lines paired by writer so no 128-byte span carries two processes' stores: [256,384) is host-written only (HP tail, PH head), [384,512) peer-written only (PH tail, HP head). <br /></td></tr>
 <tr class="memitem:a2f4a487caacbc6a4d730966647121fdc" id="r_a2f4a487caacbc6a4d730966647121fdc"><td class="memItemLeft" align="right" valign="top"><a id="a2f4a487caacbc6a4d730966647121fdc" name="a2f4a487caacbc6a4d730966647121fdc"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTITY_PEER</b>&#160;&#160;&#160;1</td></tr>
 <tr class="memitem:ac0a3465e8af31e0510c79489c7affa5b" id="r_ac0a3465e8af31e0510c79489c7affa5b"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ac0a3465e8af31e0510c79489c7affa5b">MIZU_ENTITY_OFFSET</a>(i)</td></tr>
@@ -196,12 +197,12 @@ published for me" — the publisher clears it as it signals, so one signal per i
 <tr class="memdesc:ac898f4d62bd0a236f0b4f35ce384fe12"><td class="mdescLeft">&#160;</td><td class="mdescRight">Offset 16 of the 64-byte entity block: the side's identity word (MIZU_IDENT in <a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a> — language byte, reader-capability mask).  <br /></td></tr>
 <tr class="memitem:acf8deaaffe3aa7880ccfc9423df90278" id="r_acf8deaaffe3aa7880ccfc9423df90278"><td class="memItemLeft" align="right" valign="top"><a id="acf8deaaffe3aa7880ccfc9423df90278" name="acf8deaaffe3aa7880ccfc9423df90278"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_HP_TAIL</b>&#160;&#160;&#160;((size_t) 256)</td></tr>
-<tr class="memitem:adcbde48030fff2c853f88790b6d8542a" id="r_adcbde48030fff2c853f88790b6d8542a"><td class="memItemLeft" align="right" valign="top"><a id="adcbde48030fff2c853f88790b6d8542a" name="adcbde48030fff2c853f88790b6d8542a"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_HP_HEAD</b>&#160;&#160;&#160;((size_t) 320)</td></tr>
+<tr class="memitem:a3210b2894ce4b38a2988e05b1273db3e" id="r_a3210b2894ce4b38a2988e05b1273db3e"><td class="memItemLeft" align="right" valign="top"><a id="a3210b2894ce4b38a2988e05b1273db3e" name="a3210b2894ce4b38a2988e05b1273db3e"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_PH_HEAD</b>&#160;&#160;&#160;((size_t) 320)</td></tr>
 <tr class="memitem:ae04a55ef1f51d8fe2b601f545906241d" id="r_ae04a55ef1f51d8fe2b601f545906241d"><td class="memItemLeft" align="right" valign="top"><a id="ae04a55ef1f51d8fe2b601f545906241d" name="ae04a55ef1f51d8fe2b601f545906241d"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_PH_TAIL</b>&#160;&#160;&#160;((size_t) 384)</td></tr>
-<tr class="memitem:a3210b2894ce4b38a2988e05b1273db3e" id="r_a3210b2894ce4b38a2988e05b1273db3e"><td class="memItemLeft" align="right" valign="top"><a id="a3210b2894ce4b38a2988e05b1273db3e" name="a3210b2894ce4b38a2988e05b1273db3e"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_PH_HEAD</b>&#160;&#160;&#160;((size_t) 448)</td></tr>
+<tr class="memitem:adcbde48030fff2c853f88790b6d8542a" id="r_adcbde48030fff2c853f88790b6d8542a"><td class="memItemLeft" align="right" valign="top"><a id="adcbde48030fff2c853f88790b6d8542a" name="adcbde48030fff2c853f88790b6d8542a"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_OFF_HP_HEAD</b>&#160;&#160;&#160;((size_t) 448)</td></tr>
 <tr class="memitem:a8fbd97a3e854aba49b9e0bab33c99948" id="r_a8fbd97a3e854aba49b9e0bab33c99948"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a8fbd97a3e854aba49b9e0bab33c99948">MIZU_AUX_F_KEEPERLESS</a>&#160;&#160;&#160;UINT64_C(1)</td></tr>
 <tr class="memdesc:a8fbd97a3e854aba49b9e0bab33c99948"><td class="mdescLeft">&#160;</td><td class="mdescRight">Bit 0 of the INLINE aux word: the stager's claim that staging this frame committed no retain-table entry, so a pool collect need not wake the producer's keeper sweep.  <br /></td></tr>
 <tr class="memitem:a220baa8f60ecff77d3b744cfa74aa90d" id="r_a220baa8f60ecff77d3b744cfa74aa90d"><td class="memItemLeft" align="right" valign="top"><a id="a220baa8f60ecff77d3b744cfa74aa90d" name="a220baa8f60ecff77d3b744cfa74aa90d"></a>
@@ -264,22 +265,26 @@ published for me" — the publisher clears it as it signals, so one signal per i
 <tr class="memitem:adb83f206960d5da95c6a60124039afbd" id="r_adb83f206960d5da95c6a60124039afbd"><td class="memItemLeft" align="right" valign="top"><a id="adb83f206960d5da95c6a60124039afbd" name="adb83f206960d5da95c6a60124039afbd"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_ENTRY_RUNNER</b>&#160;&#160;&#160;1u</td></tr>
 <tr class="memitem:a92366f133f6295dd1e8e52317491b2ce" id="r_a92366f133f6295dd1e8e52317491b2ce"><td class="memItemLeft" align="right" valign="top"><a id="a92366f133f6295dd1e8e52317491b2ce" name="a92366f133f6295dd1e8e52317491b2ce"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_INJ_META_SIZE</b>&#160;&#160;&#160;((size_t) 128)</td></tr>
-<tr class="memdesc:a92366f133f6295dd1e8e52317491b2ce"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection tier metadata (128 B) and control block (192 B) offsets: unrelated hot words, one cache line each. <br /></td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_INJ_META_SIZE</b>&#160;&#160;&#160;((size_t) 256)</td></tr>
+<tr class="memdesc:a92366f133f6295dd1e8e52317491b2ce"><td class="mdescLeft">&#160;</td><td class="mdescRight">Injection ring metadata (256 B), tier words (256 B) and control block (384 B): unrelated hot words, one 128-byte span each — tail and head, inj_ready and full_waiters, shutdown and the park/help words are written by different processes. <br /></td></tr>
 <tr class="memitem:ac9af3c57be88533523a45b8a72be2148" id="r_ac9af3c57be88533523a45b8a72be2148"><td class="memItemLeft" align="right" valign="top"><a id="ac9af3c57be88533523a45b8a72be2148" name="ac9af3c57be88533523a45b8a72be2148"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_INJ_TAIL_OFF</b>&#160;&#160;&#160;((size_t) 0)</td></tr>
 <tr class="memitem:ac97e533212cf0671147015c245e39514" id="r_ac97e533212cf0671147015c245e39514"><td class="memItemLeft" align="right" valign="top"><a id="ac97e533212cf0671147015c245e39514" name="ac97e533212cf0671147015c245e39514"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_INJ_HEAD_OFF</b>&#160;&#160;&#160;((size_t) 64)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_INJ_HEAD_OFF</b>&#160;&#160;&#160;((size_t) 128)</td></tr>
+<tr class="memitem:aafb2c2828fe6bf5bef6afff58d7005c8" id="r_aafb2c2828fe6bf5bef6afff58d7005c8"><td class="memItemLeft" align="right" valign="top"><a id="aafb2c2828fe6bf5bef6afff58d7005c8" name="aafb2c2828fe6bf5bef6afff58d7005c8"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_TIER_SIZE</b>&#160;&#160;&#160;((size_t) 256)</td></tr>
 <tr class="memitem:a691f31705dea9ed10d7183571ddef897" id="r_a691f31705dea9ed10d7183571ddef897"><td class="memItemLeft" align="right" valign="top"><a id="a691f31705dea9ed10d7183571ddef897" name="a691f31705dea9ed10d7183571ddef897"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_TIER_READY_OFF</b>&#160;&#160;&#160;((size_t) 0)</td></tr>
 <tr class="memitem:aa2fc97b1380c9527237a31eb124ea1ea" id="r_aa2fc97b1380c9527237a31eb124ea1ea"><td class="memItemLeft" align="right" valign="top"><a id="aa2fc97b1380c9527237a31eb124ea1ea" name="aa2fc97b1380c9527237a31eb124ea1ea"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_TIER_FULL_OFF</b>&#160;&#160;&#160;((size_t) 64)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_TIER_FULL_OFF</b>&#160;&#160;&#160;((size_t) 128)</td></tr>
+<tr class="memitem:aae2bc93622d9dc6c7f58c39d9c972fec" id="r_aae2bc93622d9dc6c7f58c39d9c972fec"><td class="memItemLeft" align="right" valign="top"><a id="aae2bc93622d9dc6c7f58c39d9c972fec" name="aae2bc93622d9dc6c7f58c39d9c972fec"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_SIZE</b>&#160;&#160;&#160;((size_t) 384)</td></tr>
 <tr class="memitem:a52b7aabb1f4aef9960e9a60ef5f1d686" id="r_a52b7aabb1f4aef9960e9a60ef5f1d686"><td class="memItemLeft" align="right" valign="top"><a id="a52b7aabb1f4aef9960e9a60ef5f1d686" name="a52b7aabb1f4aef9960e9a60ef5f1d686"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_SHUTDOWN_OFF</b>&#160;&#160;&#160;((size_t) 0)</td></tr>
 <tr class="memitem:a73f2a3a56ceb9059110d333ea0fe8602" id="r_a73f2a3a56ceb9059110d333ea0fe8602"><td class="memItemLeft" align="right" valign="top"><a id="a73f2a3a56ceb9059110d333ea0fe8602" name="a73f2a3a56ceb9059110d333ea0fe8602"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_PARKED_OFF</b>&#160;&#160;&#160;((size_t) 64)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_PARKED_OFF</b>&#160;&#160;&#160;((size_t) 128)</td></tr>
 <tr class="memitem:a068cf31b783b4b0d317a918cd4b3165e" id="r_a068cf31b783b4b0d317a918cd4b3165e"><td class="memItemLeft" align="right" valign="top"><a id="a068cf31b783b4b0d317a918cd4b3165e" name="a068cf31b783b4b0d317a918cd4b3165e"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_HELP_OFF</b>&#160;&#160;&#160;((size_t) 128)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>MIZU_CTRL_HELP_OFF</b>&#160;&#160;&#160;((size_t) 256)</td></tr>
 <tr class="memitem:a289d686d058732bf0f065d5e26037118" id="r_a289d686d058732bf0f065d5e26037118"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a289d686d058732bf0f065d5e26037118">MIZU_OPEN_VIEW_NOCOUNT</a>&#160;&#160;&#160;1u</td></tr>
 <tr class="memdesc:a289d686d058732bf0f065d5e26037118"><td class="mdescLeft">&#160;</td><td class="mdescRight">Heap-only (the stack form stays internal).  <br /></td></tr>
 <tr class="memitem:a981e0f0c900d541e444b24b9550f17f3" id="r_a981e0f0c900d541e444b24b9550f17f3"><td class="memItemLeft" align="right" valign="top"><a id="a981e0f0c900d541e444b24b9550f17f3" name="a981e0f0c900d541e444b24b9550f17f3"></a>
@@ -315,9 +320,10 @@ typedef struct <a class="el" href="structmizu__slot__hdr__s.html">mizu_slot_hdr_
 <tr class="memitem:aa64482c56ffcf305644f7e7d2b1013b0" id="r_aa64482c56ffcf305644f7e7d2b1013b0"><td class="memItemLeft" align="right" valign="top"><a id="aa64482c56ffcf305644f7e7d2b1013b0" name="aa64482c56ffcf305644f7e7d2b1013b0"></a>
 typedef struct <a class="el" href="structmizu__pool__hdr__s.html">mizu_pool_hdr_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_hdr</b></td></tr>
 <tr class="memitem:a69827f4ec2240db25fe09766d7b3554e" id="r_a69827f4ec2240db25fe09766d7b3554e"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="structmizu__wk__slot__s.html">mizu_wk_slot_s</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a69827f4ec2240db25fe09766d7b3554e">mizu_wk_slot</a></td></tr>
-<tr class="memdesc:a69827f4ec2240db25fe09766d7b3554e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Worker registry slot: two cache lines — admin + owner-written fields on line 0, thief-CAS'd deque_top apart on line 1.  <br /></td></tr>
+<tr class="memdesc:a69827f4ec2240db25fe09766d7b3554e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores.  <br /></td></tr>
 <tr class="memitem:a621b0f03ca6ee8f7919453ddf2fa4ebc" id="r_a621b0f03ca6ee8f7919453ddf2fa4ebc"><td class="memItemLeft" align="right" valign="top"><a id="a621b0f03ca6ee8f7919453ddf2fa4ebc" name="a621b0f03ca6ee8f7919453ddf2fa4ebc"></a>
 typedef struct <a class="el" href="structmizu__sub__slot__s.html">mizu_sub_slot_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_sub_slot</b></td></tr>
+<tr class="memdesc:a621b0f03ca6ee8f7919453ddf2fa4ebc"><td class="mdescLeft">&#160;</td><td class="mdescRight">Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one. <br /></td></tr>
 <tr class="memitem:a76245db92247bfec58b8dd3f52355683" id="r_a76245db92247bfec58b8dd3f52355683"><td class="memItemLeft" align="right" valign="top"><a id="a76245db92247bfec58b8dd3f52355683" name="a76245db92247bfec58b8dd3f52355683"></a>
 typedef struct <a class="el" href="structmizu__rs__hdr__s.html">mizu_rs_hdr_s</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rs_hdr</b></td></tr>
 <tr class="memdesc:a76245db92247bfec58b8dd3f52355683"><td class="mdescLeft">&#160;</td><td class="mdescRight">Result slot header; the payload framing header sits at offset 24 and payload bytes at 40. <br /></td></tr>
@@ -1024,7 +1030,7 @@ published for me" — the publisher clears it as it signals, so one signal per i
       </table>
 </div><div class="memdoc">
 
-<p>Worker registry slot: two cache lines — admin + owner-written fields on line 0, thief-CAS'd deque_top apart on line 1. </p>
+<p>Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores. </p>
 <p>in_flight_rs/_seq are announced before any claim and read only post-mortem by a reaper serialized by the liveness lock. </p>
 
 </div>

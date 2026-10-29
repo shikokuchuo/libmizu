@@ -50,6 +50,7 @@ var mizu_8h =
     [ "mizu_kind", "mizu_8h.html#ad2f0ab9ec1616cbb9cd3f3a8f103c638", null ],
     [ "mizu_type", "mizu_8h.html#a48ef91b9cfead9ad559199629a26bef5", null ],
     [ "mizu_wk_slot", "mizu_8h.html#a69827f4ec2240db25fe09766d7b3554e", null ],
+    [ "mizu_sub_slot", "mizu_8h.html#a621b0f03ca6ee8f7919453ddf2fa4ebc", null ],
     [ "mizu_rs_hdr", "mizu_8h.html#a76245db92247bfec58b8dd3f52355683", null ],
     [ "mizu_entry_hdr", "mizu_8h.html#a08a9987850c90d2bd18a698212e2712a", null ],
     [ "mizu_rs_status", "mizu_8h.html#a6e2c1ae6680f9dc5e7723ae4fff0423f", null ],
