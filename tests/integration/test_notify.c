@@ -6,6 +6,12 @@
    with internal.h absent: the API's compile-time contract check.
    POSIX (fork); a stub passes elsewhere. Run via `make test-integration`. */
 
+/* _GNU_SOURCE: glibc hides mkdtemp/setenv and other POSIX declarations
+   under strict -std=c11. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +31,8 @@ int main(void) {
 
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -263,10 +271,80 @@ static void test_pool_cross_process(void) {
   puts("ok pool_cross_process");
 }
 
+/* The pool owner that dies with no workers: creates, hands the token
+   over, then dies hard once the submitter is armed. With nobody left to
+   broadcast, the armed submitter's chained owner watch must still fire. */
+static void run_dying_owner(int token_wr, int go_rd) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 4;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_pool *o;
+  if (mizu_pool_create(&o, &opts, &b) != MIZU_OK) _exit(3);
+  char tok[64];
+  if (mizu_pool_token(o, tok, sizeof(tok)) != MIZU_OK) _exit(4);
+  if (write(token_wr, tok, strlen(tok) + 1) != (ssize_t) (strlen(tok) + 1))
+    _exit(5);
+  char go;
+  if (read(go_rd, &go, 1) != 1) _exit(6);
+  _exit(0);   /* hard: no stop, no destroy — and no worker ever joined */
+}
+
+static void test_pool_owner_death_chain(void) {
+  int tok_pipe[2], go_pipe[2];
+  assert(pipe(tok_pipe) == 0 && pipe(go_pipe) == 0);
+  fflush(stdout);
+  pid_t o = fork();
+  assert(o >= 0);
+  if (o == 0) {
+    close(tok_pipe[0]);
+    close(go_pipe[1]);
+    run_dying_owner(tok_pipe[1], go_pipe[0]);
+  }
+  close(tok_pipe[1]);
+  close(go_pipe[0]);
+  assert(read(tok_pipe[0], token, sizeof(token)) > 0);
+  close(tok_pipe[0]);
+
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *sub;
+  assert(mizu_pool_attach(&sub, token, &b) == MIZU_OK);
+  mizu_task t;
+  mizu_bytes msg = { (void *) "t", 1 };
+  assert(mizu_pool_submit(sub, &msg, &t, 1000) == MIZU_OK);
+  fires = 0;
+  assert(mizu_pool_task_notify(sub, &t, 1, 1) == MIZU_OK);
+  assert(mizu_pool_notify_arm(sub, 1) == MIZU_OK);
+  assert(mizu_pool_notify_watch(sub, count_cb, NULL) == MIZU_OK);
+
+  /* the owner dies with every (never-joined) worker: nothing publishes,
+     yet the chained watch fires the drain */
+  char go = 'x';
+  assert(write(go_pipe[1], &go, 1) == 1);
+  close(go_pipe[1]);
+  assert(wait_exit(o) == 0);
+  assert(wait_fires(1, 5000));
+  /* the sync half sees the verdict too: the collect terminates (the
+     orphan teardown's cancel sweep ends the wait) */
+  void *obj = NULL;
+  assert(mizu_pool_collect(sub, &t, &obj, 5000) != MIZU_OK);
+  assert(mizu_pool_notify_unwatch(sub) == MIZU_OK);
+  mizu_pool_destroy(sub);
+  puts("ok pool_owner_death_chain");
+}
+
 int main(void) {
   test_cross_process_burst();
   test_death_chain();
   test_pool_cross_process();
+  test_pool_owner_death_chain();
   puts("test_notify integration: all passed");
   return 0;
 }

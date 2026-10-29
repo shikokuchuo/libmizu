@@ -69,7 +69,7 @@ A re-arm of a continuously armed word skips both the drain (a datagram exists on
 
 A terminal that publishes nothing still wakes an armed consumer.
 The channel's watch chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark.
-A pool submitter needs no chain: a worker death is failed into result publishes by the reaper, which reach the armed submitter through the ordinary `waiter_slot` path.
+The pool watch chains the owner's death the same way: a worker death is failed into result publishes by the reaper, which reach the armed submitter through the ordinary `waiter_slot` path, but an owner lost together with all its workers has nobody left to broadcast.
 The watch itself is a persistent registration on the death-listener machinery (Linux's epoll thread, macOS dispatch sources, Windows thread-pool waits), firing a pure-C callback off-thread; a hard kill leaves the macOS socket path as residue beside the `.live.*` files — the reaper's exact region grammar never unlinks suffixed names, and unlink-before-bind absorbs the residue.
 On Linux the listener snapshots the fired watches under its registry mutex and invokes the callbacks unlocked: a callback may stop watches (its own included) without deadlock, and a slow callback serializes nothing; a callback landing after a concurrent stop is the absorbed-stale-signal case the drains are built for, and stop waits out an in-flight callback before returning, so teardown keeps its "nothing touches the watch after stop" guarantee.
 

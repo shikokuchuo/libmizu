@@ -592,9 +592,11 @@ MIZU_API void mizu_death_listener_teardown(void);
    The channel watch additionally chains the peer's death watch onto the
    same callback, and the close paths signal the endpoint alongside the
    parker unpark, so an armed consumer's drain also surfaces CLOSED and
-   PEER_GONE, never only publishes. A pool submitter needs no chain: a
-   worker death is failed into result publishes by the reaper, which
-   reach the armed submitter through the ordinary waiter_slot path.
+   PEER_GONE, never only publishes. The pool watch chains the owner's
+   death the same way: a worker death is failed into result publishes by
+   the reaper, which reach the armed submitter through the ordinary
+   waiter_slot path, but an owner lost together with all its workers has
+   nobody left to broadcast.
    mizu_channel_notify_arm(on != 0) sets MIZU_WAIT_NOTIFY in the side's
    parked word and reports availability in *avail_out (may be NULL): the
    caller drains what is already there synchronously, then stays armed.

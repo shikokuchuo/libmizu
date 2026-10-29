@@ -465,6 +465,12 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- An armed async pool submitter is now woken when the owner dies with
+  no survivor to broadcast: `mizu_pool_notify_watch` chains the owner's
+  death watch onto the notify callback (as the channel chains its
+  peer's), where before an owner dying together with all its workers —
+  a process-group kill, or workers already gone — left the armed drain
+  asleep until its own timeout or teardown.
 - `mizu_channel_destroy`'s drain rendezvous is now woken by the drain
   itself: the consumer's head publish runs the flush-side Dekker
   (fence, then an unpark when the peer's parked word announces the

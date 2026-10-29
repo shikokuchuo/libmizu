@@ -134,9 +134,12 @@ struct mizu_pool_s {
 
   /* notify (notify.c): the submitter's endpoint is created lazily at the
      first arm/watch; the sender cache is per submitter slot, opened on
-     the first armed announce this handle publishes past */
+     the first armed announce this handle publishes past. ntfy_dwatch
+     chains the owner's death onto the watch callback, so an owner lost
+     together with all its workers still wakes the armed drain. */
   mizu_notify_ep *ntfy_ep;
   mizu_notify_watch *ntfy_watch;
+  mizu_death_watch *ntfy_dwatch;
   void (*ntfy_cb)(void *);
   void *ntfy_cb_ctx;
   mizu_notify_tx **ntfy_tx;    /* [max_submitters], lazily allocated */
@@ -435,6 +438,10 @@ static void pool_release(mizu_pool *p) {
   if (p->ntfy_watch != NULL) {
     mizu_notify_watch_stop(p->ntfy_watch);
     p->ntfy_watch = NULL;
+  }
+  if (p->ntfy_dwatch != NULL) {
+    mizu_death_watch_stop(p->ntfy_dwatch);
+    p->ntfy_dwatch = NULL;
   }
   if (p->ntfy_ep != NULL) {
     mizu_notify_ep_close(p->ntfy_ep, 1);
@@ -909,6 +916,10 @@ void mizu_pool_abandon(mizu_pool *p) {
     if (p->ntfy_watch != NULL) {
       mizu_notify_watch_abandon(p->ntfy_watch);
       p->ntfy_watch = NULL;
+    }
+    if (p->ntfy_dwatch != NULL) {
+      mizu_death_watch_abandon(p->ntfy_dwatch);
+      p->ntfy_dwatch = NULL;
     }
     if (p->ntfy_ep != NULL) {
       mizu_notify_ep_close(p->ntfy_ep, 0);
@@ -4037,6 +4048,25 @@ mizu_status mizu_pool_notify_watch(mizu_pool *p, void (*cb)(void *),
   }
   p->ntfy_cb = cb;
   p->ntfy_cb_ctx = ctx;
+  /* chain the owner's death onto the same callback, as the channel chains
+     its peer's: an owner that dies with every worker has nobody left to
+     broadcast, so without this the armed submitter's drain never runs.
+     The flag store precedes the callback, so the drain reads the verdict.
+     An in-process owner stops itself — its broadcast signals endpoints. */
+  if ((long) p->hdr.owner_pid != p->self_pid) {
+    p->ntfy_dwatch = mizu_death_watch_start2((long) p->hdr.owner_pid,
+                                            &p->owner_dead, NULL, cb, ctx);
+    if (p->ntfy_dwatch == NULL) {
+      mizu_notify_watch_stop(p->ntfy_watch);
+      p->ntfy_watch = NULL;
+      p->ntfy_cb = NULL;
+      p->ntfy_cb_ctx = NULL;
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                     "cannot watch owner process %llu",
+                     (unsigned long long) p->hdr.owner_pid);
+      return MIZU_ERR;
+    }
+  }
   return MIZU_OK;
 }
 
@@ -4045,6 +4075,10 @@ mizu_status mizu_pool_notify_unwatch(mizu_pool *p) {
   if (p->ntfy_watch != NULL) {
     mizu_notify_watch_stop(p->ntfy_watch);
     p->ntfy_watch = NULL;
+  }
+  if (p->ntfy_dwatch != NULL) {
+    mizu_death_watch_stop(p->ntfy_dwatch);
+    p->ntfy_dwatch = NULL;
   }
   p->ntfy_cb = NULL;
   p->ntfy_cb_ctx = NULL;
