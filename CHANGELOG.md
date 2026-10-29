@@ -39,7 +39,7 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
   publish path is instruction-identical and an armed burst costs one
   signal. The watch is a persistent pure-C callback registration on the
   death-listener machinery (Linux's epoll thread, macOS dispatch sources,
-  Windows thread-pool waits); a channel watch additionally chains the
+  Windows thread-pool waits); a channel watch also chains the
   peer's death watch onto the same callback, and the close paths signal
   the endpoint alongside the parker unpark, so an armed consumer's drain
   also surfaces CLOSED and PEER_GONE. New ext-tier verbs:
@@ -276,7 +276,7 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
   thread-local error record — plus the `mizu_ix_put_*` emit helpers
   (dual form) a binding's two-pass walk sizes and writes through. The
   golden conformance corpus (`tests/interop/cases.txt` → `corpus.txt`
-  via the spec-derived stdlib reference `tools/interop_corpus.py`;
+  through the spec-derived stdlib reference `tools/interop_corpus.py`;
   deterministic, CI regenerates and asserts a clean diff) certifies the
   byte grammar once here: `tests/unit/test_interop.c` drives it through
   the cursor and re-emits it byte-for-byte, and the cursor joins the
@@ -349,7 +349,7 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
   platform waiters (futex, `__ulock`, WaitOnAddress).
 - Zero-copy payload tiers with spill/ledger machinery and retain table.
 - Three-file amalgamation distribution (`mizu.c` + `mizu.h` + `mizu_ext.h`).
-- pkg-config support via `make install`.
+- pkg-config support through `make install`.
 - `MIZU_PYMIZU_CODEC_MAGIC` in `mizu_ext.h`.
 - `MIZU_AUX_F_KEEPERLESS`, bit 0 of the INLINE aux word: a stager-authored
   claim that staging a frame committed no retain-table entry. The pool
@@ -570,7 +570,7 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
   half): a worker-death force-reclaim of slot k no longer reclaims
   result regions lent to *submitter* k (still held by live views),
   which the next spill stage would have overwritten.
-- `mizu_result_publish_lost` (née `_died`): a transient/torn payload
+- `mizu_result_publish_lost` (formerly `_died`): a transient/torn payload
   open on a live thief no longer produces a `DIED` claim whose
   force-reclaim treated the live claimant's lent regions as leaked and
   whose error named a live worker as dead.

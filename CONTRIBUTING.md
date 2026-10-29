@@ -18,7 +18,7 @@ make test               # unit + ext tiers
 make test-integration   # forked-child tier
 ```
 
-CI additionally runs the soak and fuzz tiers, sanitizer legs (ASan/UBSan/TSan), the export check, and the amalgamation smoke test.
+CI also runs the soak and fuzz tiers, sanitizer legs (ASan/UBSan/TSan), the export check, and the amalgamation smoke test.
 
 Conventions:
 

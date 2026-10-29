@@ -360,7 +360,7 @@ MIZU_API size_t mizu_type_elt_size(int type);
    per directory entry — a VECSXP or STRSXP entry's pair is {0, 0} (the
    nested header / the string block carries its own), and [48-55] is the
    total null count across that header's remaining leaves. Reserved-zero
-   means absent, so a pre-dating reader simply never looks; the section
+   means absent, so a pre-dating reader never looks; the section
    needs no capability bit. When the pair is not {0, 0} the section is the
    authoritative null record: the in-band sentinels are the null-slot fill,
    and a writer emitting a section writes the wire type's sentinel at every
@@ -641,14 +641,14 @@ MIZU_API mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
                                       const mizu_binding *);
 /** The peer bootstrap payload staged at create (the preamble's drop):
    borrowed bytes, valid until destroy. The peer's binding must consume
-   them (e.g. unserialize the expression) before ready_set — the host holds
-   everything they reference alive exactly until ready. */
+   them (for example, unserialize the expression) before ready_set —
+   the host holds everything they reference alive exactly until ready. */
 MIZU_API void mizu_channel_drop(const mizu_channel *, const uint8_t **bytes,
                               uint64_t *n);
 MIZU_API mizu_status mizu_channel_ready_set(mizu_channel *);
 MIZU_API mizu_status mizu_channel_ready_wait(mizu_channel *, double timeout_ms);
 
-/** send stages obj via the binding's stage_fn: MIZU_OK, MIZU_FULL (ring
+/** send stages obj with the binding's stage_fn: MIZU_OK, MIZU_FULL (ring
    full — sends never block for ring space; retry or drop is the
    caller's), MIZU_CLOSED, MIZU_PEER_GONE. send_batch moves up to n objects
    in one batched tail store and sets *accepted_out — short of n when the
@@ -666,9 +666,8 @@ MIZU_API mizu_status mizu_channel_ready_wait(mizu_channel *, double timeout_ms);
    and the messages read so far. The failing slot stays at the head, so
    the next receive reproduces the failure exactly (and consumes the
    slot if the binding marks it MIZU_READ_CONSUME). MIZU_READ_CONSUME
-   is therefore honoured on a single receive and on a batch's first
-   message only; past that the consume decision defers to the next
-   receive.
+   is honoured on a single receive and on a batch's first message
+   only; past that the consume decision defers to the next receive.
    Callbacks run on the calling thread; the wait parks on the caller's
    entity. */
 MIZU_API mizu_status mizu_channel_send(mizu_channel *, void *obj);
@@ -697,7 +696,7 @@ MIZU_API mizu_status mizu_channel_recv_batch_fn(mizu_channel *, size_t cap,
    after draining. MIZU_OK: rendezvoused, resources released, the region
    unlinked, and the handle dead (destroy is a no-op after). MIZU_TIMEOUT:
    the handle stays usable and the rendezvous is retried at destroy.
-   Idempotent. close_signal just sets this side's bit (the peer half of
+   Idempotent. close_signal only sets this side's bit (the peer half of
    the protocol). After either side signals, sends on both sides return
    MIZU_CLOSED and receives drain before reporting it.
    alive is the peer-liveness verdict (lock probe, not the listener
@@ -865,7 +864,7 @@ typedef enum mizu_step_result_e { MIZU_STEP_IDLE = 0, MIZU_STEP_TASK = 1,
                                  MIZU_STEP_RETIRED = -2 } mizu_step_result;
 MIZU_API int mizu_pool_step(mizu_pool *, double timeout_ms);
 
-/** submit stages task_obj via the binding's stage_fn and fills *out.
+/** submit stages task_obj with the binding's stage_fn and fills *out.
    Submission blocks only on injection-ring space (back-pressure is
    per-submitter): MIZU_FULL when the ring is still full at the deadline
    (0 polls; a binding raises its submit-timeout error here). Result-slot
@@ -903,7 +902,7 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
    slot is released as the value is produced. Valid on worker handles
    too — a nested collect helps (executes/steals) instead of sleeping,
    so exec_fn reenters from inside collect; on submitter handles
-   (exec == NULL) the wait simply parks. (A binding's collect may omit
+   (exec == NULL) the wait parks. (A binding's collect may omit
    the pool argument: its task handle carries the pool reference.)
    collect_any returns the first terminal handle (*index_out, 0-based;
    ties among already-terminal handles break to the earliest position);

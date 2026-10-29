@@ -198,7 +198,7 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
    so a hot-path call is one load + a predicted indirect branch.
 
    stage: frame obj as (hdr, payload) — payload capacity inline_max.
-     Spill/arena/retain via the mizu_stage_* services on the handle. ctx
+     Spill/arena/retain through the mizu_stage_* services on the handle. ctx
      is the handle's binding.ctx. Returns 0 on success, nonzero on
      staging failure (the verb fails as MIZU_ERR / MIZU_ERRCAT_STAGE). May
      also not return (a binding's longjmp):
@@ -315,7 +315,7 @@ typedef void (*mizu_sweep_fn)(void *ctx);
 typedef void (*mizu_drop_fn)(void *ctx, void *pin);
 
 typedef struct mizu_binding_s {
-  uint32_t     size;    /**< sizeof(mizu_binding); set via mizu_binding_init */
+  uint32_t     size;    /**< sizeof(mizu_binding); set with mizu_binding_init */
   mizu_stage_fn stage;
   mizu_read_fn  read;
   mizu_exec_fn  exec;    /**< pool workers only; NULL on submitter handles */
@@ -425,7 +425,7 @@ MIZU_EXT_INLINE void *mizu_stage_raw(mizu_handle *h, uint64_t n, int wire_type,
 MIZU_API mizu_shm *mizu_read_region(mizu_read_ctx *, const uint8_t *name,
                                  uint32_t len);
 
-/** Result publish, valid during exec only. publish stages value via the
+/** Result publish, valid during exec only. publish stages value through the
    worker handle's stage_fn and publishes MIZU_RS_OK — a result past the
    inline budget spills to a region whose consumer is the submitter, so
    a large result never has to fit the slot. publish_err publishes
@@ -439,7 +439,7 @@ MIZU_API mizu_shm *mizu_read_region(mizu_read_ctx *, const uint8_t *name,
    whose out-of-line payload vanished with its enqueuer: it carries no
    death verdict on the claiming worker, so the collect side neither
    force-reclaims the claimant's lent regions nor builds a claimant
-   record — the task simply never runs anywhere, and the drain continues
+   record — the task never runs anywhere, and the drain continues
    in this thief. The publish pair return 1 when
    the publish CAS won, 0 when a cancel beat it, and -1 on infrastructure
    failure (recorded on the handle — the worker cannot continue). */
@@ -590,7 +590,7 @@ MIZU_API void mizu_death_listener_teardown(void);
    The watch registers a persistent pure-C callback on the endpoint: it
    may run on any thread and its targets must stay valid until unwatch
    (or destroy) returns — stop synchronizes with an in-flight callback.
-   The channel watch additionally chains the peer's death watch onto the
+   The channel watch also chains the peer's death watch onto the
    same callback, and the close paths signal the endpoint alongside the
    parker unpark, so an armed consumer's drain also surfaces CLOSED and
    PEER_GONE, never only publishes. The pool watch chains the owner's

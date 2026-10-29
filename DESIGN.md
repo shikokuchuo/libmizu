@@ -508,11 +508,11 @@ The shape whitelist's wire strings, as macros — compile-time constants need no
 
 `mizu_ext.h` is the wire authority for these strings: they are the format-0x01 baseline's vocabulary, so the set is append-only under the language-value rule — a rename is a wire change and never happens; a later whitelist shape adds rows (and takes a capability bit, per the format section).
 The vocabulary is exactly the whitelist's: `"ordered"` never crosses (the writer declines it) and `"integer64"` rides the 0x0e value tag, so neither takes a constant; timezone names are an open value space — any zoneinfo key, pymizu's naive-datetime fallback `"UTC"` included — and take none either. `tscale` carries the one value `"ns"` — the verbatim temporal form's scale label, allocated with `MIZU_CAP_MIZL_TSN` (the Arrow frame writer subsection).
-Layout blobs in the whitelist shapes use these same constants; a same-language blob may additionally carry arbitrary attribute names — an open key space the vocabulary does not cover.
+Layout blobs in the whitelist shapes use these same constants; a same-language blob may also carry arbitrary attribute names — an open key space the vocabulary does not cover.
 
 **Verification and adoption.**
 
-- `tools/exports.txt` gains seven symbols via `--write` — `mizu_ix_utf8_valid`, `mizu_ix_write_err`, `mizu_ix_tag_of`, and the four `mizu_ixt_*` — no leaks, no missing; the release carrying the helpers records them in CHANGELOG.md.
+- `tools/exports.txt` gains seven symbols with `--write` — `mizu_ix_utf8_valid`, `mizu_ix_write_err`, `mizu_ix_tag_of`, and the four `mizu_ixt_*` — no leaks, no missing; the release carrying the helpers records them in CHANGELOG.md.
 - The ext tier (`tests/ext_surface.c`) exercises every dual-form helper in both forms (`EXT_PROBE_EXPORTS` proves they agree), and the amalgamation smoke test covers them.
 - The unit tier (`tests/unit/test_interop.c`) pins: the validator's edge matrix (overlong forms, surrogates, the U+10FFFF boundary, truncated and stray continuations, the empty span), the framer's budget matrix (each span truncated at and past its share, the UTF-8-boundary step-back, the index flag on and off, `inline_max` at the 25-byte minimum, the NULL-dst size query), the shim's accept and reject rows with the exact TLS texts, and the full tag table plus the unknown-type zero.
 - The wire does not change, so the golden corpus passes unmodified — that is the acceptance gate — and `MIZU_ABI_VERSION` stays.
@@ -561,7 +561,7 @@ Staging is transactional: the writer is pure C over caller-owned memory until th
 ### Validity as data
 
 When a MIZH or MIZL header's validity pair is not `{0, 0}`, the section it locates is the **authoritative null record** for the layout: the in-band sentinels (`NA_real_`'s NaN payload, `INT_MIN`, `INT64_MIN`) are the null-slot fill, not the record. `{0, -1}` asserts authoritatively null-free.
-The declaration is semantic, not byte-level: the section already exists, so it needs no capability bit — a pre-dating reader simply never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions. `MIZU_ABI_VERSION` stays 1.
+The declaration is semantic, not byte-level: the section already exists, so it needs no capability bit — a pre-dating reader never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions. `MIZU_ABI_VERSION` stays 1.
 
 **The fill invariant.** A writer that emits a section writes the wire type's sentinel at every clear bit.
 The bitmap and the sentinels never disagree in the null direction, so a reader that ignores the section (R's value reads) still reads every null as NA; they may disagree only in the other direction — a *set* bit over a sentinel value is a genuine value.
