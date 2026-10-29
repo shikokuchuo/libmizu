@@ -7,6 +7,12 @@
    API's compile-time contract check.
    POSIX (fork); a stub passes elsewhere. Run via `make test-integration`. */
 
+/* _GNU_SOURCE: glibc hides clock_gettime and other POSIX declarations
+   under strict -std=c11. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -220,10 +226,66 @@ static void test_drain_rendezvous(void) {
   puts("ok drain_rendezvous");
 }
 
+/* The slow reader: attach, then read the one message only after a beat —
+   the host's destroy is parked in the drain rendezvous by then, and the
+   head publish on this read must unpark it (pre-fix the destroy ran out
+   the full 1000 ms bound regardless). The peer must outlive the bound:
+   its exit's death verdict would wake the drain wait on its own and mask
+   a missing publish wake. */
+static void run_slow_peer(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel *p;
+  if (mizu_channel_attach(&p, token, &b) != MIZU_OK) _exit(15);
+  if (mizu_channel_ready_set(p) != MIZU_OK) _exit(16);
+  struct timespec ts = { 0, 200 * 1000000L };
+  nanosleep(&ts, NULL);
+  void *obj = NULL;
+  if (mizu_channel_recv(p, &obj, 5000) != MIZU_OK) _exit(17);
+  mizu_bytes_free(obj);
+  ts.tv_sec = 1;                  /* 200 ms + 1 s > the 1000 ms bound */
+  ts.tv_nsec = 800 * 1000000L;
+  nanosleep(&ts, NULL);
+  mizu_channel_destroy(p);
+  _exit(0);
+}
+
+static double now_s(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double) ts.tv_sec + (double) ts.tv_nsec / 1e9;
+}
+
+static void test_drain_wait_wake(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
+  opts.capacity = 8;
+  opts.slot_size = 512;
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof token) == MIZU_OK);
+  fflush(stdout);
+  pid_t p = fork();
+  assert(p >= 0);
+  if (p == 0) run_slow_peer();
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  mizu_bytes tb = { (void *) "ping", 4 };
+  assert(mizu_channel_send(host, &tb) == MIZU_OK);
+  /* the peer reads 200 ms out; the drain wait must wake on its head
+     publish (destroy bound is 1000 ms — the pre-fix outcome) */
+  double t0 = now_s();
+  mizu_channel_destroy(host);
+  assert(now_s() - t0 < 0.8);
+  assert(wait_exit(p) == 0);
+  puts("ok drain_wait_wake");
+}
+
 int main(void) {
   test_fork_guard();
   test_fork_abandon();
   test_drain_rendezvous();
+  test_drain_wait_wake();
   puts("test_channel integration: all passed");
   return 0;
 }

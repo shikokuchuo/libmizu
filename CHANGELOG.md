@@ -465,6 +465,13 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- `mizu_channel_destroy`'s drain rendezvous is now woken by the drain
+  itself: the consumer's head publish runs the flush-side Dekker
+  (fence, then an unpark when the peer's parked word announces the
+  drain wait and the ring has caught up), where before only a peer
+  send, close, or confirmed death unparked the wait — a peer that
+  merely read late, sending and closing nothing, cost the whole 1000 ms
+  bound on every destroy with an undrained message.
 - A notify signal can no longer be lost to a sender-side open failure:
   both the channel's `chan_notify_signal` and the pool's
   `pool_notify_send` now open the cached tx before claiming the edge,
