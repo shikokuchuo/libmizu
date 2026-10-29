@@ -130,6 +130,27 @@ static void mizu_dl_fork_guard(void) {
   if (mizu_dl_pid == 0 || mizu_dl_pid == getpid()) return;
   if (mizu_dl_epfd >= 0) close(mizu_dl_epfd);
   if (mizu_dl_evfd >= 0) close(mizu_dl_evfd);
+  /* A watch already stopped at fork time was the parent's listener's to
+     reap: the child inherits the struct but no listener, so it is freed
+     here or never. Only STOPPED watches are touched — every stop NULLs
+     the handle's pointer, so no handle can reference one; live watches
+     stay for the handles' abandon. */
+  for (struct mizu_death_watch_s *w = mizu_dl_watches, *next; w;
+       w = next) {
+    next = w->next;
+    if (w->state == MIZU_DW_STOPPED) {
+      if (w->pidfd >= 0) close(w->pidfd);
+      free(w);
+    }
+  }
+  for (struct mizu_notify_watch_s *nw = mizu_dl_nwatches, *next; nw;
+       nw = next) {
+    next = nw->next;
+    if (nw->state == MIZU_NW_STOPPED) {
+      close(nw->fd);
+      free(nw);
+    }
+  }
   mizu_dl_epfd = mizu_dl_evfd = -1;
   mizu_dl_running = 0;
   mizu_dl_shutdown = 0;
