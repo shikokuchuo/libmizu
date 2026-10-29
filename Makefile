@@ -8,9 +8,11 @@ AR      ?= ar
 PREFIX  ?= /usr/local
 DESTDIR ?=
 
-VERSION_MAJOR := 0
-VERSION_MINOR := 0
-VERSION_PATCH := 1
+# The version is single-sourced in include/mizu.h (release.yml's tag gate
+# keys on it); derive it so the soname, pkg-config and docs banner agree.
+VERSION_MAJOR := $(shell awk '/^\#define MIZU_VERSION_MAJOR/ { print $$3 }' include/mizu.h)
+VERSION_MINOR := $(shell awk '/^\#define MIZU_VERSION_MINOR/ { print $$3 }' include/mizu.h)
+VERSION_PATCH := $(shell awk '/^\#define MIZU_VERSION_PATCH/ { print $$3 }' include/mizu.h)
 VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 
 CPPFLAGS += -Iinclude -Isrc

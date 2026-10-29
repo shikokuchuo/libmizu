@@ -9,7 +9,7 @@ Versions carry an ABI contract: any wire-format change bumps
 ## [Unreleased]
 
 Pre-release; no tagged version yet. On the first tag, rename this section
-to `## [0.0.1] - <date>` and start a fresh `Unreleased` section above it.
+to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Added
 
