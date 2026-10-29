@@ -254,6 +254,12 @@ static void chan_survivor_unlink(mizu_channel *c) {
   }
   if (c->live_self_path[0] != '\0') (void) remove(c->live_self_path);
   if (c->live_peer_path[0] != '\0') (void) remove(c->live_peer_path);
+  /* a hard-killed peer's notify endpoint outlives it (no close ran): the
+     endpoint is named by the dead side's tag under the recorded livedir.
+     On a rendezvous teardown with a live peer this is a harmless duplicate
+     of the peer's own close-time unlink. */
+  mizu_notify_ep_unlink(c->livedir, c->shm.name,
+                        c->side == MIZU_ENTITY_HOST ? "peer" : "host");
 }
 
 static int chan_probe_dead(mizu_channel *c) {

@@ -294,6 +294,11 @@ intptr_t mizu_notify_ep_handle(const mizu_notify_ep *ep);
 void mizu_notify_ep_drain(mizu_notify_ep *ep);
 /* Close; unlink_path != 0 also removes the macOS socket path. */
 void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path);
+/* The survivor's half of that unlink, for a holder that died without a
+   close: removes the endpoint path derived from (livedir, region, tag).
+   A no-op on Windows (kernel object). */
+void mizu_notify_ep_unlink(const char *livedir, const char *region,
+                           const char *tag);
 
 /* The producer's sender to one peer endpoint, opened lazily on the first
    armed sighting. send is fire-and-forget: a stale or absent endpoint

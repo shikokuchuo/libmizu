@@ -465,6 +465,12 @@ to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
 
 ### Fixed
 
+- A hard-killed armed consumer's notify socket path no longer leaks:
+  the survivor cleanup (the channel's `chan_survivor_unlink`, the
+  pool's live-file removal on both the unlink and the orphan paths)
+  now unlinks the dead side's endpoint beside the `.live.*` files.
+  Previously a kill left one inode per armed consumer — since 930a209
+  under `/dev/shm` on Linux, unbounded over a long-lived host.
 - An armed async pool submitter is now woken when the owner dies with
   no survivor to broadcast: `mizu_pool_notify_watch` chains the owner's
   death watch onto the notify callback (as the channel chains its

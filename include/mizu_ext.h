@@ -581,9 +581,10 @@ MIZU_API void mizu_death_listener_teardown(void);
    bit rides the word the publish already loads and tests.
    An endpoint is created lazily at the first arm or watch and lives
    until the handle's destroy; a graceful destroy unlinks the socket
-   path, a hard kill leaves it as residue beside the .live.*
-   files (unlink-before-bind absorbs it; the reaper's exact region
-   grammar never touches suffixed names).
+   path, a hard kill leaves it for the peer's survivor cleanup, which
+   unlinks it with the dead side's .live.* files (unlink-before-bind
+   absorbs any residue; the reaper's exact region grammar never touches
+   suffixed names).
    arm on a MIZU_FLAG_SPIN channel fails MIZU_ERR: the spin publish path
    skips the wake checkpoint by design.
    The watch registers a persistent pure-C callback on the endpoint: it

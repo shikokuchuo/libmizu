@@ -113,6 +113,18 @@ void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path) {
   free(ep);
 }
 
+/* Survivor cleanup for a dead holder's endpoint: the owner unlinks at
+   close, but a hard kill runs no close — the survivor drops the path
+   (bind's unlink-before-bind already absorbs a same-name re-create). */
+void mizu_notify_ep_unlink(const char *livedir, const char *region,
+                           const char *tag) {
+  struct sockaddr_un sa;
+  socklen_t len;
+  const char *err = NULL;
+  if (notify_addr(livedir, region, tag, &sa, &len, &err) == 0)
+    (void) unlink(sa.sun_path);
+}
+
 mizu_notify_tx *mizu_notify_tx_open(const char *livedir, const char *region,
                                   const char *tag) {
   const char *err = NULL;
@@ -203,6 +215,11 @@ void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path) {
   (void) unlink_path;   /* kernel object: no unlink step */
   CloseHandle(ep->ev);
   free(ep);
+}
+
+void mizu_notify_ep_unlink(const char *livedir, const char *region,
+                           const char *tag) {
+  (void) livedir; (void) region; (void) tag;   /* kernel object: no unlink */
 }
 
 mizu_notify_tx *mizu_notify_tx_open(const char *livedir, const char *region,

@@ -2816,9 +2816,15 @@ static void pool_remove_live_files(mizu_pool *p) {
   for (uint32_t i = 0; i < p->hdr.max_workers; i++)
     if (pool_live_path(p, path, sizeof(path), "wk", i) == 0)
       (void) remove(path);
-  for (uint32_t j = 0; j < p->hdr.max_submitters; j++)
+  for (uint32_t j = 0; j < p->hdr.max_submitters; j++) {
     if (pool_live_path(p, path, sizeof(path), "sub", j) == 0)
       (void) remove(path);
+    /* a killed armed submitter leaves its endpoint path behind (no close
+       ran); the pool's notify tags are its submitter slots */
+    char tag[16];
+    snprintf(tag, sizeof(tag), "sub%u", j);
+    mizu_notify_ep_unlink(p->livedir, p->shm.name, tag);
+  }
   if (pool_live_path(p, path, sizeof(path), "owner", 0) == 0)
     (void) remove(path);
 }

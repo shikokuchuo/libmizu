@@ -340,11 +340,114 @@ static void test_pool_owner_death_chain(void) {
   puts("ok pool_owner_death_chain");
 }
 
+/* The armed peer that dies without a close: its endpoint path is the
+   survivor's to unlink (with the .live.* files), not residue. */
+static void run_armed_dying_peer(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel *p;
+  if (mizu_channel_attach(&p, token, &b) != MIZU_OK) _exit(3);
+  if (mizu_channel_ready_set(p) != MIZU_OK) _exit(4);
+  if (mizu_channel_notify_arm(p, 1, NULL) != MIZU_OK) _exit(5);
+  _exit(0);   /* hard: no unwatch, no destroy — the endpoint path stays */
+}
+
+static void test_peer_endpoint_unlink(void) {
+  char dir[] = "/tmp/mizu-test-ntfy-chan-XXXXXX";
+  assert(mkdtemp(dir) != NULL);
+  assert(setenv("MIZU_LIVENESS_DIR", dir, 1) == 0);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_channel_opts opts;
+  mizu_channel_opts_init(&opts);
+  opts.capacity = 64;
+  opts.slot_size = 512;
+  mizu_channel *host;
+  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
+  assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+  mizu_channel_info info;
+  assert(mizu_channel_info_get(host, &info) == MIZU_OK);
+
+  fflush(stdout);
+  pid_t p = fork();
+  assert(p >= 0);
+  if (p == 0) run_armed_dying_peer();
+  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  assert(wait_exit(p) == 0);
+  /* the verdict runs the survivor unlink */
+  void *obj = NULL;
+  assert(mizu_channel_recv(host, &obj, 5000) == MIZU_PEER_GONE);
+
+  char path[1200];
+  struct stat st;
+  snprintf(path, sizeof(path), "%s%s.ntfy.peer", dir, info.name);
+  assert(stat(path, &st) != 0 && errno == ENOENT);
+  snprintf(path, sizeof(path), "%s%s.live.peer", dir, info.name);
+  assert(stat(path, &st) != 0 && errno == ENOENT);
+  mizu_channel_destroy(host);
+  unsetenv("MIZU_LIVENESS_DIR");
+  assert(rmdir(dir) == 0);
+  puts("ok peer_endpoint_unlink");
+}
+
+/* The armed submitter that dies without a leave: the controller's
+   teardown unlinks its endpoint path beside the liveness files. The
+   controller holds submitter slot 0, so the child claims slot 1. */
+static void run_armed_dying_submitter(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool *p;
+  if (mizu_pool_attach(&p, token, &b) != MIZU_OK) _exit(3);
+  if (mizu_pool_notify_arm(p, 1) != MIZU_OK) _exit(4);
+  _exit(0);   /* hard: no disarm, no destroy — the endpoint path stays */
+}
+
+static void test_pool_endpoint_unlink(void) {
+  char dir[] = "/tmp/mizu-test-ntfy-pool-XXXXXX";
+  assert(mkdtemp(dir) != NULL);
+  assert(setenv("MIZU_LIVENESS_DIR", dir, 1) == 0);
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 4;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_pool *ctrl;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  mizu_pool_status status;
+  memset(&status, 0, sizeof(status));
+  status.size = sizeof(status);
+  assert(mizu_pool_status_get(ctrl, &status) == MIZU_OK);
+
+  fflush(stdout);
+  pid_t p = fork();
+  assert(p >= 0);
+  if (p == 0) run_armed_dying_submitter();
+  assert(wait_exit(p) == 0);
+  /* stop reaps the dead submitter and unlinks every endpoint tag */
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  char path[1200];
+  struct stat st;
+  snprintf(path, sizeof(path), "%s%s.ntfy.sub1", dir, status.name);
+  assert(stat(path, &st) != 0 && errno == ENOENT);
+  mizu_pool_destroy(ctrl);
+  unsetenv("MIZU_LIVENESS_DIR");
+  assert(rmdir(dir) == 0);
+  puts("ok pool_endpoint_unlink");
+}
+
 int main(void) {
   test_cross_process_burst();
   test_death_chain();
   test_pool_cross_process();
   test_pool_owner_death_chain();
+  test_peer_endpoint_unlink();
+  test_pool_endpoint_unlink();
   puts("test_notify integration: all passed");
   return 0;
 }
