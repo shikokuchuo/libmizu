@@ -37,7 +37,7 @@ Representative figures from the C bench suite (`make bench`), measured on an App
 | Channel round trip (nil / 64 B payload) | 0.3–0.4 µs |
 | Channel round trip (64 KiB, arena tier) | 4.0 µs |
 | Channel round trip (1 MiB, spill tier) | 50 µs |
-| Channel batch throughput (64 B, batches of 32) | 44 M msgs/s |
+| Channel batch throughput (64 B, batches of 32) | 52.8 M msgs/s |
 | Pool submit + collect (nil payload) | 0.4 µs |
 | Pool submit + collect (4 KiB payload) | 1.0 µs |
 | Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
