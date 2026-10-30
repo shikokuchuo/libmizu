@@ -56,9 +56,7 @@ var NAVTREE =
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
       [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", [
-        [ "Added", "md_CHANGELOG.html#autotoc_md34", null ],
-        [ "Changed", "md_CHANGELOG.html#autotoc_md35", null ],
-        [ "Fixed", "md_CHANGELOG.html#autotoc_md36", null ]
+        [ "Added", "md_CHANGELOG.html#autotoc_md34", null ]
       ] ]
     ] ],
     [ "Data Structures", "annotated.html", [
@@ -86,7 +84,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#aad8d5822cd30234e761c62abea32206b"
+"mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

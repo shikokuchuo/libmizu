@@ -1,7 +1,5 @@
 var NAVTREEINDEX1 =
 {
-"mizu__ext_8h.html#aad8d5822cd30234e761c62abea32206b":[4,0,0,1,79],
-"mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806":[4,0,0,1,152],
 "mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d":[4,0,0,1,157],
 "mizu__ext_8h.html#ab76ac0a4c96d06f733bc4a41cd65f206":[4,0,0,1,34],
 "mizu__ext_8h.html#ab83e23693b4a75957eed9e2a24510f28":[4,0,0,1,137],
