@@ -25,7 +25,7 @@
 var NAVTREE =
 [
   [ "libmizu", "index.html", [
-    [ "libmizu 水", "index.html", "index" ],
+    [ "libmizu ミズ", "index.html", "index" ],
     [ "libmizu design notes", "md_DESIGN.html", [
       [ "Wire format", "md_DESIGN.html#autotoc_md9", null ],
       [ "Statuses, not exceptions", "md_DESIGN.html#autotoc_md10", null ],

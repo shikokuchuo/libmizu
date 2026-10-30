@@ -1,6 +1,6 @@
 var indexSectionsWithContent =
 {
-  0: "abcdefghiklmnopqrstuvwxz水",
+  0: "abcdefghiklmnopqrstuvwxzミ",
   1: "am",
   2: "m",
   3: "m",
@@ -9,7 +9,7 @@ var indexSectionsWithContent =
   6: "m",
   7: "m",
   8: "am",
-  9: "abcdefhiklmnpqrstuvwz水"
+  9: "abcdefhiklmnpqrstuvwzミ"
 };
 
 var indexSectionNames =
