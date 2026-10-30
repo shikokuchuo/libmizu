@@ -198,6 +198,13 @@ static void *chan_recv_main(void *arg) {
   return NULL;
 }
 
+/* The destroy side of the drain rendezvous: runs on its own thread, so
+   the consumer's head publish is what wakes it. */
+static void *chan_destroy_main(void *arg) {
+  mizu_channel_destroy((mizu_channel *) arg);
+  return NULL;
+}
+
 static void chan_send_n(mizu_channel *c, long n) {
   mizu_bytes b = { "t", 1 };
   for (long i = 0; i < n; i++) {
@@ -769,6 +776,55 @@ int main(int argc, char **argv) {
   }
   assert(mizu_channel_alive(peer) == 0);   /* the lock probe's verdict */
   mizu_channel_destroy(peer);
+
+#ifndef _WIN32
+  /* a destroy parked in the drain rendezvous wakes on the consumer's
+     head publish, not on the 1000 ms bound: the caught-up publish sees
+     the peer's parked announce and unparks it */
+  {
+    assert(mizu_channel_create(&host, &opts, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    assert(mizu_channel_attach(&peer, token, &bytesb) == MIZU_OK);
+    assert(mizu_channel_ready_set(peer) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    send_bytes(peer, "ping", 4);
+
+    pthread_t th;
+    assert(pthread_create(&th, NULL, chan_destroy_main, peer) == 0);
+
+    /* the peer's park announce on its entity word, read through a
+       second mapping — the publish's cross-check reads the same word */
+    mizu_shm *shm = NULL;
+    char name[80];
+    int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+    assert(nl > 0 && (size_t) nl < sizeof(name));
+    assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+    _Atomic uint32_t *peer_parked =
+      (_Atomic uint32_t *) ((unsigned char *) mizu_shm_addr(shm) +
+                            MIZU_ENTITY_OFFSET(MIZU_ENTITY_PEER) +
+                            MIZU_ENTITY_PARKED);
+    int parked = 0;
+    for (int i = 0; i < 5000 && !parked; i++) {
+      struct timespec ts = { 0, 1000000 };
+      nanosleep(&ts, NULL);
+      parked = (atomic_load_explicit(peer_parked, memory_order_acquire) &
+                MIZU_WAIT_PARKED) != 0;
+    }
+    assert(parked);
+    mizu_shm_close(shm, 0);
+
+    double t0 = mizu_now();
+    recv_bytes(host, "ping", 4);      /* the caught-up publish unparks */
+    assert(pthread_join(th, NULL) == 0);
+    assert(mizu_now() - t0 < 0.8);    /* the 1000 ms bound never ran */
+    {
+      void *obj = NULL;
+      assert(mizu_channel_recv(host, &obj, 1000) == MIZU_CLOSED);
+    }
+    mizu_channel_destroy(host);
+    puts("ok destroy_drain_unpark");
+  }
+#endif
 
   /* destroy with a spilled payload in flight: the vanished region fails
      its one read, then the ring drains to CLOSED instead of wedging

@@ -1832,6 +1832,58 @@ static void test_hdr_validate(void) {
   puts("ok hdr_validate");
 }
 
+/* The open-time slot geometry validator: a worker or live submitter
+   slot whose fields disagree with the header-implied layout refuses the
+   open; a FREE submitter slot's stale fields are rewritten at claim and
+   never checked. */
+static void test_slot_geometry(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  char name[80];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = NULL;
+  assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+  unsigned char *base = mizu_shm_addr(shm);
+  const uint64_t a127 = ~(uint64_t) 127;
+  size_t wk_off = (size_t) ((sizeof(mizu_pool_hdr) + 127) & a127);
+  mizu_wk_slot *wks = (mizu_wk_slot *) (base + wk_off);
+  size_t sub_off = (size_t) ((wk_off + sizeof(mizu_wk_slot) + 127) & a127);
+  mizu_sub_slot *subs = (mizu_sub_slot *) (base + sub_off);
+  mizu_binding b;
+  make_binding(&b, 0);
+  mizu_pool *bad = NULL;
+
+  int64_t save_off = wks[0].deque_buf_off;
+  wks[0].deque_buf_off += 512;
+  assert(mizu_pool_attach(&bad, token, &b) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "worker slot geometry mismatch") != NULL);
+  wks[0].deque_buf_off = save_off;
+
+  /* the controller's own (live) slot disagrees: refused */
+  uint32_t save_rs = subs[0].rs_start;
+  subs[0].rs_start += 1;
+  assert(mizu_pool_attach(&bad, token, &b) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(),
+                "submitter slot geometry mismatch") != NULL);
+  subs[0].rs_start = save_rs;
+
+  /* a FREE slot's stale fields are never checked: the claim rewrites
+     them and the handle works */
+  subs[1].rs_start = 0xdead;
+  subs[1].rs_count = 0xbeef;
+  mizu_pool *sub2 = NULL;
+  assert(mizu_pool_attach(&sub2, token, &b) == MIZU_OK);
+  mizu_task t = submit_bytes(sub2, "ok", 2);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(sub2, &t, "ok", 2);
+  mizu_pool_destroy(sub2);
+
+  mizu_shm_close(shm, 0);
+  pool_end();
+  puts("ok slot_geometry");
+}
+
 /* The handle guards: NULL and released handles answer with the TLS slot
    or the handle's error record; role mismatches refuse. */
 static void test_handle_guards(void) {
@@ -3869,6 +3921,7 @@ int main(void) {
 
   test_create_validate();
   test_hdr_validate();
+  test_slot_geometry();
   test_handle_guards();
   test_join_errors();
   test_nested_no_exec();

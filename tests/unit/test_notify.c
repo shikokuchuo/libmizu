@@ -15,8 +15,13 @@
 #include <string.h>
 #ifndef _WIN32
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#endif
+#ifdef __linux__
+#include <sys/resource.h>
 #endif
 
 #include "internal.h"
@@ -400,6 +405,219 @@ static void test_pool_gates(void) {
   puts("ok pool_gates");
 }
 
+#ifndef _WIN32
+/* A foreign owner's death is chained onto the notify watch: the armed
+   submitter's callback fires with owner_dead set (an in-process owner
+   stops itself — its broadcast signals endpoints). The forked-child
+   abandon and the unwatch/release of the chained watch ride along. */
+static void test_pool_owner_death_watch(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 2;
+  opts.injection_cap = 8;
+  opts.per_worker_cap = 8;
+  opts.result_slots = 16;
+  opts.slot_size = 256;
+  int pipefd[2];
+  assert(pipe(pipefd) == 0);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(pipefd[0]);
+    mizu_binding b;
+    mizu_binding_bytes(&b);
+    mizu_pool *dp = NULL;
+    if (mizu_pool_create(&dp, &opts, &b) != MIZU_OK) _exit(2);
+    char dtok[64];
+    if (mizu_pool_token(dp, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
+    size_t want = strlen(dtok) + 1;
+    if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
+    sleep(30);                       /* the foreign owner, alive for now */
+    _exit(0);
+  }
+  close(pipefd[1]);
+  char dtok[64];
+  size_t got = 0;
+  while (got < sizeof(dtok)) {
+    ssize_t r = read(pipefd[0], dtok + got, sizeof(dtok) - got);
+    assert(r > 0);
+    got += (size_t) r;
+    if (memchr(dtok, '\0', got) != NULL) break;
+  }
+  close(pipefd[0]);
+
+  mizu_pool *sub2 = NULL;
+  assert(mizu_pool_attach(&sub2, dtok, &bytesb) == MIZU_OK);
+  fires = 0;
+  assert(mizu_pool_notify_arm(sub2, 1) == MIZU_OK);
+  assert(mizu_pool_notify_watch(sub2, count_cb, NULL) == MIZU_OK);
+
+  /* the forked child abandons its inherited armed handle: only the
+     child's copies go, the parent's watch stays (plain exit: the
+     atexit coverage flush rides along) */
+  pid_t g = fork();
+  assert(g >= 0);
+  if (g == 0) {
+    mizu_pool_abandon(sub2);
+    exit(0);
+  }
+  int gst;
+  assert(waitpid(g, &gst, 0) == g);
+  assert(WIFEXITED(gst) && WEXITSTATUS(gst) == 0);
+
+  /* the owner's death fires the chained watch: the callback runs and
+     the drain reads the verdict */
+  kill(pid, SIGKILL);
+  int wst;
+  assert(waitpid(pid, &wst, 0) == pid);
+  assert(wait_fires(1, 5000));
+  mizu_pool_sig *sig = mizu_pool_signals(sub2);
+  assert(*sig->owner_dead == 1);
+  free(sig);
+
+  assert(mizu_pool_notify_unwatch(sub2) == MIZU_OK);
+  /* re-watching a dead owner fires immediately */
+  assert(mizu_pool_notify_watch(sub2, count_cb, NULL) == MIZU_OK);
+  assert(wait_fires(2, 5000));
+
+  mizu_pool_destroy(sub2);
+
+  /* the orphan's names: the region through the platform reap, the
+     liveness files by name */
+  char name[64];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", dtok);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  int n = 0;
+  char **reaped = mizu_shm_reap(&n);
+  int found = 0;
+  for (int i = 0; i < n; i++) {
+    if (strcmp(reaped[i], name) == 0) found = 1;
+    free(reaped[i]);
+  }
+  free(reaped);
+  assert(found);
+  const char *dir = mizu_live_dir();
+  char lp[1100];
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.owner", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.wk.0", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.sub.0", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.sub.1", dir, dtok);
+  remove(lp);
+  puts("ok pool_owner_death_watch");
+}
+#endif
+
+#ifdef __linux__
+/* RLIMIT_NOFILE caps the fd VALUE, not the count of open fds (mirrors
+   the channel tier's helper): exactly k coexisting new fds is the soft
+   limit one past the k-th free value. */
+static rlim_t rlim_for_free(int k) {
+  int free_n = 0;
+  for (int i = 0; i < 65536; i++) {
+    if (fcntl(i, F_GETFD) != -1) continue;
+    if (k == 0) return (rlim_t) i;
+    if (free_n + 1 == k) return (rlim_t) i + 1;
+    free_n++;
+  }
+  return (rlim_t) -1;
+}
+
+/* The owner death watch failing to start rolls the notify watch back:
+   fd exhaustion fails the pidfd open after the endpoint and its watch
+   succeeded; the verb reports the failure and the handle recovers. */
+static void test_pool_owner_watch_fail(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 2;
+  opts.injection_cap = 8;
+  opts.per_worker_cap = 8;
+  opts.result_slots = 16;
+  opts.slot_size = 256;
+  int pipefd[2];
+  assert(pipe(pipefd) == 0);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(pipefd[0]);
+    mizu_binding b;
+    mizu_binding_bytes(&b);
+    mizu_pool *dp = NULL;
+    if (mizu_pool_create(&dp, &opts, &b) != MIZU_OK) _exit(2);
+    char dtok[64];
+    if (mizu_pool_token(dp, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
+    size_t want = strlen(dtok) + 1;
+    if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
+    sleep(30);                       /* the foreign owner, alive for now */
+    _exit(0);
+  }
+  close(pipefd[1]);
+  char dtok[64];
+  size_t got = 0;
+  while (got < sizeof(dtok)) {
+    ssize_t r = read(pipefd[0], dtok + got, sizeof(dtok) - got);
+    assert(r > 0);
+    got += (size_t) r;
+    if (memchr(dtok, '\0', got) != NULL) break;
+  }
+  close(pipefd[0]);
+
+  mizu_pool *sub2 = NULL;
+  assert(mizu_pool_attach(&sub2, dtok, &bytesb) == MIZU_OK);
+
+  /* exactly two free fds: the endpoint socket and its dup succeed, the
+     owner watch's pidfd fails */
+  struct rlimit rl;
+  assert(getrlimit(RLIMIT_NOFILE, &rl) == 0);
+  rlim_t saved = rl.rlim_cur;
+  rl.rlim_cur = rlim_for_free(2);
+  assert(setrlimit(RLIMIT_NOFILE, &rl) == 0);
+  assert(mizu_pool_notify_watch(sub2, count_cb, NULL) == MIZU_ERR);
+  assert(strstr(mizu_pool_error(sub2), "cannot watch owner process") !=
+         NULL);
+  rl.rlim_cur = saved;
+  assert(setrlimit(RLIMIT_NOFILE, &rl) == 0);
+
+  /* the rollback left nothing half-armed: a fresh watch succeeds */
+  assert(mizu_pool_notify_watch(sub2, count_cb, NULL) == MIZU_OK);
+  assert(mizu_pool_notify_unwatch(sub2) == MIZU_OK);
+
+  kill(pid, SIGKILL);
+  int wst;
+  assert(waitpid(pid, &wst, 0) == pid);
+  mizu_pool_destroy(sub2);
+
+  /* the orphan's names, as in the other foreign-owner scenario */
+  char name[64];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", dtok);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  int n = 0;
+  char **reaped = mizu_shm_reap(&n);
+  int found = 0;
+  for (int i = 0; i < n; i++) {
+    if (strcmp(reaped[i], name) == 0) found = 1;
+    free(reaped[i]);
+  }
+  free(reaped);
+  assert(found);
+  const char *dir = mizu_live_dir();
+  char lp[1100];
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.owner", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.wk.0", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.sub.0", dir, dtok);
+  remove(lp);
+  snprintf(lp, sizeof(lp), "%s/mizu_%s.sub.1", dir, dtok);
+  remove(lp);
+  puts("ok pool_owner_watch_fail");
+}
+#endif
+
 // Endpoint mechanics -------------------------------------------------------------------
 
 /* Direct endpoint/tx behavior: the stale-path absorb, the filesystem
@@ -503,6 +721,12 @@ int main(void) {
   test_pool_burst();
   test_pool_withdraw();
   test_pool_gates();
+#ifndef _WIN32
+  test_pool_owner_death_watch();
+#endif
+#ifdef __linux__
+  test_pool_owner_watch_fail();
+#endif
   test_endpoint_paths();
   test_reap_grammar();
   puts("test_notify: all passed");

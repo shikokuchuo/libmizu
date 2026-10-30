@@ -28,6 +28,20 @@
 
 #include "internal.h"
 
+#ifdef __linux__
+/* The fork-guard test's blocking callback: holds the death listener off
+   its reap until the test has forked. */
+static _Atomic int dl_cb_entered, dl_cb_release;
+static void dl_block_cb(void *ctx) {
+  (void) ctx;
+  atomic_store_explicit(&dl_cb_entered, 1, memory_order_release);
+  while (atomic_load_explicit(&dl_cb_release, memory_order_acquire) == 0) {
+    struct timespec ts = {0, 1000000};
+    nanosleep(&ts, NULL);
+  }
+}
+#endif
+
 #ifndef _WIN32
 /* The liveness dir resolution is thread-local: a fresh thread re-resolves
    it (TMPDIR unset falls back to the platform default; an oversized
@@ -614,6 +628,86 @@ int main(void) {
     mizu_death_watch_stop(w2);
     mizu_death_listener_teardown();
     puts("ok death listener restart");
+  }
+
+  /* the fork guard frees watches stopped before the fork: the parent's
+     listener was their reaper and the child inherits none. A callback
+     blocked mid-fire holds the listener off the reap until after the
+     fork, so the stopped pair is still listed in the child. */
+  {
+    pid_t watched = fork();
+    assert(watched >= 0);
+    if (watched == 0) {
+      sleep(30);
+      _exit(0);
+    }
+    pid_t watched2 = fork();
+    assert(watched2 >= 0);
+    if (watched2 == 0) {
+      sleep(30);
+      _exit(0);
+    }
+
+    _Atomic int flag_a = 0, flag_b = 0;
+    mizu_death_watch *wa = mizu_death_watch_start2((long) watched, &flag_a,
+                                                   NULL, dl_block_cb, NULL);
+    assert(wa != NULL);
+    mizu_death_watch *wb = mizu_death_watch_start2((long) watched2, &flag_b,
+                                                   NULL, NULL, NULL);
+    assert(wb != NULL);
+
+    /* a notify watch stopped in the same window */
+    char nreg[64];
+    int nn = snprintf(nreg, sizeof(nreg), MIZU_PREFIX_LITERAL "%lx_dlfg",
+                      (unsigned long) getpid());
+    assert(nn > 0 && (size_t) nn < sizeof(nreg));
+    const char *nerr = NULL;
+    mizu_notify_ep *nep =
+      mizu_notify_ep_open(mizu_live_dir(), nreg, "t", &nerr);
+    assert(nep != NULL);
+    mizu_notify_watch *nw =
+      mizu_notify_watch_start(mizu_notify_ep_handle(nep), dl_block_cb, NULL);
+    assert(nw != NULL);
+
+    /* fire A: the listener blocks in its callback, off the reap */
+    kill(watched, SIGKILL);
+    int wst;
+    assert(waitpid(watched, &wst, 0) == watched);
+    for (int i = 0; i < 5000 &&
+         !atomic_load_explicit(&dl_cb_entered, memory_order_acquire); i++) {
+      struct timespec ts = {0, 1000000};
+      nanosleep(&ts, NULL);
+    }
+    assert(atomic_load_explicit(&dl_cb_entered, memory_order_acquire));
+    assert(flag_a != 0);
+
+    /* stopped now, still listed at the fork */
+    mizu_death_watch_stop(wb);
+    mizu_notify_watch_stop(nw);
+
+    pid_t kid = fork();
+    assert(kid >= 0);
+    if (kid == 0) {
+      /* the guard frees the stopped pair; the child abandons the rest
+         (plain exit: the atexit coverage flush rides along) */
+      mizu_death_watch_abandon(wa);
+      mizu_notify_ep_close(nep, 0);
+      exit(0);
+    }
+    assert(waitpid(kid, &wst, 0) == kid);
+    assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+
+    /* release the listener: the parent's reap frees its own copies */
+    atomic_store_explicit(&dl_cb_release, 1, memory_order_release);
+    mizu_death_watch_stop(wa);   /* waits out the in-flight callback */
+    assert(flag_b == 0);              /* a stopped watch never fires */
+    kill(watched2, SIGKILL);
+    assert(waitpid(watched2, &wst, 0) == watched2);
+    mizu_notify_ep_close(nep, 1);
+    mizu_death_listener_teardown();
+    dl_cb_entered = 0;
+    dl_cb_release = 0;
+    puts("ok death listener fork guard");
   }
 #endif
 
