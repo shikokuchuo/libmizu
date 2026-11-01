@@ -1,3 +1,4 @@
+<!-- HTML header for doxygen 1.18.0-->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
 <head>
@@ -5,10 +6,15 @@
 <meta http-equiv="X-UA-Compatible" content="IE=11"/>
 <meta name="generator" content="Doxygen 1.15.0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>libmizu: libmizu ミズ</title>
+<title>libmizu</title>
+<link rel="icon" href="logo-icon.svg" type="image/x-icon" />
 <link href="tabs.css" rel="stylesheet" type="text/css"/>
-<script type="text/javascript" src="jquery.js"></script>
+<!--BEGIN HTML_DYNAMIC_SECTIONS-->
 <script type="text/javascript" src="dynsections.js"></script>
+<!--END HTML_DYNAMIC_SECTIONS-->
+<!--BEGIN HTML_CODE_FOLDING-->
+<script type="text/javascript" src="codefolding.js"></script>
+<!--END HTML_CODE_FOLDING-->
 <script type="text/javascript" src="clipboard.js"></script>
 <link href="navtree.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="navtreedata.js"></script>
@@ -17,8 +23,14 @@
 <link href="search/search.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="search/searchdata.js"></script>
 <script type="text/javascript" src="search/search.js"></script>
+$mermaidjs
 <link href="doxygen.css" rel="stylesheet" type="text/css" />
 <link href="doxygen-awesome.css" rel="stylesheet" type="text/css"/>
+<meta property="og:title" content="libmizu" />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="https://shikokuchuo.net/libmizu/og-image.png" />
+<meta property="og:description" content="Lock-free shared-memory IPC" />
+<meta name="twitter:card" content="summary_large_image" />
 </head>
 <body>
 <div id="top"><!-- do not remove this div, it is closed by doxygen! -->
@@ -26,6 +38,7 @@
 <table cellspacing="0" cellpadding="0">
  <tbody>
  <tr id="projectrow">
+  <td id="projectlogo"><img alt="Logo" src="logo-icon.svg"/></td>
   <td id="projectalign">
    <div id="projectname">libmizu<span id="projectnumber">&#160;0.1.0</span>
    </div>
@@ -90,10 +103,11 @@ $(function(){initNavTree('index.html','',''); });
 </div>
 
 <div><div class="header">
-  <div class="headertitle"><div class="title">libmizu ミズ </div></div>
+  <div class="headertitle"><div class="title">libmizu </div></div>
 </div><!--header-->
 <div class="contents">
 <div class="textblock"><p><a class="anchor" id="md_README"></a></p>
+<p><a href="https://shikokuchuo.net/libmizu/"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" alt="libmizu logo" align="right" width="240" style="pointer-events: none;" class="inline"/></a></p>
 <p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE)</p>
 <p>libmizu is a C library for lock-free shared-memory IPC.</p>
 <p>For runtimes that parallelize with processes rather than threads, libmizu uses shared memory to make communication between those processes fast enough to divide work at thread granularity.</p>

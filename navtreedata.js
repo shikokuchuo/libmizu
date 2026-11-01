@@ -25,7 +25,13 @@
 var NAVTREE =
 [
   [ "libmizu", "index.html", [
-    [ "libmizu ミズ", "index.html", "index" ],
+    [ "Performance", "index.html#autotoc_md1", null ],
+    [ "Quickstart", "index.html#autotoc_md2", null ],
+    [ "Writing a binding", "index.html#autotoc_md3", null ],
+    [ "API tiers", "index.html#autotoc_md4", null ],
+    [ "Building", "index.html#autotoc_md5", null ],
+    [ "Contributing", "index.html#autotoc_md6", null ],
+    [ "License", "index.html#autotoc_md7", null ],
     [ "libmizu design notes", "md_DESIGN.html", [
       [ "Wire format", "md_DESIGN.html#autotoc_md9", null ],
       [ "Statuses, not exceptions", "md_DESIGN.html#autotoc_md10", null ],
@@ -84,7 +90,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d"
+"mizu__ext_8h.html#ab76ac0a4c96d06f733bc4a41cd65f206"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';
