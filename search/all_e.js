@@ -3,7 +3,7 @@ var searchData=
   ['pad1_0',['pad1',['../structmizu__wk__slot__s.html#a60273667a6ad21510a071e19df2918c0',1,'mizu_wk_slot_s']]],
   ['park_1',['park',['../structmizu__binding__s.html#a569b65aee20a4da4fd3136ad359d93d7',1,'mizu_binding_s']]],
   ['park_5fstate_2',['park_state',['../structmizu__wk__slot__s.html#aed743cfd1208c0117e77c58080eadec5',1,'mizu_wk_slot_s']]],
-  ['parked_5fmask_3',['parked_mask',['../structmizu__pool__status__s.html#a32656f73211ab874c4eac4ab3f0183f8',1,'mizu_pool_status_s']]],
+  ['parked_5fmask_3',['parked_mask',['../structmizu__pool__info__s.html#ab70509ccc04b2de7b3d3b56507764cf1',1,'mizu_pool_info_s']]],
   ['parker_20protocol_4',['Parker protocol',['../md_DESIGN.html#autotoc_md12',1,'']]],
   ['payload_5',['payload',['../structmizu__result__sink__s.html#a24b3101ca7b197f0e42275b8d2cd0384',1,'mizu_result_sink_s']]],
   ['payload_20framing_20tiers_6',['Payload framing tiers',['../md_DESIGN.html#autotoc_md14',1,'']]],

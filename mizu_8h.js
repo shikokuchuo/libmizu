@@ -11,7 +11,7 @@ var mizu_8h =
     [ "mizu_channel_info_s", "structmizu__channel__info__s.html", "structmizu__channel__info__s" ],
     [ "mizu_pool_opts_s", "structmizu__pool__opts__s.html", "structmizu__pool__opts__s" ],
     [ "mizu_task_s", "structmizu__task__s.html", null ],
-    [ "mizu_pool_status_s", "structmizu__pool__status__s.html", "structmizu__pool__status__s" ],
+    [ "mizu_pool_info_s", "structmizu__pool__info__s.html", "structmizu__pool__info__s" ],
     [ "mizu_worker_stat_s", "structmizu__worker__stat__s.html", null ],
     [ "mizu_sub_stat_s", "structmizu__sub__stat__s.html", "structmizu__sub__stat__s" ],
     [ "mizu_pool_dump_s", "structmizu__pool__dump__s.html", "structmizu__pool__dump__s" ],
@@ -62,7 +62,7 @@ var mizu_8h =
     [ "mizu_step_result", "mizu_8h.html#af9f8c150ff5a025b09119c7c7fa0d615", null ],
     [ "mizu_obj_supply", "mizu_8h.html#aaa72daa0a627f687e5a26067c9ae49f9", null ],
     [ "mizu_trace_event", "mizu_8h.html#a48550d9d6d7b6fcdf2606c5611fe824d", null ],
-    [ "mizu_pool_status", "mizu_8h.html#a22a46e78e48329c7d28f07f49ef4811d", null ],
+    [ "mizu_pool_info", "mizu_8h.html#af3b1a1accd004f7ee9891f15e4121c55", null ],
     [ "mizu_rs_row", "mizu_8h.html#a871142e0a6f8ed7af4a6d88c4cac5559", null ],
     [ "mizu_status_e", "mizu_8h.html#afc26639142b17e64f9b3613f67270d55", null ],
     [ "mizu_errcat_e", "mizu_8h.html#a42b039cfafe9c8a3d13e0a52ad691d03", [

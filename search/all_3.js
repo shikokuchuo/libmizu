@@ -4,7 +4,7 @@ var searchData=
   ['data_5foffset_1',['data_offset',['../structmizu__mizl__entry__s.html#a75f987e212e13254f6076f5e365ea6f7',1,'mizu_mizl_entry_s']]],
   ['death_20verdict_2',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
   ['deque_5fcap_3',['deque_cap',['../structmizu__pool__hdr__s.html#a759cd998f08f31533303ee975838b9cc',1,'mizu_pool_hdr_s']]],
-  ['deque_5fdepth_4',['deque_depth',['../structmizu__pool__status__s.html#abaa611826fd1d7b0b8e70fe29b65a107',1,'mizu_pool_status_s']]],
+  ['deque_5fdepth_4',['deque_depth',['../structmizu__pool__info__s.html#addf3e96b352e1aa3bc00493afd3a39a6',1,'mizu_pool_info_s']]],
   ['design_20notes_5',['libmizu design notes',['../md_DESIGN.html',1,'']]],
   ['died_5fpid_6',['died_pid',['../structmizu__read__ctx__s.html#a4f8fb3f448de665d6f446a0b61f1722a',1,'mizu_read_ctx_s']]],
   ['died_5fslot_7',['died_slot',['../structmizu__read__ctx__s.html#a495be19250d2c5400b9b6357d8961f83',1,'mizu_read_ctx_s']]],

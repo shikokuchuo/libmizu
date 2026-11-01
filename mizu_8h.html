@@ -134,8 +134,8 @@ Data Structures</h2></td></tr>
 <tr class="memitem:mizu_5Fpool_5Fopts_5Fs" id="r_mizu_5Fpool_5Fopts_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__pool__opts__s.html">mizu_pool_opts_s</a></td></tr>
 <tr class="memitem:mizu_5Ftask_5Fs" id="r_mizu_5Ftask_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__task__s.html">mizu_task_s</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">A task handle: an 8-byte value identifying one result slot at one sequence — 40-bit sequence in the low bits, 24-bit result-slot index in the high (result_slots is capped at 2^24 at create).  <a href="structmizu__task__s.html#details">More...</a><br /></td></tr>
-<tr class="memitem:mizu_5Fpool_5Fstatus_5Fs" id="r_mizu_5Fpool_5Fstatus_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__pool__status__s.html">mizu_pool_status_s</a></td></tr>
-<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Snapshots.  <a href="structmizu__pool__status__s.html#details">More...</a><br /></td></tr>
+<tr class="memitem:mizu_5Fpool_5Finfo_5Fs" id="r_mizu_5Fpool_5Finfo_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__pool__info__s.html">mizu_pool_info_s</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Snapshots.  <a href="structmizu__pool__info__s.html#details">More...</a><br /></td></tr>
 <tr class="memitem:mizu_5Fworker_5Fstat_5Fs" id="r_mizu_5Fworker_5Fstat_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__worker__stat__s.html">mizu_worker_stat_s</a></td></tr>
 <tr class="memitem:mizu_5Fsub_5Fstat_5Fs" id="r_mizu_5Fsub_5Fstat_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__sub__stat__s.html">mizu_sub_stat_s</a></td></tr>
 <tr class="memitem:mizu_5Fpool_5Fdump_5Fs" id="r_mizu_5Fpool_5Fdump_5Fs"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structmizu__pool__dump__s.html">mizu_pool_dump_s</a></td></tr>
@@ -359,8 +359,8 @@ typedef struct <a class="el" href="structmizu__pool__opts__s.html">mizu_pool_opt
 <tr class="memdesc:a48550d9d6d7b6fcdf2606c5611fe824d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Task lifecycle trace hook: per-handle, per-process; NULL removes.  <br /></td></tr>
 <tr class="memitem:ab82b2501248588000af58d36643db2c8" id="r_ab82b2501248588000af58d36643db2c8"><td class="memItemLeft" align="right" valign="top"><a id="ab82b2501248588000af58d36643db2c8" name="ab82b2501248588000af58d36643db2c8"></a>
 typedef void(*&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_trace_fn</b>) (<a class="el" href="#a48550d9d6d7b6fcdf2606c5611fe824d">mizu_trace_event</a> event, uint64_t task_id, void *ctx)</td></tr>
-<tr class="memitem:a22a46e78e48329c7d28f07f49ef4811d" id="r_a22a46e78e48329c7d28f07f49ef4811d"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="structmizu__pool__status__s.html">mizu_pool_status_s</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a22a46e78e48329c7d28f07f49ef4811d">mizu_pool_status</a></td></tr>
-<tr class="memdesc:a22a46e78e48329c7d28f07f49ef4811d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Snapshots.  <br /></td></tr>
+<tr class="memitem:af3b1a1accd004f7ee9891f15e4121c55" id="r_af3b1a1accd004f7ee9891f15e4121c55"><td class="memItemLeft" align="right" valign="top">typedef struct <a class="el" href="structmizu__pool__info__s.html">mizu_pool_info_s</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#af3b1a1accd004f7ee9891f15e4121c55">mizu_pool_info</a></td></tr>
+<tr class="memdesc:af3b1a1accd004f7ee9891f15e4121c55"><td class="mdescLeft">&#160;</td><td class="mdescRight">Snapshots.  <br /></td></tr>
 <tr class="memitem:a9d538c69c6c52723aac220f77f689a80" id="r_a9d538c69c6c52723aac220f77f689a80"><td class="memItemLeft" align="right" valign="top"><a id="a9d538c69c6c52723aac220f77f689a80" name="a9d538c69c6c52723aac220f77f689a80"></a>
 typedef enum mizu_role_e&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_role</b></td></tr>
 <tr class="memitem:aa223ee89d3128f8df5531316d9f20b27" id="r_aa223ee89d3128f8df5531316d9f20b27"><td class="memItemLeft" align="right" valign="top"><a id="aa223ee89d3128f8df5531316d9f20b27" name="aa223ee89d3128f8df5531316d9f20b27"></a>
@@ -628,8 +628,8 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_task_state</
 <tr class="memdesc:abebbb012fadaf97925c9dd83ae09e6c8"><td class="mdescLeft">&#160;</td><td class="mdescRight">MIZU_RS_* of a task (informational, racy against slot reuse). <br /></td></tr>
 <tr class="memitem:a895a9771867e8a7e96bdc4580ba669b4" id="r_a895a9771867e8a7e96bdc4580ba669b4"><td class="memItemLeft" align="right" valign="top"><a class="el" href="#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a895a9771867e8a7e96bdc4580ba669b4">mizu_pool_stop</a> (mizu_pool *, double timeout_ms)</td></tr>
 <tr class="memdesc:a895a9771867e8a7e96bdc4580ba669b4"><td class="mdescLeft">&#160;</td><td class="mdescRight">Orderly shutdown, controller only: broadcasts shutdown, wakes every parked participant, and cancels all pending tasks (blocked collectors see MIZU_RS_CANCEL), then waits up to timeout_ms for clean worker exits and unlinks the region and liveness files.  <br /></td></tr>
-<tr class="memitem:a5e4916f68ef467be0194c0e41fea1fc5" id="r_a5e4916f68ef467be0194c0e41fea1fc5"><td class="memItemLeft" align="right" valign="top"><a id="a5e4916f68ef467be0194c0e41fea1fc5" name="a5e4916f68ef467be0194c0e41fea1fc5"></a>
-<a class="el" href="#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_status_get</b> (const mizu_pool *, <a class="el" href="#a22a46e78e48329c7d28f07f49ef4811d">mizu_pool_status</a> *out)</td></tr>
+<tr class="memitem:a058b7317b82c88811a331c6376bcc423" id="r_a058b7317b82c88811a331c6376bcc423"><td class="memItemLeft" align="right" valign="top"><a id="a058b7317b82c88811a331c6376bcc423" name="a058b7317b82c88811a331c6376bcc423"></a>
+<a class="el" href="#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_info_get</b> (const mizu_pool *, <a class="el" href="#af3b1a1accd004f7ee9891f15e4121c55">mizu_pool_info</a> *out)</td></tr>
 <tr class="memitem:a9775d5ec3ed7e9964727d5722d9b9dad" id="r_a9775d5ec3ed7e9964727d5722d9b9dad"><td class="memItemLeft" align="right" valign="top"><a id="a9775d5ec3ed7e9964727d5722d9b9dad" name="a9775d5ec3ed7e9964727d5722d9b9dad"></a>
 <a class="el" href="#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_dump_get</b> (const mizu_pool *, mizu_pool_dump *out)</td></tr>
 <tr class="memitem:a7bf2492682c076d33f4d5c0ae953ec89" id="r_a7bf2492682c076d33f4d5c0ae953ec89"><td class="memItemLeft" align="right" valign="top"><a class="el" href="#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7bf2492682c076d33f4d5c0ae953ec89">mizu_pool_tasks_get</a> (const mizu_pool *, <a class="el" href="#a871142e0a6f8ed7af4a6d88c4cac5559">mizu_rs_row</a> *out, uint32_t cap, uint32_t *n_out)</td></tr>
@@ -1207,20 +1207,20 @@ published for me" — the publisher clears it as it signals, so one signal per i
 
 </div>
 </div>
-<a id="a22a46e78e48329c7d28f07f49ef4811d" name="a22a46e78e48329c7d28f07f49ef4811d"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a22a46e78e48329c7d28f07f49ef4811d">&#9670;&#160;</a></span>mizu_pool_status</h2>
+<a id="af3b1a1accd004f7ee9891f15e4121c55" name="af3b1a1accd004f7ee9891f15e4121c55"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#af3b1a1accd004f7ee9891f15e4121c55">&#9670;&#160;</a></span>mizu_pool_info</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">typedef struct <a class="el" href="structmizu__pool__status__s.html">mizu_pool_status_s</a> <a class="el" href="#a22a46e78e48329c7d28f07f49ef4811d">mizu_pool_status</a></td>
+          <td class="memname">typedef struct <a class="el" href="structmizu__pool__info__s.html">mizu_pool_info_s</a> <a class="el" href="#af3b1a1accd004f7ee9891f15e4121c55">mizu_pool_info</a></td>
         </tr>
       </table>
 </div><div class="memdoc">
 
 <p>Snapshots. </p>
-<p>status reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks) — the cold-path introspection API behind a binding's dump output. Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
+<p>info reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks) — the cold-path introspection API behind a binding's dump output. Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
 
 </div>
 </div>

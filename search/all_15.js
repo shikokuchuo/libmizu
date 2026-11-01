@@ -7,7 +7,7 @@ var searchData=
   ['word_4',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
   ['worker_5fident_5',['worker_ident',['../structmizu__pool__hdr__s.html#afb5a6b3f1e4eb7c5fc4ceed3dd7dc826',1,'mizu_pool_hdr_s']]],
   ['worker_5fslot_6',['worker_slot',['../structmizu__rs__hdr__s.html#afb97401f97fac7c1acb6bfd8b0bea13d',1,'mizu_rs_hdr_s']]],
-  ['worker_5fstate_7',['worker_state',['../structmizu__pool__status__s.html#a623225b85216640e055236d34e3769bb',1,'mizu_pool_status_s']]],
+  ['worker_5fstate_7',['worker_state',['../structmizu__pool__info__s.html#a7ac908b151d105a7bcd71546362d43a2',1,'mizu_pool_info_s']]],
   ['writer_8',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
   ['writing_20a_20binding_9',['Writing a binding',['../index.html#autotoc_md3',1,'']]]
 ];
