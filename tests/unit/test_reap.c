@@ -161,9 +161,9 @@ static void wait_child(pid_t pid) {
 }
 
 static void await_slot_free(mizu_pool *ctrl) {
-  mizu_pool_status ps;
+  mizu_pool_info ps;
   int freed = 0;
-  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &ps) == MIZU_OK &&
+  MIZU_SPIN_WAIT((mizu_pool_info_get(ctrl, &ps) == MIZU_OK &&
                   ps.worker_state[0] == MIZU_WK_FREE),
                  mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, freed);
   assert(freed);

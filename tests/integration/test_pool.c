@@ -391,8 +391,8 @@ static void test_submitter_death(void) {
   /* the claim consumes the CANCEL and reaps the dead submitter */
   int freed = 0;
   for (int i = 0; i < 2000 && !freed; i++) {
-    mizu_pool_status st;
-    assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+    mizu_pool_info st;
+    assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
     freed = st.sub_state[1] == MIZU_SUB_FREE;
     if (!freed) sleep_ms(5);
   }

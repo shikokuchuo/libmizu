@@ -132,6 +132,7 @@ mizu_pool_errcat
 mizu_pool_error
 mizu_pool_eval_mark
 mizu_pool_help_once
+mizu_pool_info_get
 mizu_pool_lame_duck
 mizu_pool_leave
 mizu_pool_map_caps
@@ -143,7 +144,6 @@ mizu_pool_ready_wait
 mizu_pool_retire
 mizu_pool_set_trace
 mizu_pool_signals
-mizu_pool_status_get
 mizu_pool_step
 mizu_pool_stop
 mizu_pool_submit

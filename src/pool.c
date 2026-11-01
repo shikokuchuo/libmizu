@@ -4459,7 +4459,7 @@ mizu_status mizu_pool_stop(mizu_pool *p, double timeout_ms) {
 /* Snapshots over the wire state (dump adds the handle-local counters):
    cold-path, single loads, states can move mid-fill. */
 
-static void pool_status_fill(const mizu_pool *p, mizu_pool_status *out) {
+static void pool_info_fill(const mizu_pool *p, mizu_pool_info *out) {
   memset(out, 0, sizeof(*out));
   out->size = (uint32_t) sizeof(*out);
   out->name = p->shm.name;
@@ -4504,16 +4504,16 @@ static void pool_status_fill(const mizu_pool *p, mizu_pool_status *out) {
     (int32_t) atomic_load_explicit(p->shutdown, memory_order_acquire);
 }
 
-mizu_status mizu_pool_status_get(const mizu_pool *p, mizu_pool_status *out) {
+mizu_status mizu_pool_info_get(const mizu_pool *p, mizu_pool_info *out) {
   if (p == NULL || p->released) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
     return MIZU_ERR;
   }
   if (out == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "expected a status out-param");
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "expected an info out-param");
     return MIZU_ERR;
   }
-  pool_status_fill(p, out);
+  pool_info_fill(p, out);
   return MIZU_OK;
 }
 
@@ -4528,7 +4528,7 @@ mizu_status mizu_pool_dump_get(const mizu_pool *p, mizu_pool_dump *out) {
   }
   memset(out, 0, sizeof(*out));
   out->size = (uint32_t) sizeof(*out);
-  pool_status_fill(p, &out->status);
+  pool_info_fill(p, &out->info);
   out->n_workers = p->hdr.max_workers;
   for (uint32_t i = 0; i < p->hdr.max_workers; i++) {
     const mizu_wk_slot *w = &p->wk[i];

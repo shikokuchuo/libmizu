@@ -625,8 +625,8 @@ static void test_leave_fails_in_flight(void) {
   assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
-  mizu_pool_status st;
-  assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+  mizu_pool_info st;
+  assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   uint32_t live = 0;
   for (int i = 1; i < 6; i++) live += st.tasks_by_state[i];
   assert(live == 0);
@@ -777,8 +777,8 @@ static void test_orphan_finalize(void) {
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
   assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_ERR);
-  mizu_pool_status ps;
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  mizu_pool_info ps;
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
   assert(ps.worker_state[0] == MIZU_WK_FREE);
 
   /* the freed slot respawns */
@@ -820,19 +820,19 @@ static void test_probe_streak(void) {
   mizu_pool_destroy(wk2);   /* no leave: exactly a crash */
   wk2 = NULL;
 
-  mizu_pool_status ps;
+  mizu_pool_info ps;
   for (int i = 0; i < 15; i++)
     assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
   assert(ps.worker_state[1] == MIZU_WK_LIVE);   /* below the streak bound */
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);   /* the probe fires */
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
   assert(ps.worker_state[1] == MIZU_WK_REAPING);
 
   /* the drained orphan's slot frees at the next observation */
   atomic_store(&w1->deque_top, 1);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
   assert(ps.worker_state[1] == MIZU_WK_FREE);
 
   mizu_shm_close_stack(shm, 0);
@@ -1104,7 +1104,7 @@ static void test_collect_all(void) {
   puts("ok collect_all");
 }
 
-/* status/dump/tasks snapshots: wire-state reads plus the handle-local
+/* info/dump/tasks snapshots: wire-state reads plus the handle-local
    counters. */
 static void test_introspection(void) {
   pool_pair(1, 1, 8, 64, 64, 64, 512);
@@ -1112,8 +1112,8 @@ static void test_introspection(void) {
   mizu_task t2 = submit_bytes(ctrl, "b", 1);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* t1 OK, uncollected */
 
-  mizu_pool_status st;
-  assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+  mizu_pool_info st;
+  assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   assert(st.size == sizeof(st));
   assert(st.role == MIZU_ROLE_CONTROLLER);
   assert(st.max_workers == 1 && st.max_submitters == 8);
@@ -1136,7 +1136,7 @@ static void test_introspection(void) {
   assert(d.submitters[0].claimed == 1);
   assert(d.submitters[0].rs_count == 8);
   assert(d.help_wanted == 1);   /* no running worker to wake */
-  assert(d.status.tasks_by_state[MIZU_RS_OK] == 1);
+  assert(d.info.tasks_by_state[MIZU_RS_OK] == 1);
 
   mizu_rs_row rows[8];
   uint32_t nrows = 0;
@@ -1182,8 +1182,8 @@ static void test_map_support(void) {
   assert(mizu_pool_help_once(wk) == 1);
   assert(exec_calls == 0);
   assert(*sig->help_wanted == 0);   /* ring drained: the bell stays clear */
-  mizu_pool_status st;
-  assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+  mizu_pool_info st;
+  assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   assert(st.deque_depth[0] == 1);
   assert(mizu_pool_help_once(wk) == 0);   /* nothing left to claim */
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* pops its own deque */
@@ -1200,7 +1200,7 @@ static void test_map_support(void) {
   mizu_task t1 = submit_bytes(ctrl, "x", 1);
   mizu_task t2 = submit_bytes(ctrl, "y", 1);
   assert(mizu_pool_deque_pull(wk, 2) == 2);
-  assert(mizu_pool_status_get(ctrl, &st) == MIZU_OK);
+  assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   assert(st.deque_depth[0] == 2 && st.inj_queued[0] == 0);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
@@ -1515,9 +1515,9 @@ static void test_zombie_entry(void) {
   assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
-  mizu_pool_status ps;
+  mizu_pool_info ps;
   int freed = 0;
-  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &ps) == MIZU_OK &&
+  MIZU_SPIN_WAIT((mizu_pool_info_get(ctrl, &ps) == MIZU_OK &&
                   ps.worker_state[0] == MIZU_WK_FREE),
                  mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, freed);
   assert(freed);
@@ -1842,7 +1842,7 @@ static void test_handle_guards(void) {
   mizu_task t = submit_bytes(ctrl, "x", 1);
   void *obj = NULL;
   size_t idx = 9, err = 9, consumed = 9, n_out = 9;
-  mizu_pool_status st;
+  mizu_pool_info st;
   mizu_pool_dump d;
   mizu_rs_row rows[1];
   uint32_t nrows = 9;
@@ -1877,8 +1877,8 @@ static void test_handle_guards(void) {
   assert(mizu_pool_submit_flags(ctrl, &b, 0, NULL, 0) == MIZU_ERR);
   assert(mizu_pool_submit_batch_fn(ctrl, NULL, NULL, 1, &t, &n_out,
                                    0) == MIZU_ERR);
-  assert(mizu_pool_status_get(NULL, &st) == MIZU_ERR);
-  assert(mizu_pool_status_get(ctrl, NULL) == MIZU_ERR);
+  assert(mizu_pool_info_get(NULL, &st) == MIZU_ERR);
+  assert(mizu_pool_info_get(ctrl, NULL) == MIZU_ERR);
   assert(mizu_pool_dump_get(NULL, &d) == MIZU_ERR);
   assert(mizu_pool_dump_get(ctrl, NULL) == MIZU_ERR);
   assert(mizu_pool_tasks_get(NULL, rows, 1, &nrows) == MIZU_ERR);
@@ -1916,7 +1916,7 @@ static void test_handle_guards(void) {
   assert(mizu_pool_stop(ctrl, 1000) == MIZU_OK);
   assert(mizu_pool_submit(ctrl, &b, &t, 0) == MIZU_ERR);
   assert(mizu_pool_collect(ctrl, &t, &obj, 0) == MIZU_ERR);
-  assert(mizu_pool_status_get(ctrl, &st) == MIZU_ERR);
+  assert(mizu_pool_info_get(ctrl, &st) == MIZU_ERR);
   assert(mizu_pool_dump_get(ctrl, &d) == MIZU_ERR);
   assert(mizu_pool_tasks_get(ctrl, rows, 1, &nrows) == MIZU_ERR);
   assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_ERR);
@@ -2577,9 +2577,9 @@ static void test_cross_thread_waits(void) {
   c.ms = 500;
   assert(pthread_create(&th, NULL, step_main, &c) == 0);
   /* the worker is parked before the collect: its parked_mask bit shows */
-  mizu_pool_status pst;
+  mizu_pool_info pst;
   parked = 0;
-  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &pst) == MIZU_OK &&
+  MIZU_SPIN_WAIT((mizu_pool_info_get(ctrl, &pst) == MIZU_OK &&
                   (pst.parked_mask & 1) != 0),
                  mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
   assert(parked);
@@ -2600,7 +2600,7 @@ static void test_cross_thread_waits(void) {
   c.ms = 30000;
   assert(pthread_create(&th, NULL, step_main, &c) == 0);
   parked = 0;
-  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &pst) == MIZU_OK &&
+  MIZU_SPIN_WAIT((mizu_pool_info_get(ctrl, &pst) == MIZU_OK &&
                   (pst.parked_mask & 1) != 0),
                  mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
   assert(parked);
@@ -3179,8 +3179,8 @@ static void test_fairness(void) {
     assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(exec_calls == 61);   /* the tick stole the orphan */
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
-  mizu_pool_status ps;
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  mizu_pool_info ps;
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
   assert(ps.worker_state[1] == MIZU_WK_FREE);   /* the drained slot freed */
   for (int i = 0; i < 60; i++) collect_bytes(ctrl, &ts[i], "x", 1);
   pool_end();

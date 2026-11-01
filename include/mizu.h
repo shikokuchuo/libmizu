@@ -988,13 +988,13 @@ MIZU_API int mizu_pool_task_state(mizu_pool *, const mizu_task *);
    shutdown the same way, without the wait. */
 MIZU_API mizu_status mizu_pool_stop(mizu_pool *, double timeout_ms);
 
-/** Snapshots. status reads shm-resident wire state; dump adds
+/** Snapshots. info reads shm-resident wire state; dump adds
    handle-local counters (free list, open caches, collect parks) — the
    cold-path introspection API behind a binding's dump output.
    Per-slot arrays are indexed by slot; only the first n_workers /
    n_submitters entries are valid. The per-slot worker states are what a
    resize scans for free slots. All borrowed; valid until the next call. */
-typedef struct mizu_pool_status_s {
+typedef struct mizu_pool_info_s {
   uint32_t size;
   const char *name;
   int32_t role;             /**< MIZU_ROLE_* */
@@ -1008,7 +1008,7 @@ typedef struct mizu_pool_status_s {
   uint32_t tasks_by_state[7];              /**< occupancy indexed by MIZU_RS_* */
   uint32_t inj_queued[64];                 /**< unclaimed injection entries */
   int32_t shutdown;
-} mizu_pool_status;
+} mizu_pool_info;
 
 typedef enum mizu_role_e { MIZU_ROLE_CONTROLLER = 0, MIZU_ROLE_WORKER,
                           MIZU_ROLE_SUBMITTER } mizu_role;
@@ -1033,7 +1033,7 @@ typedef struct mizu_sub_stat_s {
 
 typedef struct mizu_pool_dump_s {
   uint32_t size;
-  mizu_pool_status status;
+  mizu_pool_info info;
   uint32_t n_workers;                 /**< <= MIZU_MAX_WORKERS */
   mizu_worker_stat workers[MIZU_MAX_WORKERS];
   uint32_t n_submitters;              /**< <= 64 */
@@ -1056,8 +1056,8 @@ typedef struct mizu_rs_row_s {
   int32_t waiter_slot;
 } mizu_rs_row;
 
-MIZU_API mizu_status mizu_pool_status_get(const mizu_pool *,
-                                       mizu_pool_status *out);
+MIZU_API mizu_status mizu_pool_info_get(const mizu_pool *,
+                                     mizu_pool_info *out);
 MIZU_API mizu_status mizu_pool_dump_get(const mizu_pool *, mizu_pool_dump *out);
 /** The dump's task table, paged by the caller: fills up to cap rows in
    slot order (non-FREE slots only) and sets *n_out to the total non-FREE

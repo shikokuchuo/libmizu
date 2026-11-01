@@ -430,10 +430,10 @@ static void test_pool_endpoint_unlink(void) {
   mizu_pool *ctrl;
   assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
   assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
-  mizu_pool_status status;
-  memset(&status, 0, sizeof(status));
-  status.size = sizeof(status);
-  assert(mizu_pool_status_get(ctrl, &status) == MIZU_OK);
+  mizu_pool_info info;
+  memset(&info, 0, sizeof(info));
+  info.size = sizeof(info);
+  assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
 
   fflush(stdout);
   pid_t p = fork();
@@ -444,7 +444,7 @@ static void test_pool_endpoint_unlink(void) {
   assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
   char path[1200];
   struct stat st;
-  snprintf(path, sizeof(path), "%s%s.ntfy.sub1", dir, status.name);
+  snprintf(path, sizeof(path), "%s%s.ntfy.sub1", dir, info.name);
   assert(stat(path, &st) != 0 && errno == ENOENT);
   mizu_pool_destroy(ctrl);
   unsetenv("MIZU_LIVENESS_DIR");
