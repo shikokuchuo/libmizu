@@ -1,4 +1,6 @@
-# libmizu ミズ
+# libmizu
+
+<a href="https://shikokuchuo.net/libmizu/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo-dark.svg"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" align="right" width="240" alt="libmizu logo"/></picture></a>
 
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)

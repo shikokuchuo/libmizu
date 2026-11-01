@@ -8,6 +8,8 @@
 PROJECT_NAME           = libmizu
 PROJECT_BRIEF          = "Lock-free shared-memory IPC"
 PROJECT_NUMBER         = $(MIZU_VERSION)
+PROJECT_LOGO           = docs/assets/logo-icon.svg
+PROJECT_ICON           = docs/assets/logo-icon.svg
 OUTPUT_DIRECTORY       = docs
 
 INPUT                  = README.md \
@@ -28,6 +30,8 @@ WARN_IF_UNDOCUMENTED   = NO
 
 GENERATE_LATEX         = NO
 HTML_EXTRA_STYLESHEET  = tools/doxygen/doxygen-awesome.css
+HTML_HEADER            = tools/doxygen/header.html
+HTML_EXTRA_FILES       = docs/assets/og-image.png
 HTML_COLORSTYLE        = LIGHT
 
 MACRO_EXPANSION        = YES
