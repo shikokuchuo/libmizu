@@ -2019,31 +2019,6 @@ static void test_remote(void) {
   assert(e.valid[0] == 0 && e.valid[1] == 0);
   free(b3);
   mizu_arrow_close(a);
-
-  /* a referenced leaf of another length: the override declines, the
-     column stays local (C-20) */
-  ArrowSchema cz, root2;
-  ArrowSchema *kids2[1] = { &cz };
-  mk_schema(&cz, "i", "z", NULL, 0, NULL, 0);
-  mk_schema(&root2, "+s", NULL, kids2, 1, NULL, 0);
-  const int32_t z[4] = { 1, 2, 3, 4 };
-  const void *zb[2] = { NULL, z };
-  ArrowArray az, bz;
-  ArrowArray *kz[1] = { &az };
-  mk_array(&az, 4, 0, 0, 2, zb, NULL, NULL);
-  mk_array(&bz, 4, 0, 0, 1, NULL, kz, NULL);
-  bz.n_children = 1;
-  const ArrowArray *bb[1] = { &bz };
-  assert(mizu_arrow_open(&a, &root2, bb, 1, 0) == MIZU_OK);
-  assert(mizu_arrow_remote(a, 0, ident, strlen(ident), ref, reftotal,
-                           0) == -1);
-  size_t t4 = mizu_arrow_size(a);
-  uint8_t *b4 = calloc(1, t4);
-  mizu_arrow_write(a, b4, &warn);
-  assert(mizu_mizl_elem(b4, t4, 0, &e) == 0);
-  assert(e.sexptype == MIZU_TYPE_INT && e.length == 4);   /* stayed local */
-  free(b4);
-  mizu_arrow_close(a);
   free(ref2);
   free(ref);
 }

@@ -200,16 +200,34 @@ static pid_t spawn(int role, uint32_t slot) {
   return pid;
 }
 
+/* Bounded waits: 60 s, then a hard kill — a wedged child fails the
+   test, it does not hang the job. */
 static int wait_exit(pid_t pid) {
   int st = 0;
+  for (int i = 0; i < 600; i++) {
+    pid_t r = waitpid(pid, &st, WNOHANG);
+    assert(r >= 0);
+    if (r == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+    struct timespec ts = { 0, 100 * 1000000L };
+    nanosleep(&ts, NULL);
+  }
+  kill(pid, SIGKILL);
   assert(waitpid(pid, &st, 0) == pid);
-  return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+  return 128;
 }
 
 static int wait_signalled(pid_t pid) {
   int st = 0;
+  for (int i = 0; i < 600; i++) {
+    pid_t r = waitpid(pid, &st, WNOHANG);
+    assert(r >= 0);
+    if (r == pid) return WIFSIGNALED(st) ? WTERMSIG(st) : 0;
+    struct timespec ts = { 0, 100 * 1000000L };
+    nanosleep(&ts, NULL);
+  }
+  kill(pid, SIGKILL);
   assert(waitpid(pid, &st, 0) == pid);
-  return WIFSIGNALED(st) ? WTERMSIG(st) : 0;
+  return 0;
 }
 
 // Harness ------------------------------------------------------------------------------

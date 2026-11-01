@@ -66,8 +66,9 @@ static mizu_channel *chan_pair(mizu_binding *b, uint32_t slot_size,
   char token[64];
   assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
   assert(mizu_channel_attach(peer, token, b) == MIZU_OK);
-  assert(mizu_channel_ready_set(*peer) == MIZU_OK);
-  assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+  /* no ready rendezvous: destroy's close drain (a 1 s bound per row, the
+     peer never reads) is gated on the ready word, and the staging policy
+     under test needs none */
   return host;
 }
 

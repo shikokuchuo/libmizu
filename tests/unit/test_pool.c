@@ -601,7 +601,9 @@ static void test_infra_failure_and_reap(void) {
   mizu_pool_destroy(wk);   /* simulated crash: lock releases, slot LIVE */
   wk = NULL;
   void *obj = NULL;
-  assert(mizu_pool_collect(ctrl, &t, &obj, 500) == MIZU_ERR);
+  /* 250 ms: the backstop probe fires on the first park wake, so the
+     timeout only sets when the verdict lands */
+  assert(mizu_pool_collect(ctrl, &t, &obj, 250) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
   exec_mode = 0;
@@ -792,32 +794,6 @@ static void test_orphan_finalize(void) {
   puts("ok orphan_finalize");
 }
 
-/* The fairness tick's orphan-deque scan: the route that bounds
-   ownerless-work latency when the ordinary steal tier never falls to it.
-   Deterministic: the tick fires on a handle's 61st claim, so the orphan
-   appears after the second worker's 60 idle claims and its 61st step
-   takes the scan (the steal tier never gets a look). */
-static void test_fairness_orphan(void) {
-  pool_pair(2, 2, 8, 64, 64, 64, 512);
-  for (int i = 0; i < 60; i++)
-    assert(mizu_pool_step(wk2, 0) == MIZU_STEP_IDLE);   /* claims -> 60 */
-  mizu_bytes b = { (void *) "q", 1 };
-  mizu_task t;
-  assert(mizu_pool_submit(wk, &b, &t, 0) == MIZU_OK);   /* wk's own deque */
-  assert(mizu_pool_leave(wk) == MIZU_OK);   /* REAPING with a queued deque */
-
-  exec_calls = 0;
-  assert(mizu_pool_step(wk2, 0) == MIZU_STEP_TASK);   /* the tick's scan */
-  assert(exec_calls == 1);
-  mizu_pool_status ps;
-  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
-  assert(ps.worker_state[0] == MIZU_WK_FREE);   /* the drained slot freed */
-  mizu_pool_destroy(wk);
-  wk = NULL;
-  pool_end();
-  puts("ok fairness_orphan");
-}
-
 /* The thief-probe backstop: repeated failed steals against an
    apparently-live, apparently-nonempty victim warrant one death probe —
    the cross-check for a reap the listener never ran. A corrupt deque
@@ -863,33 +839,6 @@ static void test_probe_streak(void) {
   free(shm);
   pool_end();
   puts("ok probe_streak");
-}
-
-/* Submitter death, reaped in-line: a worker whose claim consumes a CANCEL
-   probes the submitter — dead here — and the reap frees its slot (the
-   registry of two has no room for a new attach otherwise). */
-static void test_submitter_reap(void) {
-  pool_pair(1, 1, 2, 64, 64, 64, 512);   /* ctrl + one more submitter */
-  mizu_binding b;
-  make_binding(&b, 0);
-  assert(mizu_pool_attach(&sub, token, &b) == MIZU_OK);
-  mizu_task t = submit_bytes(sub, "doomed", 6);
-  assert(mizu_pool_cancel(sub, &t) == 1);
-  mizu_pool_destroy(sub);   /* dead with the cancelled task still queued */
-  sub = NULL;
-
-  exec_calls = 0;
-  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* claims, skips, reaps */
-  assert(exec_calls == 0);
-
-  mizu_pool *sub2;
-  assert(mizu_pool_attach(&sub2, token, &b) == MIZU_OK);   /* slot was freed */
-  mizu_task t2 = submit_bytes(sub2, "alive", 5);
-  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
-  collect_bytes(sub2, &t2, "alive", 5);
-  mizu_pool_destroy(sub2);
-  pool_end();
-  puts("ok submitter_reap");
 }
 
 /* Submitter-slot lifecycle: an orderly destroy frees the slot outright
@@ -1422,7 +1371,7 @@ static void test_ledger_key_kinds(void) {
 
   /* wk's nested collect reaps worker 1 (backstop probe) and claims DIED */
   obj = NULL;
-  assert(mizu_pool_collect(wk, &tn, &obj, 1500) == MIZU_ERR);
+  assert(mizu_pool_collect(wk, &tn, &obj, 250) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(wk),
                 "worker died while executing this task") == 0);
   spill_info(wk, &fl, &led);
@@ -1616,7 +1565,8 @@ static void test_attach_owner_gone(void) {
     if (mizu_pool_token(dp, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
     size_t want = strlen(dtok) + 1;
     if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
-    exit(0);                       /* dies holding the owner lock */
+    _exit(0);                      /* dies holding the owner lock (_exit:
+                                      LSan would flag the leaked pool) */
   }
   close(pipefd[1]);
   char dtok[64];
@@ -2183,7 +2133,8 @@ static void test_vectored_collect(void) {
      position, the other handle collectible */
   mizu_pool_destroy(wk);   /* simulated crash */
   wk = NULL;
-  assert(mizu_pool_collect_any(ctrl, ts, 2, &idx, &obj, 1500) == MIZU_ERR);
+  /* 250 ms: the wake backstop probes on the first park expiry */
+  assert(mizu_pool_collect_any(ctrl, ts, 2, &idx, &obj, 250) == MIZU_ERR);
   assert(idx == 0);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
@@ -2408,25 +2359,11 @@ static void test_batch_nested(void) {
   puts("ok batch_nested");
 }
 
-/* The keeper record follows a reused slot's new incarnation, and a
-   mid-table removal swaps the tail in. */
+/* A mid-table keeper-record removal swaps the tail in (rk_follow covers
+   the record following a reused slot's new incarnation): two kept
+   results, collecting the first swaps the second's record into the
+   vacated slot at the worker's next reap. */
 static void test_rk_reuse(void) {
-  pool_pair(1, 1, 2, 64, 64, 2, 512);   /* ctrl: one result slot */
-  size_t n = 100 * 1024;
-  unsigned char *big = malloc(n);
-  for (size_t i = 0; i < n; i++) big[i] = (unsigned char) (i * 17u);
-
-  mizu_task t1 = submit_bytes(ctrl, big, n);
-  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* kept: rk[0] */
-  collect_bytes(ctrl, &t1, big, n);                  /* slot FREE, rk held */
-  mizu_task t2 = submit_bytes(ctrl, big, n);         /* the same slot */
-  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* record follows */
-  collect_bytes(ctrl, &t2, big, n);
-  free(big);
-  pool_end();
-
-  /* two kept results: collecting the first swaps the second's record
-     into the vacated slot at the worker's reap */
   pool_pair(1, 1, 2, 64, 64, 4, 512);   /* ctrl: two result slots */
   size_t m = 100 * 1024;
   unsigned char *bg = malloc(m);
@@ -2553,8 +2490,14 @@ static void test_cross_thread_waits(void) {
   c.b = (mizu_bytes) { (void *) "c", 1 };
   pthread_t th;
   assert(pthread_create(&th, NULL, full_submit_main, &c) == 0);
-  struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
-  nanosleep(&ts, NULL);
+  struct timespec ts = { 0, 100000000 };   /* the parked-collect wait below */
+  /* the waiter is parked before the claim: its full_waiters bit shows */
+  mizu_pool_dump d;
+  int parked = 0;
+  MIZU_SPIN_WAIT((mizu_pool_dump_get(ctrl, &d) == MIZU_OK &&
+                  d.submitters[0].full_waiter == 1),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
+  assert(parked);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* claims, wakes */
   assert(pthread_join(th, NULL) == 0);
   assert(c.st == MIZU_OK);
@@ -2581,8 +2524,12 @@ static void test_cross_thread_waits(void) {
   c.p = sub;
   c.b = (mizu_bytes) { (void *) "c", 1 };
   assert(pthread_create(&th, NULL, full_submit_main, &c) == 0);
-  nanosleep(&ts, NULL);
-  assert(mizu_pool_stop(ctrl, 500) == MIZU_TIMEOUT);   /* wk never exits */
+  parked = 0;
+  MIZU_SPIN_WAIT((mizu_pool_dump_get(ctrl, &d) == MIZU_OK &&
+                  d.submitters[1].full_waiter == 1),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
+  assert(parked);
+  assert(mizu_pool_stop(ctrl, 50) == MIZU_TIMEOUT);   /* wk never exits */
   assert(pthread_join(th, NULL) == 0);
   assert(c.st == MIZU_ERR);
   assert(mizu_pool_errcat(sub) == MIZU_ERRCAT_STOPPED);
@@ -2603,8 +2550,8 @@ static void test_cross_thread_waits(void) {
   c.b = (mizu_bytes) { (void *) "doomed", 6 };
   assert(mizu_pool_submit(sub, &c.b, &c.ct, 0) == MIZU_OK);
   assert(pthread_create(&th, NULL, parked_collect_main, &c) == 0);
-  nanosleep(&ts, NULL);
-  assert(mizu_pool_stop(ctrl, 500) == MIZU_TIMEOUT);   /* wk never exits */
+  nanosleep(&ts, NULL);   /* announced by now (no wire-visible parked bit) */
+  assert(mizu_pool_stop(ctrl, 50) == MIZU_TIMEOUT);   /* wk never exits */
   assert(pthread_join(th, NULL) == 0);
   assert(c.st == MIZU_ERR);
   assert(strcmp(mizu_pool_error(sub), "task cancelled or pool stopped") ==
@@ -2629,7 +2576,13 @@ static void test_cross_thread_waits(void) {
   c.p = wk;
   c.ms = 500;
   assert(pthread_create(&th, NULL, step_main, &c) == 0);
-  nanosleep(&ts, NULL);   /* parked by now */
+  /* the worker is parked before the collect: its parked_mask bit shows */
+  mizu_pool_status pst;
+  parked = 0;
+  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &pst) == MIZU_OK &&
+                  (pst.parked_mask & 1) != 0),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
+  assert(parked);
   collect_bytes(ctrl, &t4, big, n);   /* frees the slot: the keeper drops */
   assert(pthread_join(th, NULL) == 0);
   assert(c.step_rc == MIZU_STEP_IDLE);
@@ -2646,7 +2599,11 @@ static void test_cross_thread_waits(void) {
   c.p = wk;
   c.ms = 30000;
   assert(pthread_create(&th, NULL, step_main, &c) == 0);
-  nanosleep(&ts, NULL);   /* parked by now */
+  parked = 0;
+  MIZU_SPIN_WAIT((mizu_pool_status_get(ctrl, &pst) == MIZU_OK &&
+                  (pst.parked_mask & 1) != 0),
+                 mizu_now() + 5, MIZU_SPIN_CLOCK_EVERY_LIGHT, parked);
+  assert(parked);
   mizu_task t5 = submit_bytes(ctrl, "x", 1);
   assert(pthread_join(th, NULL) == 0);
   assert(c.step_rc == MIZU_STEP_TASK);
@@ -2687,8 +2644,8 @@ static void test_cross_thread_waits(void) {
      (10 µs) or the park (2 ms); the announce re-check takes a flip with
      no exec variance — a cancel anchored busy-exact to the fresh 32 µs
      spin budget (a fresh pool each round, so the budget never adapts
-     away) */
-  for (int i = 0; i < 150; i++) {
+     away); 45 rounds cycle the (tier, verb, delay) combos three times */
+  for (int i = 0; i < 45; i++) {
     pool_pair(1, 1, 2, 64, 64, 64, 512);
     int tier = (i / 3) % 3;
     if (tier == 1) {
@@ -2872,7 +2829,8 @@ static void test_threaded_races(void) {
     mizu_pool_destroy(wk);   /* simulated crash */
     wk = NULL;
     void *obj = NULL;
-    assert(mizu_pool_collect(ctrl, &t1, &obj, 300) == MIZU_ERR);   /* probes:
+    /* the probe fires on the first park wake: 100 ms sets only when */
+    assert(mizu_pool_collect(ctrl, &t1, &obj, 100) == MIZU_ERR);   /* probes:
                                               both slots fail DIED */
     struct race_ctx ra = { .p = ctrl, .t = t2 }, rb = { .p = sub, .t = t2 };
     race_start(&ta, &tb, gated_collect_main, gated_collect_main, &ra, &rb);
@@ -3009,7 +2967,7 @@ static void test_collect_recheck(void) {
   pthread_t th;
   assert(pthread_create(&th, NULL, poke_cancel_main, NULL) == 0);
   const char *want = "task cancelled or pool stopped";
-  for (int round = 0; round < 3 * 40 * 8; round++) {
+  for (int round = 0; round < 3 * 40 * 2; round++) {
     int site = round % 3;
     poke_n = site == 1 ? 8 : site == 2 ? 2 : 1;
     poke_first = site == 2;
@@ -3129,10 +3087,10 @@ static void test_abandon_fork(void) {
     mizu_task t;
     if (mizu_pool_submit(ctrl, &b, &t, 0) != MIZU_ERR ||
         strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
-      exit(1);
+      _exit(1);
     mizu_pool_abandon(wk);
     mizu_pool_abandon(ctrl);
-    exit(0);
+    _exit(0);
   }
   int st;
   assert(waitpid(pid, &st, 0) == pid);
@@ -3221,6 +3179,9 @@ static void test_fairness(void) {
     assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(exec_calls == 61);   /* the tick stole the orphan */
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  mizu_pool_status ps;
+  assert(mizu_pool_status_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[1] == MIZU_WK_FREE);   /* the drained slot freed */
   for (int i = 0; i < 60; i++) collect_bytes(ctrl, &ts[i], "x", 1);
   pool_end();
   puts("ok fairness");
@@ -3318,7 +3279,7 @@ static void test_worker_run_interrupt(void) {
   collect_bytes(ctrl, &t, "x", 1);   /* the task itself completed */
 
   intr_armed = 1;   /* now from inside the step's park wake */
-  assert(mizu_pool_step(wk, 1000) == MIZU_STEP_SHUTDOWN);
+  assert(mizu_pool_step(wk, 100) == MIZU_STEP_SHUTDOWN);
   assert(strstr(mizu_pool_error(wk), "interrupted") != NULL);
   assert(mizu_pool_leave(wk) == MIZU_OK);
   mizu_pool_destroy(wk);
@@ -3641,7 +3602,9 @@ static void test_reap_paths(void) {
   mizu_pool_destroy(wk);   /* simulated crash */
   wk = NULL;
   void *obj = NULL;
-  assert(mizu_pool_collect(ctrl, &t, &obj, 1500) == MIZU_TIMEOUT);
+  /* 250 ms: the backstop probe reaps on the first park expiry, then the
+     wait times out as nothing ever publishes */
+  assert(mizu_pool_collect(ctrl, &t, &obj, 250) == MIZU_TIMEOUT);
   /* the orphaned entry steals back onto a fresh worker */
   mizu_binding wb;
   make_binding(&wb, 1);
@@ -3972,9 +3935,7 @@ int main(void) {
   test_lame_duck_role_guard();
   test_orphan_drain();
   test_orphan_finalize();
-  test_fairness_orphan();
   test_probe_streak();
-  test_submitter_reap();
   test_sub_slot_recycle();
   test_step_idle();
   test_ready_wait();

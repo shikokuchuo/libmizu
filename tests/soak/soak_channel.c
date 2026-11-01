@@ -169,6 +169,11 @@ int main(void) {
   double seconds = env != NULL ? atof(env) : 120;
   assert(seconds > 0);
 
+  /* the run is time-boxed by `seconds`; the alarm bounds the DONE drain
+     and the final waitpid (soak_pool's discipline) — a lost wake fails
+       instead of hanging the nightly */
+  alarm((unsigned) seconds + 180);
+
   mizu_binding b;
   mizu_binding_bytes(&b);
   mizu_channel_opts opts;

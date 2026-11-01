@@ -419,12 +419,13 @@ static void test_pool_owner_death_watch(void) {
   opts.per_worker_cap = 8;
   opts.result_slots = 16;
   opts.slot_size = 256;
-  int pipefd[2];
-  assert(pipe(pipefd) == 0);
+  int pipefd[2], stay[2];
+  assert(pipe(pipefd) == 0 && pipe(stay) == 0);
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
     close(pipefd[0]);
+    close(stay[1]);
     mizu_binding b;
     mizu_binding_bytes(&b);
     mizu_pool *dp = NULL;
@@ -433,10 +434,16 @@ static void test_pool_owner_death_watch(void) {
     if (mizu_pool_token(dp, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
     size_t want = strlen(dtok) + 1;
     if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
-    sleep(30);                       /* the foreign owner, alive for now */
+    /* the foreign owner, alive until killed or orphaned — the parent's
+       death closes the stay pipe (no sleep(30) process outlives an
+       assert abort) */
+    char c;
+    ssize_t n = read(stay[0], &c, 1);   /* blocks to EOF or error */
+    (void) n;
     _exit(0);
   }
   close(pipefd[1]);
+  close(stay[0]);
   char dtok[64];
   size_t got = 0;
   while (got < sizeof(dtok)) {
@@ -471,6 +478,7 @@ static void test_pool_owner_death_watch(void) {
   kill(pid, SIGKILL);
   int wst;
   assert(waitpid(pid, &wst, 0) == pid);
+  close(stay[1]);
   assert(wait_fires(1, 5000));
   mizu_pool_sig *sig = mizu_pool_signals(sub2);
   assert(*sig->owner_dead == 1);
@@ -538,12 +546,13 @@ static void test_pool_owner_watch_fail(void) {
   opts.per_worker_cap = 8;
   opts.result_slots = 16;
   opts.slot_size = 256;
-  int pipefd[2];
-  assert(pipe(pipefd) == 0);
+  int pipefd[2], stay[2];
+  assert(pipe(pipefd) == 0 && pipe(stay) == 0);
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
     close(pipefd[0]);
+    close(stay[1]);
     mizu_binding b;
     mizu_binding_bytes(&b);
     mizu_pool *dp = NULL;
@@ -552,10 +561,14 @@ static void test_pool_owner_watch_fail(void) {
     if (mizu_pool_token(dp, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
     size_t want = strlen(dtok) + 1;
     if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
-    sleep(30);                       /* the foreign owner, alive for now */
+    /* the foreign owner, alive until killed or orphaned */
+    char c;
+    ssize_t n = read(stay[0], &c, 1);   /* blocks to EOF or error */
+    (void) n;
     _exit(0);
   }
   close(pipefd[1]);
+  close(stay[0]);
   char dtok[64];
   size_t got = 0;
   while (got < sizeof(dtok)) {
@@ -589,6 +602,7 @@ static void test_pool_owner_watch_fail(void) {
   kill(pid, SIGKILL);
   int wst;
   assert(waitpid(pid, &wst, 0) == pid);
+  close(stay[1]);
   mizu_pool_destroy(sub2);
 
   /* the orphan's names, as in the other foreign-owner scenario */
@@ -626,12 +640,15 @@ static void test_endpoint_paths(void) {
   const char *livedir = mizu_live_dir();
   assert(livedir != NULL);
   const char *err = NULL;
-  const char *region =
+  /* PID-keyed: two runs of this binary never collide on the endpoint */
+  char region[64];
 #ifdef _WIN32
-    "Local\\mizu_1_2";
+  const char *fmt = "Local\\mizu_1_%ld";
 #else
-    "/mizu_1_2";
+  const char *fmt = "/mizu_1_%ld";
 #endif
+  int rn = snprintf(region, sizeof(region), fmt, mizu_self_pid());
+  assert(rn > 0 && (size_t) rn < sizeof(region));
 
   mizu_notify_ep *ep1 = mizu_notify_ep_open(livedir, region, "host", &err);
   assert(ep1 != NULL);
@@ -650,7 +667,8 @@ static void test_endpoint_paths(void) {
   mizu_notify_ep_close(ep2, 1);
 
   char path[MIZU_PATH_BUF];
-  int n = snprintf(path, sizeof(path), "%s/mizu_1_2.ntfy.host", livedir);
+  int n = snprintf(path, sizeof(path), "%s/mizu_1_%ld.ntfy.host", livedir,
+                   mizu_self_pid());
   assert(n > 0 && (size_t) n < sizeof(path));
 #ifndef _WIN32
   /* the filesystem socket is unlinked by the graceful close */
@@ -690,7 +708,8 @@ static void test_reap_grammar(void) {
   const char *livedir = mizu_live_dir();
   assert(livedir != NULL);
   char path[MIZU_PATH_BUF];
-  int n = snprintf(path, sizeof(path), "%s/mizu_1_2.ntfy.host", livedir);
+  int n = snprintf(path, sizeof(path), "%s/mizu_1_%ld.ntfy.host", livedir,
+                   mizu_self_pid());
   assert(n > 0 && (size_t) n < sizeof(path));
   int fd = open(path, O_CREAT | O_WRONLY, 0600);
   assert(fd >= 0);

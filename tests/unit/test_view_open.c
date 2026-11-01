@@ -31,9 +31,13 @@ int main(void) {
   assert(mizu_zc_refcount(shm) == 2);
 
   /* unbalanced flags reject nothing (0 is the default); a vanished name
-     fails with the thread-local slot set, either form */
+     fails with the thread-local slot set, either form. PID-keyed: no
+     stray region from another run ever matches. */
+  char gname[64];
+  int gn = snprintf(gname, sizeof(gname), "/mizu_0_%ld", mizu_self_pid());
+  assert(gn > 0 && (size_t) gn < sizeof(gname));
   mizu_shm *gone = NULL;
-  assert(mizu_shm_open_view_flags(&gone, "/mizu_0_0",
+  assert(mizu_shm_open_view_flags(&gone, gname,
                                  MIZU_OPEN_VIEW_NOCOUNT) == MIZU_ERR);
   assert(mizu_last_error_category() != MIZU_ERRCAT_NONE);
 

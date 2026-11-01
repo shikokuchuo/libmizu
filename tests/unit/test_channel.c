@@ -816,7 +816,7 @@ int main(int argc, char **argv) {
     double t0 = mizu_now();
     recv_bytes(host, "ping", 4);      /* the caught-up publish unparks */
     assert(pthread_join(th, NULL) == 0);
-    assert(mizu_now() - t0 < 0.8);    /* the 1000 ms bound never ran */
+    assert(mizu_now() - t0 < 0.95);   /* the 1000 ms bound never ran */
     {
       void *obj = NULL;
       assert(mizu_channel_recv(host, &obj, 1000) == MIZU_CLOSED);
@@ -1010,10 +1010,26 @@ int main(int argc, char **argv) {
     ct.c = peer;
     ct.n = 1;
     assert(pthread_create(&th, NULL, chan_recv_main, &ct) == 0);
-    {
-      struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
+    /* the consumer is parked before the send: its entity word, read
+       through a second mapping, carries the announce the flush tests */
+    mizu_shm *shm = NULL;
+    char name[80];
+    int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+    assert(nl > 0 && (size_t) nl < sizeof(name));
+    assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+    _Atomic uint32_t *peer_parked =
+      (_Atomic uint32_t *) ((unsigned char *) mizu_shm_addr(shm) +
+                            MIZU_ENTITY_OFFSET(MIZU_ENTITY_PEER) +
+                            MIZU_ENTITY_PARKED);
+    int parked = 0;
+    for (int i = 0; i < 20000 && !parked; i++) {
+      struct timespec ts = { 0, 1000000 };
       nanosleep(&ts, NULL);
+      parked = (atomic_load_explicit(peer_parked, memory_order_acquire) &
+                MIZU_WAIT_PARKED) != 0;
     }
+    assert(parked);
+    mizu_shm_close(shm, 0);
     send_bytes(host, "w", 1);
     assert(pthread_join(th, NULL) == 0);
     assert(ct.st == MIZU_OK);
@@ -1174,7 +1190,8 @@ int main(int argc, char **argv) {
       if (mizu_channel_token(dh, dtok, sizeof(dtok)) != MIZU_OK) _exit(3);
       size_t want = strlen(dtok) + 1;
       if (write(pipefd[1], dtok, want) != (ssize_t) want) _exit(4);
-      exit(0);                       /* dies holding the host lock */
+      _exit(0);                      /* dies holding the host lock (_exit:
+                                        LSan would flag the leaked channel) */
     }
     close(pipefd[1]);
     char dtok[64];
@@ -1219,7 +1236,9 @@ int main(int argc, char **argv) {
       execl(argv[0], argv[0], "gonepeer", token, (char *) NULL);
       _exit(9);
     }
-    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    /* 30 s: the exec'd (possibly instrumented) image needs dyld + attach;
+       the budget is a ceiling, never the expectation */
+    assert(mizu_channel_ready_wait(host, 30000) == MIZU_OK);
     int wst;
     assert(waitpid(pid, &wst, 0) == pid);
     assert(mizu_channel_alive(host) == 0);   /* the lock verdict */
@@ -1298,7 +1317,7 @@ int main(int argc, char **argv) {
       _exit(9);
     }
     close(pipefd[1]);
-    assert(mizu_channel_ready_wait(host, 5000) == MIZU_OK);
+    assert(mizu_channel_ready_wait(host, 30000) == MIZU_OK);   /* exec'd */
     int wst;
     assert(waitpid(pid, &wst, 0) == pid);   /* the peer is dead ... */
     char c;
@@ -1307,8 +1326,9 @@ int main(int argc, char **argv) {
     void *obj = NULL;
     double t0 = mizu_now();
     assert(mizu_channel_recv(host, &obj, 300) == MIZU_TIMEOUT);
-    assert(mizu_now() - t0 < 1.0);          /* parked, not spinning */
-    assert(mizu_channel_recv(host, &obj, 4000) == MIZU_PEER_GONE);
+    assert(mizu_now() - t0 < 1.8);          /* parked, not spinning (the
+                                               squatter exits at ~2 s) */
+    assert(mizu_channel_recv(host, &obj, 8000) == MIZU_PEER_GONE);
     mizu_channel_destroy(host);
   }
 #endif

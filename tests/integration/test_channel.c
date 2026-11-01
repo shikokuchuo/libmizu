@@ -30,6 +30,7 @@ int main(void) {
 
 #else
 
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -90,8 +91,18 @@ static void run_peer(void) {
 
 static int wait_exit(pid_t pid) {
   int st = 0;
+  for (int i = 0; i < 600; i++) {
+    /* 60 s, then a hard kill: a wedged child fails the test, it does
+       not hang the job */
+    pid_t r = waitpid(pid, &st, WNOHANG);
+    assert(r >= 0);
+    if (r == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+    struct timespec ts = { 0, 100 * 1000000L };
+    nanosleep(&ts, NULL);
+  }
+  kill(pid, SIGKILL);
   assert(waitpid(pid, &st, 0) == pid);
-  return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+  return 128;
 }
 
 static void test_fork_guard(void) {
@@ -128,62 +139,14 @@ static void test_fork_guard(void) {
   puts("ok fork_guard");
 }
 
-/* The inherited handle's verb: a forked child abandons its copies of both
-   sides (create and attach allocations alike) — only the child's half is
-   released, and the parent's channel echoes on uncorrupted. */
-static void test_fork_abandon(void) {
-  mizu_binding b;
-  mizu_binding_bytes(&b);
-  mizu_channel_opts opts;
-  mizu_channel_opts_init(&opts);
-  opts.capacity = 64;
-  opts.slot_size = 512;
-  assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
-  assert(mizu_channel_token(host, token, sizeof token) == MIZU_OK);
-  /* a peer-side handle attached in-process: the child abandons the attach
-     side's allocations alongside the create side's */
-  mizu_channel *peer_in;
-  assert(mizu_channel_attach(&peer_in, token, &b) == MIZU_OK);
-
-  /* in-flight state the child inherits: a warmup exchange both ways */
-  mizu_bytes warm = { (void *) "warm", 4 };
-  assert(mizu_channel_send(host, &warm) == MIZU_OK);
-  void *obj = NULL;
-  assert(mizu_channel_recv(peer_in, &obj, 5000) == MIZU_OK);
-  mizu_bytes_free(obj);
-
-  fflush(stdout);
-  pid_t a = fork();
-  assert(a >= 0);
-  if (a == 0) {
-    mizu_channel_abandon(host);
-    mizu_channel_abandon(peer_in);
-    _exit(0);
-  }
-  assert(wait_exit(a) == 0);
-
-  /* nothing the child released may leak into the live channel */
-  mizu_bytes tb = { (void *) "ping", 4 };
-  assert(mizu_channel_send(host, &tb) == MIZU_OK);
-  assert(mizu_channel_recv(peer_in, &obj, 5000) == MIZU_OK);
-  mizu_bytes *rb = obj;
-  assert(rb->len == 4 && memcmp(rb->data, "ping", 4) == 0);
-  mizu_bytes_free(rb);
-  mizu_bytes pong = { (void *) "pong", 4 };
-  assert(mizu_channel_send(peer_in, &pong) == MIZU_OK);
-  assert(mizu_channel_recv(host, &obj, 5000) == MIZU_OK);
-  rb = obj;
-  assert(rb->len == 4 && memcmp(rb->data, "pong", 4) == 0);
-  mizu_bytes_free(rb);
-  mizu_channel_destroy(peer_in);   /* its close bit lets the host's unlink */
-  mizu_channel_destroy(host);
-  puts("ok fork_abandon");
-}
+/* (fork + abandon + the parent's echo on is covered in-process by the
+   unit tier; the fresh-process attach after a forked misuser is
+   test_fork_guard above) */
 
 /* The fire-and-exit producer: attach, one spill-region payload, immediate
    destroy — destroy's drain rendezvous holds the teardown (and its
    unlinks) until the host has read. */
-static void run_fire_peer(void) {
+static void run_fire_peer(int sync_wr) {
   mizu_binding b;
   mizu_binding_bytes(&b);
   mizu_channel *p;
@@ -193,6 +156,7 @@ static void run_fire_peer(void) {
   for (size_t i = 0; i < sizeof big; i++) big[i] = (unsigned char) i;
   mizu_bytes tb = { big, sizeof big };
   if (mizu_channel_send(p, &tb) != MIZU_OK) _exit(17);
+  if (write(sync_wr, "S", 1) != 1) _exit(18);   /* the payload is in flight */
   mizu_channel_destroy(p);
   _exit(0);
 }
@@ -207,13 +171,24 @@ static void test_drain_rendezvous(void) {
   opts.arena_size = 0;   /* force the spill region the race unlinks */
   assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
   assert(mizu_channel_token(host, token, sizeof token) == MIZU_OK);
+  int syncp[2];
+  assert(pipe(syncp) == 0);
   fflush(stdout);
   pid_t p = fork();
   assert(p >= 0);
-  if (p == 0) run_fire_peer();
-  { /* the peer's destroy is mid-rendezvous by now; pre-rendezvous this
-       recv read "payload region vanished" */
-    struct timespec ts = { 0, 300 * 1000000L };
+  if (p == 0) {
+    close(syncp[0]);
+    run_fire_peer(syncp[1]);
+  }
+  close(syncp[1]);
+  /* the send done, the peer's destroy reaches the drain rendezvous within
+     the beat (two statements); pre-rendezvous this recv read "payload
+     region vanished" */
+  char c;
+  assert(read(syncp[0], &c, 1) == 1);
+  close(syncp[0]);
+  {
+    struct timespec ts = { 0, 100 * 1000000L };
     nanosleep(&ts, NULL);
   }
   void *obj = NULL;
@@ -276,14 +251,15 @@ static void test_drain_wait_wake(void) {
      publish (destroy bound is 1000 ms — the pre-fix outcome) */
   double t0 = now_s();
   mizu_channel_destroy(host);
-  assert(now_s() - t0 < 0.8);
+  /* the publish wake beats the 1000 ms bound (its own floor: nothing
+     else can wake the drain this early — the peer outlives the bound) */
+  assert(now_s() - t0 < 1.0);
   assert(wait_exit(p) == 0);
   puts("ok drain_wait_wake");
 }
 
 int main(void) {
   test_fork_guard();
-  test_fork_abandon();
   test_drain_rendezvous();
   test_drain_wait_wake();
   puts("test_channel integration: all passed");

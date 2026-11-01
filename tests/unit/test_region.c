@@ -40,6 +40,28 @@ static void dl_block_cb(void *ctx) {
     nanosleep(&ts, NULL);
   }
 }
+
+/* A forked child that stays alive until killed or orphaned: its read
+   end sees EOF once every write copy closes (the parent's death closes
+   its own), so an assert abort mid-test never leaks a lingering
+   process. The caller kills the child, reaps it, then closes the
+   returned write end. */
+static pid_t spawn_lingering(int *wr_fd) {
+  int pipefd[2];
+  assert(pipe(pipefd) == 0);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(pipefd[1]);
+    char c;
+    ssize_t n = read(pipefd[0], &c, 1);   /* blocks to EOF or error */
+    (void) n;
+    _exit(0);
+  }
+  close(pipefd[0]);
+  *wr_fd = pipefd[1];
+  return pid;
+}
 #endif
 
 #ifndef _WIN32
@@ -85,13 +107,16 @@ static void *live_dir_main(void *arg) {
 
 /* A signal to the parked thread breaks the sleep as PARK_INTR. */
 static mizu_parker intr_pk;
+static _Atomic int eintr_done;
 static void eintr_handler(int sig) {
   (void) sig;
 }
 static void *eintr_park_main(void *arg) {
   (void) arg;
   uint32_t e = mizu_parker_snapshot(&intr_pk);
-  return (void *) (intptr_t) mizu_park(&intr_pk, e, 30000);
+  intptr_t rc = mizu_park(&intr_pk, e, 30000);
+  atomic_store_explicit(&eintr_done, 1, memory_order_release);
+  return (void *) rc;
 }
 
 /* An unpark on a short delay: the indefinite park wakes from its sleep,
@@ -527,26 +552,8 @@ int main(void) {
     assert(strstr(mizu_last_error_message(), "cannot open region") != NULL);
   }
 
-  /* the view open: the default form performs the counted add, NOCOUNT
-     leaves it to the caller */
-  {
-    mizu_shm *vreg = NULL;
-    assert(mizu_shm_create(&vreg, 4096) == MIZU_OK);
-    mizu_shm *v = NULL;
-    assert(mizu_shm_open_view(&v, mizu_shm_name(vreg)) == MIZU_OK);
-    assert(mizu_zc_refcount(v) == 1);
-    mizu_zc_unref(v);
-    assert(mizu_zc_refcount(v) == 0);
-    mizu_shm_close(v, 0);
-    assert(mizu_shm_open_view_flags(&v, mizu_shm_name(vreg),
-                                    MIZU_OPEN_VIEW_NOCOUNT) == MIZU_OK);
-    assert(mizu_zc_refcount(v) == 0);
-    mizu_zc_ref(v);
-    assert(mizu_zc_refcount(v) == 1);
-    mizu_zc_unref(v);
-    mizu_shm_close(v, 0);
-    mizu_shm_close(vreg, 1);
-  }
+  /* (the view-open refcount semantics — the counted add and NOCOUNT —
+     are covered by test_view_open.c) */
 
   /* the spin learner: a completed wait inside the cap grows 1.5x +
      headroom (never below the base, never past the cap); a wait past the
@@ -604,12 +611,8 @@ int main(void) {
      watched pid's exit, and a pre-teardown (now unlisted) watch's stop
      frees directly */
   {
-    pid_t pid = fork();
-    assert(pid >= 0);
-    if (pid == 0) {
-      sleep(30);
-      _exit(0);
-    }
+    int wr;
+    pid_t pid = spawn_lingering(&wr);
     _Atomic int dl_flag = 0;
     mizu_death_watch *w1 = mizu_death_watch_start((long) pid, &dl_flag, NULL);
     assert(w1 != NULL);
@@ -619,6 +622,7 @@ int main(void) {
     kill(pid, SIGKILL);
     int wst;
     assert(waitpid(pid, &wst, 0) == pid);
+    close(wr);
     for (int i = 0; i < 5000 && !dl_flag; i++) {
       struct timespec ts = {0, 1000000};
       nanosleep(&ts, NULL);
@@ -635,18 +639,9 @@ int main(void) {
      blocked mid-fire holds the listener off the reap until after the
      fork, so the stopped pair is still listed in the child. */
   {
-    pid_t watched = fork();
-    assert(watched >= 0);
-    if (watched == 0) {
-      sleep(30);
-      _exit(0);
-    }
-    pid_t watched2 = fork();
-    assert(watched2 >= 0);
-    if (watched2 == 0) {
-      sleep(30);
-      _exit(0);
-    }
+    int wr_a, wr_b;
+    pid_t watched = spawn_lingering(&wr_a);
+    pid_t watched2 = spawn_lingering(&wr_b);
 
     _Atomic int flag_a = 0, flag_b = 0;
     mizu_death_watch *wa = mizu_death_watch_start2((long) watched, &flag_a,
@@ -673,6 +668,7 @@ int main(void) {
     kill(watched, SIGKILL);
     int wst;
     assert(waitpid(watched, &wst, 0) == watched);
+    close(wr_a);
     for (int i = 0; i < 5000 &&
          !atomic_load_explicit(&dl_cb_entered, memory_order_acquire); i++) {
       struct timespec ts = {0, 1000000};
@@ -703,6 +699,7 @@ int main(void) {
     assert(flag_b == 0);              /* a stopped watch never fires */
     kill(watched2, SIGKILL);
     assert(waitpid(watched2, &wst, 0) == watched2);
+    close(wr_b);
     mizu_notify_ep_close(nep, 1);
     mizu_death_listener_teardown();
     dl_cb_entered = 0;
@@ -785,9 +782,15 @@ int main(void) {
     assert(sigaction(SIGUSR1, &sa, NULL) == 0);
     pthread_t th;
     assert(pthread_create(&th, NULL, eintr_park_main, NULL) == 0);
-    struct timespec ts = { 0, 100000000 };   /* 100 ms: parked by now */
-    nanosleep(&ts, NULL);
-    assert(pthread_kill(th, SIGUSR1) == 0);
+    /* signals are not queued: keep poking until one lands inside the
+       sleep — an early one is absorbed by the handler and the next
+       interrupts the park */
+    for (int i = 0; i < 30000 &&
+         !atomic_load_explicit(&eintr_done, memory_order_acquire); i++) {
+      assert(pthread_kill(th, SIGUSR1) == 0);
+      struct timespec ts = { 0, 1000000 };
+      nanosleep(&ts, NULL);
+    }
     void *rc = NULL;
     assert(pthread_join(th, &rc) == 0);
     assert((intptr_t) rc == MIZU_PARK_INTR);

@@ -29,6 +29,7 @@ int main(void) {
 
 #else
 
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -64,8 +65,18 @@ static void settle(int ms) {
 
 static int wait_exit(pid_t pid) {
   int st = 0;
+  for (int i = 0; i < 600; i++) {
+    /* 60 s, then a hard kill: a wedged child fails the test, it does
+       not hang the job */
+    pid_t r = waitpid(pid, &st, WNOHANG);
+    assert(r >= 0);
+    if (r == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+    struct timespec ts = { 0, 100 * 1000000L };
+    nanosleep(&ts, NULL);
+  }
+  kill(pid, SIGKILL);
   assert(waitpid(pid, &st, 0) == pid);
-  return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+  return 128;
 }
 
 /* The armed peer: arm and watch first (the parent waits for the go

@@ -236,7 +236,12 @@ int main(void) {
   got = mizu_read_region(&ctx, (const uint8_t *) target->name,
                         target->name_len);
   assert(got != NULL && h.oc.hits == 1);
-  mizu_shm *gone = mizu_read_region(&ctx, (const uint8_t *) "/mizu_0_0", 8);
+  /* a vanished name (PID-keyed: no stray region from another run) */
+  char gname[64];
+  int gn = snprintf(gname, sizeof(gname), "/mizu_0_%ld", mizu_self_pid());
+  assert(gn > 0 && (size_t) gn < sizeof(gname));
+  mizu_shm *gone = mizu_read_region(&ctx, (const uint8_t *) gname,
+                                    (uint32_t) strlen(gname));
   assert(gone == NULL && ctx.gone == 1);
   /* the wire-name grammar gate: a traversal or malformed name is refused
      before the open, reported gone like a vanished region */

@@ -260,29 +260,15 @@ static void open_tests(void) {
   assert(mizu_ix_next(&cur, &(mizu_ix_item) {0}) == MIZU_ERR);  /* latched */
 }
 
-/* The err and task items: parsed from day one, ahead of their builders
-   (Phases 2 and 4). */
+/* The task item: list nesting, the kind-2 (runner) header, and the
+   unknown-kind decline. (The bare err round trips — index-bearing and
+   index-free — ride the corpus err-basic/err-index rt rows, whose
+   re-emit exercises every field.) */
 static void err_task_tests(void) {
   unsigned char buf[256];
-  size_t off = mizu_ix_put_header(buf);
-  off += mizu_ix_put_err(buf + off, 1, 42, "type", 4, "msg", 3, "dt", 2);
+  size_t off;
   mizu_ix cur;
-  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
   mizu_ix_item it;
-  assert(mizu_ix_next(&cur, &it) == MIZU_OK);
-  assert(it.kind == MIZU_IX_ERR && it.err_flags == 1 && it.err_index == 42);
-  assert(it.err_str[0].len == 4 && memcmp(it.err_str[0].ptr, "type", 4) == 0);
-  assert(it.err_str[1].len == 3 && memcmp(it.err_str[1].ptr, "msg", 3) == 0);
-  assert(it.err_str[2].len == 2 && memcmp(it.err_str[2].ptr, "dt", 2) == 0);
-  assert(mizu_ix_end(&cur) == MIZU_OK);
-
-  /* no index: flags 0, three strings only */
-  off = mizu_ix_put_header(buf);
-  off += mizu_ix_put_err(buf + off, 0, 0, "t", 1, "m", 1, "d", 1);
-  assert(mizu_ix_open(&cur, buf, off) == MIZU_OK);
-  assert(mizu_ix_next(&cur, &it) == MIZU_OK);
-  assert(it.kind == MIZU_IX_ERR && it.err_flags == 0);
-  assert(mizu_ix_end(&cur) == MIZU_OK);
 
   /* list[task, x]: the task nests as one element of kind-determined
      arity, so the list's count is 2 */
