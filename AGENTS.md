@@ -228,9 +228,9 @@ these.
   restatement of the code. Keep license/attribution headers intact.
 - README structure is shared with the bindings; contributor notes live in
   `CONTRIBUTING.md`, not the README.
-- Commit messages are a single line (subject only, no body).
-- Never push without explicit approval — every push must be approved by
-  the user first.
+- Commit messages: a short single-line summary, no body — describe the
+  change, don't enumerate every file or edit.
+- PR descriptions: brief, tidyverse-style plain English.
 
 ## CI
 

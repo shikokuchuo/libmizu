@@ -6,13 +6,11 @@
 
 libmizu is a C library for lock-free shared-memory IPC.
 
-libmizu is for runtimes that parallelize with processes rather than threads.
-It uses shared memory to make the communication between those processes fast enough to divide work at thread granularity.
+For runtimes that parallelize with processes rather than threads, libmizu uses shared memory to make communication between those processes fast enough to divide work at thread granularity.
 
-Round trips drop from tens of microseconds over sockets to under a microsecond (see [Performance](#performance)).
-The hot path never enters the kernel and data is never copied through a system socket.
+Round trips drop from tens of microseconds over sockets to < 1 µs (see [Performance](#performance)).
 
-Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting, and peer death delivered as an OS event.
+Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting with the hot path bypassing the kernel, and peer death delivered as an OS event.
 
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R and [pymizu](https://github.com/shikokuchuo/pymizu) for Python.
@@ -26,7 +24,7 @@ The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R a
 - FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
 - C11, 64-bit: Linux, macOS, and Windows
 
-> **Pre-release.** The API is not stable and can change at any time before a release.
+> **Pre-release.** The API is not yet stable and we may make changes in response to feedback.
 
 ## Performance
 
@@ -109,8 +107,8 @@ Bindings that compile C can add the amalgamation to their own build instead: `to
 
 The headers form two tiers:
 
-- **`mizu.h`** — the stable consumer API.
-  The soname tracks its ABI. The stability promise starts at 1.0.
+- **`mizu.h`** — the consumer API, stable from 1.0.
+  The soname tracks its ABI.
 - **`mizu_ext.h`** — the binding-author API: the callback seam (`stage`, `read`, `exec`, ...), the stager/read/publish services, the built-in bytes binding, and promoted internals (parker, liveness, preamble, map support).
   It is version-pinned per minor release and can change without deprecation. Binding authors rebuild (or re-vendor) per minor release.
 
@@ -119,7 +117,7 @@ A third header, `src/internal.h`, is private. It is never installed, and binding
 ## Building
 
 libmizu needs a C11 compiler and a 64-bit platform: the wire formats depend on lock-free 64-bit atomics.
-On Linux, kernel 5.3 or later is required.
+On Linux, kernel 5.3 or later is required (for `pidfd_open`).
 
 The Makefile is the only build system:
 
