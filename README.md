@@ -5,6 +5,7 @@
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-api-blue.svg)](https://shikokuchuo.net/libmizu/)
 
 libmizu is a C library for lock-free shared-memory IPC.
 
@@ -26,7 +27,7 @@ The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R a
 - FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
 - C11, 64-bit: Linux, macOS, and Windows
 
-> **Pre-release.** The API is not yet stable and we may make changes in response to feedback.
+> **Lifecycle: experimental.** The API is not yet stable and we may make changes in response to feedback.
 
 ## Performance
 
