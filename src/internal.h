@@ -19,6 +19,21 @@
 #if !defined(_WIN32)
 #  include <sys/types.h>          /* mode_t: mizu_shm_os_open */
 #endif
+#if defined(__linux__)
+#  include <sys/mman.h>
+/* The madvise codes the region layer gates on are fixed kernel ABI, but
+   their names postdate some shipping libc headers (glibc 2.35 and 2.37;
+   a manylinux_2_28 build host has neither). Defined here, after the
+   real header, so every core TU compiles the same paths whatever its
+   headers: support is a kernel property, probed at run time — an older
+   kernel EINVALs into the existing fallbacks. */
+#  ifndef MADV_POPULATE_WRITE
+#    define MADV_POPULATE_WRITE 23   /* kernel >= 5.14 */
+#  endif
+#  ifndef MADV_COLLAPSE
+#    define MADV_COLLAPSE 25         /* kernel >= 6.1 */
+#  endif
+#endif
 
 #include "mizu.h"
 #include "mizu_ext.h"

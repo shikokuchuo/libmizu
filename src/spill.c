@@ -114,7 +114,7 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
   fl->stamp[slot] = ++fl->tick;
   fl->total += size;
   fl->n++;
-#if defined(__linux__) && defined(MADV_COLLAPSE)
+#if defined(__linux__)
   /* Collapse a proved-reusable region to huge pages (Linux >= 6.1): on
      stock Linux shmem THP is off, so the create-time MADV_HUGEPAGE is
      inert and a reused region would stay on 4 KiB pages forever. At

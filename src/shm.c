@@ -169,13 +169,6 @@ char **mizu_shm_reap(int *n) {
 #define MAP_POPULATE 0
 #endif
 
-/* Linux 6.1's MADV_COLLAPSE postdates some shipping libc headers; the
-   number is fixed, and an older kernel EINVALs into the create's
-   populate fallback. */
-#if defined(__linux__) && !defined(MADV_COLLAPSE)
-#define MADV_COLLAPSE 25
-#endif
-
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
@@ -660,7 +653,7 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
     return mizu_create_fail(fd, shm->name, ENOSPC);
 #endif
 
-#if defined(__linux__) && defined(MADV_POPULATE_WRITE)
+#if defined(__linux__)
   /* One reservation pass: MADV_POPULATE_WRITE faults the range writable,
      allocating the tmpfs folios and installing the PTEs together — the
      fallocate + MAP_POPULATE pair below walks the range twice. A full
@@ -679,7 +672,7 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
 #endif
   int reserved = 0;
   /* Huge-folio create (kernel >= 6.1; MADV_COLLAPSE is fallback-defined
-     above): touch one page per 2 MiB extent — a wholly-empty extent
+     in internal.h): touch one page per 2 MiB extent — a wholly-empty extent
      fails the collapse (SCAN_TRUNCATED) — then collapse: the kernel
      zero-fills each extent's holes into a fully-present huge folio, so
      one fault per extent plus one madvise reserve the region where the
@@ -705,7 +698,10 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
     munmap(addr, size);
     if (perr != EINVAL)             /* tmpfs full: fail, do not retry */
       return mizu_create_fail(fd, shm->name, perr);
-    /* kernel < 5.14: the two-pass reservation */
+    /* kernel < 5.14: the two-pass reservation. posix_fallocate allocates
+       the tmpfs pages (ftruncate leaves the file sparse, and MAP_POPULATE
+       alone read-faults holes onto the shared zero page without
+       allocating), then MAP_POPULATE installs the PTEs. */
     int ferr = posix_fallocate(fd, 0, (off_t) size);
     if (ferr != 0)
       return mizu_create_fail(fd, shm->name, ferr);
@@ -720,17 +716,6 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
   }
   close(fd);
 #else
-#ifdef __linux__
-  /* Reserve tmpfs pages now: ftruncate leaves the file sparse and tmpfs
-     allocates only on write fault — SIGBUS if /dev/shm is full.
-     MAP_POPULATE alone won't help: read prefault of a hole resolves to
-     the shared zero page without allocating. posix_fallocate returns
-     errno directly. */
-  int ferr = posix_fallocate(fd, 0, (off_t) size);
-  if (ferr != 0)
-    return mizu_create_fail(fd, shm->name, ferr);
-#endif
-
   void *addr = mizu_mmap_aligned(fd, size, PROT_READ | PROT_WRITE,
                                  MAP_SHARED | MAP_POPULATE);
   if (addr == MAP_FAILED)

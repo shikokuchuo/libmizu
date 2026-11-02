@@ -113,7 +113,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
       (void) ((const volatile unsigned char *) addr)[off];
 #endif
 
-#if defined(__linux__) && defined(MADV_COLLAPSE)
+#if defined(__linux__)
   /* Collapse to huge folios (kernel >= 6.1): with the extent-aligned
      mapping this succeeds under the stock shmem_enabled=[never] — no
      PMD-mapping there, the win is the huge folio in the page cache (this
@@ -208,7 +208,7 @@ int mizu_shm_create_populate(mizu_shm *shm, size_t size) {
     for (size_t off = 0; off < size; off += MIZU_TOUCH_STRIDE) b[off] = 0;
   }
 #endif
-#if defined(__linux__) && defined(MADV_COLLAPSE)
+#if defined(__linux__)
   /* The plain create's MADV_HUGEPAGE is inert under the stock
      shmem_enabled=[never]; a synchronous collapse works regardless (the
      mapping is extent-aligned), and the populated pages already exist.
