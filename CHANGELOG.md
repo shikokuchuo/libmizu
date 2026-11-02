@@ -59,7 +59,13 @@ First public release.
 - Notify endpoints for event-driven bindings: named, edge-triggered
   wakes (a filesystem datagram socket on POSIX, an auto-reset event on
   Windows) signaled at the publish checkpoint; watches ride the
-  death-listener machinery, and close and peer death also signal.
+  death-listener machinery, and close and peer death also signal. The
+  arm-time stale-datagram drop runs once per arm cycle, at the handle's
+  disarmed-to-armed transition (a re-arm under a standing arm never
+  drains a signal in flight), and the channel arm reports the
+  zero-timeout recv's verdict (data, closed, or peer gone), so a
+  terminal already present at the arm is surfaced by the caller's
+  synchronous drain.
 - L'Ecuyer-CMRG (MRG32k3a) stream jumping for deterministic per-element
   map seeds.
 - Distribution as a three-file amalgamation (`mizu.c` + `mizu.h` +

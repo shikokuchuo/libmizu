@@ -98,6 +98,9 @@ struct mizu_channel_s {
      of the peer's armed bit. ntfy_dwatch chains the peer's death onto
      the watch callback, so a dead peer wakes the drain too. */
   mizu_notify_ep *ntfy_ep;
+  _Atomic int ntfy_armed;      /* this handle's arm cycle: gates the
+                                  arm-time drain (relaxed — arm-family
+                                  calls are externally synchronized) */
   mizu_notify_watch *ntfy_watch;
   mizu_death_watch *ntfy_dwatch;
   void (*ntfy_cb)(void *);
@@ -516,6 +519,30 @@ static int chan_rx_avail(mizu_channel *c) {
   return r->lhead < r->cached_tail;
 }
 
+/* The empty-ring half of a zero-timeout recv's verdict, drain-before-
+   verdict: MIZU_CLOSED on either side's bit, MIZU_PEER_GONE on the sticky
+   death verdict or a listener-flagged death the lock probe confirms —
+   each branch re-checking the ring and answering MIZU_OK when a message
+   landed meanwhile (close never discards sent messages: data wins) —
+   else MIZU_TIMEOUT, nothing to report. The recv returns the verdict as
+   is; the notify arm reports it as availability. held (may be NULL) is
+   set when the listener flagged the peer but the lock still reads HELD
+   (a forked child outliving its parent holds the lock's open file
+   description): the flag is a one-shot wake trigger, not a permanence,
+   and the recv's park must not let it veto the wait. */
+static mizu_status chan_rx_verdict(mizu_channel *c, int *held) {
+  if (atomic_load_explicit(c->closedw, memory_order_acquire) != 0)
+    return chan_rx_avail(c) ? MIZU_OK : MIZU_CLOSED;
+  if (c->verdict_dead)
+    return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
+  if (atomic_load_explicit(&c->peer_dead, memory_order_acquire)) {
+    if (chan_probe_dead(c))
+      return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
+    if (held != NULL) *held = 1;
+  }
+  return MIZU_TIMEOUT;
+}
+
 /* ext tier: the count form of chan_rx_avail (a drain sizes its receive
    buffer from it — only this consumer shrinks it, so it never
    over-allocates on a producer's later publish). */
@@ -658,15 +685,8 @@ static mizu_status chan_wait_msg(mizu_channel *c, double timeout_ms) {
       }
     }
 
-    if (atomic_load_explicit(c->closedw, memory_order_acquire) != 0)
-      return chan_rx_avail(c) ? MIZU_OK : MIZU_CLOSED;
-    if (c->verdict_dead)
-      return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
-    if (atomic_load_explicit(&c->peer_dead, memory_order_acquire)) {
-      if (chan_probe_dead(c))
-        return chan_rx_avail(c) ? MIZU_OK : MIZU_PEER_GONE;
-      held = 1;
-    }
+    mizu_status verdict = chan_rx_verdict(c, &held);
+    if (verdict != MIZU_TIMEOUT) return verdict;
 
     if (timeout_ms == 0) {
       chan_publish_head(c);
@@ -1264,25 +1284,39 @@ mizu_status mizu_channel_notify_arm(mizu_channel *c, int on, int *avail_out) {
   if (!on) {
     atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_NOTIFY,
                               memory_order_seq_cst);
+    atomic_store_explicit(&c->ntfy_armed, 0, memory_order_relaxed);
     return MIZU_OK;
   }
   if (chan_notify_ep(c) == NULL) return MIZU_ERR;
-  /* announce -> fence -> report: either the peer's publish sees the bit
-     or this availability check sees the data — the parker protocol's
-     announce/re-check, transplanted. A re-arm of a continuously armed
-     word needs neither the drain (a datagram exists only once a publish
-     clears the bit, and it never moved) nor the RMW (the announce
-     stands). */
-  if ((atomic_load_explicit(c->self_parked, memory_order_seq_cst) &
-       MIZU_WAIT_NOTIFY) == 0) {
-    /* drop signals queued while disarmed: a stale datagram costs one
-       empty drain, never a spurious fresh signal */
+  if (!atomic_load_explicit(&c->ntfy_armed, memory_order_relaxed)) {
+    /* the disarmed -> armed transition, the only point where a queued
+       datagram is known stale: drop it (one spared empty drain, and a
+       watch installed later never fires for it). Never on a re-arm:
+       under a standing arm a clear word is a publish's — or a close's —
+       signal in flight, and draining it loses the wake. The word's
+       observed state cannot tell "disarmed" from "a publish cleared it";
+       only this flag can. */
     mizu_notify_ep_drain(c->ntfy_ep);
+    atomic_store_explicit(&c->ntfy_armed, 1, memory_order_relaxed);
+  }
+  /* announce -> fence -> report: either the peer's publish sees the bit
+     or this report sees the data — the parker protocol's announce /
+     re-check, transplanted. A re-arm skips the RMW while the announce
+     stands and re-stores it when a publish cleared it. */
+  if ((atomic_load_explicit(c->self_parked, memory_order_seq_cst) &
+       MIZU_WAIT_NOTIFY) == 0)
     atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_NOTIFY,
                              memory_order_seq_cst);
-  }
   atomic_thread_fence(memory_order_seq_cst);
-  if (avail_out != NULL) *avail_out = chan_rx_avail(c);
+  /* the report is what a zero-timeout recv would return: data in the
+     ring, or the terminal verdict (closed, peer gone). The caller's
+     synchronous drain reads data first and the terminal last, as the
+     recv orders them. A terminal already present at the arm signals
+     nothing later (the close signalled once, before anything was armed),
+     so it is reported here or never. */
+  if (avail_out != NULL)
+    *avail_out = chan_rx_avail(c) ||
+                 chan_rx_verdict(c, NULL) != MIZU_TIMEOUT;
   return MIZU_OK;
 }
 

@@ -56,16 +56,17 @@ On Windows the endpoint is an auto-reset named event (`SetEvent` while signaled 
 Notify endpoints are a second wake-trigger class: like the death listeners, they are triggers only, not a verdict.
 The consumer's drain-and-recheck decides.
 
-The arm is the parker protocol's announce/re-check transplanted: arm stores the flag with a seq_cst RMW, fences, and reports availability, so either the publisher sees the flag or the armer sees the data.
+The arm is the parker protocol's announce/re-check transplanted: arm stores the flag with a seq_cst RMW, fences, and reports what a zero-timeout recv would return (data in the ring, or the terminal verdict: closed, peer gone), so either the publisher sees the flag or the armer sees the data, and a terminal already present when nothing was armed to be signalled is surfaced by the arm's own report.
 The flag is edge-triggered.
 It rides the word the publish already loads and tests (the channel's `parked` word as `MIZU_WAIT_NOTIFY` beside the park announce, the pool's `waiter_slot` as `MIZU_WS_NOTIFY` beside the submitter index), so the unarmed publish path runs the same load, the same compare, and the same not-taken branch as without the feature.
 The publisher clears the bit as it signals (the winner of the clear sends), so one signal moves per idle-to-data transition, not one per publish.
 The sender opens its cached tx before claiming the edge: an open failure leaves the announce in place and the next armed sighting retries, whereas claiming first could consume the edge without sending.
 The pool coalesces per submitter: the slot's gate selects the endpoint wake, and the first publisher past it clears the submitter's `notify` word, so there is one signal per burst, however many workers publish.
 That clear is load-gated: once the burst's first publisher has won the word, every later publish pays one shared acquire load, not a locked RMW on the submitter's line.
-Spurious and stale signals are absorbed by the drain-and-recheck; a datagram queued while disarmed is dropped at the next arm.
+Spurious and stale signals are absorbed by the drain-and-recheck; a datagram queued while disarmed is dropped at the handle's disarmed-to-armed transition, never at a re-arm: under a standing arm a clear word is a publish's signal in flight, left for the watch.
 That arm-time drain is an active consume on every platform (a non-blocking read of the endpoint socket on POSIX, a zero-timeout wait on the auto-reset event on Windows), so a signal queued while disarmed cannot fire a later-installed watch.
-A re-arm of a continuously armed word skips both the drain (a datagram exists only once a publish clears the bit, and it never moved) and the RMW (the announce stands); the fence and the caller's re-check still close the protocol.
+A re-arm of a continuously armed word skips the drain, and skips the RMW when the announce stands, re-storing it when a publish cleared it; the fence and the caller's re-check still close the protocol.
+The handle, not the word, knows which transition an arm is (the word's observed state cannot distinguish "disarmed" from "a publish cleared it"), so each handle keeps a process-private arm-cycle flag, and arm-family calls on one handle are externally synchronized.
 
 A terminal that publishes nothing still wakes an armed consumer.
 The channel's watch chains the peer's death watch onto the same callback, and the close paths signal the endpoint alongside the parker unpark.

@@ -599,17 +599,29 @@ MIZU_API void mizu_death_listener_teardown(void);
    waiter_slot path, but an owner lost together with all its workers has
    nobody left to broadcast.
    mizu_channel_notify_arm(on != 0) sets MIZU_WAIT_NOTIFY in the side's
-   parked word and reports availability in *avail_out (may be NULL): the
-   caller drains what is already there synchronously, then stays armed.
-   Re-arms are idempotent; on == 0 disarms.
-   mizu_pool_notify_arm is the submitter-half arm (the coalescing word);
-   mizu_pool_task_notify announces (on != 0) or withdraws (on == 0) the
-   MIZU_WS_NOTIFY gate on each task's result slot. Announce before arming
-   the word, then re-check the tasks' terminal states (the sync scan
-   resolves whatever was already published). Withdrawing restores -1 on
+   parked word and reports in *avail_out (may be NULL) whether a
+   zero-timeout recv would not time out: data in the ring, or the
+   terminal verdict (closed, peer gone). The caller drains what is
+   already there synchronously, then stays armed. The stale-datagram
+   drop runs once per arm cycle, at the handle's disarmed -> armed
+   transition; a re-arm never drains (under a standing arm a clear word
+   is a publish's signal in flight, left for the watch) and re-stores
+   the announce a publish cleared. on == 0 disarms and ends the cycle.
+   mizu_pool_notify_arm is the submitter-half arm (the coalescing word),
+   with the same cycle discipline; mizu_pool_task_notify announces
+   (on != 0) or withdraws (on == 0) the MIZU_WS_NOTIFY gate on each
+   task's result slot. Announce before arming the word, then re-check the
+   tasks' terminal states (the sync scan resolves whatever was already
+   published). Under a standing arm cycle a caller may skip the re-arm
+   and issue the seq_cst fence itself: the announce -> re-check pairing
+   needs only the fence, and a publish that cleared the word has its
+   signal in flight, whose drain re-arms. Withdrawing restores -1 on
    slots still holding this submitter's announce; a publish racing it at
    worst sends one absorbed signal or skips a wake nobody waits on. Both
-   pool verbs need a handle with a claimed submitter slot. */
+   pool verbs need a handle with a claimed submitter slot.
+   Arm-family calls (arm, task_notify, watch, unwatch) on one handle are
+   externally synchronized: a binding's main thread or its global lock.
+   The arm-cycle flag and the endpoint's lazy create rely on it. */
 MIZU_API mizu_status mizu_channel_notify_arm(mizu_channel *, int on,
                                           int *avail_out);
 MIZU_API mizu_status mizu_channel_notify_watch(mizu_channel *,

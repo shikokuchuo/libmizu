@@ -186,6 +186,71 @@ static void test_channel_arm_reports(void) {
   puts("ok channel_arm_reports");
 }
 
+/* A re-arm under a standing arm never drains: a publish's signal in
+   flight (the word cleared, the datagram queued) survives to the watch
+   installed afterwards, and the re-arm re-stores the announce the
+   publish cleared. No watch during the re-arm, so the socket is
+   observable. */
+static void test_channel_rearm_keeps_signal(void) {
+  mizu_channel *host, *peer;
+  chan_pair(&host, &peer, 0);
+  fires = 0;
+  int avail = -1;
+  assert(mizu_channel_notify_arm(peer, 1, &avail) == MIZU_OK);
+  assert(avail == 0);
+  /* the publish clears the word and queues one datagram */
+  mizu_bytes b = { (void *) "r", 1 };
+  assert(mizu_channel_send(host, &b) == MIZU_OK);
+  assert(chan_sends(host) == 1);
+  /* the re-arm while armed: reports the data, leaves the datagram */
+  assert(mizu_channel_notify_arm(peer, 1, &avail) == MIZU_OK);
+  assert(avail == 1);
+  recv_one(peer);
+  assert(mizu_channel_notify_watch(peer, count_cb, NULL) == MIZU_OK);
+  assert(wait_fires(1, 5000));
+  settle(50);
+  assert(fires == 1);
+  /* the announce stands again: the next publish signals */
+  assert(mizu_channel_send(host, &b) == MIZU_OK);
+  assert(chan_sends(host) == 2);
+  assert(wait_fires(2, 5000));
+  recv_one(peer);
+  assert(mizu_channel_notify_unwatch(peer) == MIZU_OK);
+  assert(mizu_channel_notify_arm(peer, 0, NULL) == MIZU_OK);
+  chan_end(host, peer);
+  puts("ok channel_rearm_keeps_signal");
+}
+
+/* The arm reports what a zero-timeout recv would return: a close already
+   present at the arm is availability (the caller's synchronous drain
+   surfaces CLOSED), ordered behind any data still in the ring. */
+static void test_channel_arm_reports_terminal(void) {
+  mizu_channel *host, *peer;
+  chan_pair(&host, &peer, 0);
+  int avail = -1;
+  assert(mizu_channel_close_signal(host) == MIZU_OK);
+  assert(mizu_channel_notify_arm(peer, 1, &avail) == MIZU_OK);
+  assert(avail == 1);
+  void *obj = NULL;
+  assert(mizu_channel_recv(peer, &obj, 0) == MIZU_CLOSED);
+  assert(mizu_channel_notify_arm(peer, 0, NULL) == MIZU_OK);
+  chan_end(host, peer);
+
+  /* data, then the close: the drain reads the message first */
+  chan_pair(&host, &peer, 0);
+  mizu_bytes b = { (void *) "c", 1 };
+  assert(mizu_channel_send(host, &b) == MIZU_OK);
+  assert(mizu_channel_close_signal(host) == MIZU_OK);
+  assert(mizu_channel_notify_arm(peer, 1, &avail) == MIZU_OK);
+  assert(avail == 1);
+  assert(mizu_channel_recv(peer, &obj, 0) == MIZU_OK);
+  mizu_bytes_free(obj);
+  assert(mizu_channel_recv(peer, &obj, 0) == MIZU_CLOSED);
+  assert(mizu_channel_notify_arm(peer, 0, NULL) == MIZU_OK);
+  chan_end(host, peer);
+  puts("ok channel_arm_reports_terminal");
+}
+
 /* A spin channel has no notify endpoint (its publish path skips the wake
    checkpoint): arm and watch fail on both sides. */
 static void test_channel_spin(void) {
@@ -340,6 +405,45 @@ static void test_pool_burst(void) {
   assert(mizu_pool_notify_arm(ctrl, 0) == MIZU_OK);
   pool_end();
   puts("ok pool_burst");
+}
+
+/* The pool mirror: an announced task's publish clears the submitter word
+   and queues the datagram; a re-arm while armed (a second enrollment)
+   leaves it for the watch installed afterwards and re-stores the word. */
+static void test_pool_rearm_keeps_signal(void) {
+  pool_pair();
+  fires = 0;
+  mizu_task t, t2;
+  mizu_bytes b = { (void *) "w", 1 };
+  assert(mizu_pool_submit(ctrl, &b, &t, 1000) == MIZU_OK);
+  assert(mizu_pool_task_notify(ctrl, &t, 1, 1) == MIZU_OK);
+  assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
+  assert(mizu_pool_step(wk, 1000) == MIZU_STEP_TASK);
+  mizu_pool_dump dump;
+  assert(mizu_pool_dump_get(wk, &dump) == MIZU_OK);
+  assert(dump.notify_sends == 1);
+  /* the second enrollment's re-arm: the datagram stays queued */
+  assert(mizu_pool_submit(ctrl, &b, &t2, 1000) == MIZU_OK);
+  assert(mizu_pool_task_notify(ctrl, &t2, 1, 1) == MIZU_OK);
+  assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
+  assert(mizu_pool_notify_watch(ctrl, count_cb, NULL) == MIZU_OK);
+  assert(wait_fires(1, 5000));
+  settle(50);
+  assert(fires == 1);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_OK);
+  mizu_bytes_free(obj);
+  /* the announce stands again: the second publish signals */
+  assert(mizu_pool_step(wk, 1000) == MIZU_STEP_TASK);
+  assert(wait_fires(2, 5000));
+  assert(mizu_pool_dump_get(wk, &dump) == MIZU_OK);
+  assert(dump.notify_sends == 2);
+  assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_OK);
+  mizu_bytes_free(obj);
+  assert(mizu_pool_notify_unwatch(ctrl) == MIZU_OK);
+  assert(mizu_pool_notify_arm(ctrl, 0) == MIZU_OK);
+  pool_end();
+  puts("ok pool_rearm_keeps_signal");
 }
 
 /* A withdrawn announce wakes nobody: no signal, and the blocking collect
@@ -734,10 +838,13 @@ int main(void) {
   mizu_binding_bytes(&bytesb);
   test_channel_burst();
   test_channel_arm_reports();
+  test_channel_rearm_keeps_signal();
+  test_channel_arm_reports_terminal();
   test_channel_spin();
   test_channel_close_wakes();
   test_channel_destroy_watched();
   test_pool_burst();
+  test_pool_rearm_keeps_signal();
   test_pool_withdraw();
   test_pool_gates();
 #ifndef _WIN32

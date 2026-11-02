@@ -147,6 +147,9 @@ struct mizu_pool_s {
                                 slots keep the racing lazy open lock-free */
   _Atomic int ntfy_lock;       /* serializes the lazy tx open (worker
                                   publishes and the reaper race here) */
+  _Atomic int ntfy_armed;      /* this handle's arm cycle: gates the
+                                  arm-time drain (relaxed — arm-family
+                                  calls are externally synchronized) */
   uint64_t stat_notify_sends;
 };
 
@@ -4023,23 +4026,30 @@ mizu_status mizu_pool_notify_arm(mizu_pool *p, int on) {
   if (!on) {
     atomic_fetch_and_explicit(&s->notify, ~MIZU_WAIT_NOTIFY,
                               memory_order_seq_cst);
+    atomic_store_explicit(&p->ntfy_armed, 0, memory_order_relaxed);
     return MIZU_OK;
   }
   if (pool_notify_ep(p) == NULL) return MIZU_ERR;
-  /* a re-arm of a continuously armed word needs neither the drain (a
-     datagram exists only once a publish clears the bit, and it never
-     moved) nor the RMW (the announce stands): fence and let the caller's
-     terminal scan see whatever was already published */
-  if ((atomic_load_explicit(&s->notify, memory_order_seq_cst) &
-       MIZU_WAIT_NOTIFY) == 0) {
-    /* drop signals queued while disarmed: a stale datagram costs one
-       empty drain, never a spurious fresh signal */
+  if (!atomic_load_explicit(&p->ntfy_armed, memory_order_relaxed)) {
+    /* the disarmed -> armed transition, the only point where a queued
+       datagram is known stale: drop it (one spared empty drain, and a
+       watch installed later never fires for it). Never on a re-arm:
+       under a standing arm a clear word is a publish's signal in
+       flight, and draining it loses the wake for whatever else the
+       caller announced. The word's observed state cannot tell
+       "disarmed" from "a publish cleared it"; only this flag can. */
     mizu_notify_ep_drain(p->ntfy_ep);
-    /* the task-slot announces are already in place (mizu_pool_task_notify
-       goes first): announce the coalescing word -> fence */
+    atomic_store_explicit(&p->ntfy_armed, 1, memory_order_relaxed);
+  }
+  /* the task-slot announces are already in place (mizu_pool_task_notify
+     goes first): announce the coalescing word -> fence, and let the
+     caller's terminal scan see whatever was already published. A re-arm
+     skips the RMW while the announce stands and re-stores it when a
+     publish cleared it. */
+  if ((atomic_load_explicit(&s->notify, memory_order_seq_cst) &
+       MIZU_WAIT_NOTIFY) == 0)
     atomic_fetch_or_explicit(&s->notify, MIZU_WAIT_NOTIFY,
                              memory_order_seq_cst);
-  }
   atomic_thread_fence(memory_order_seq_cst);
   return MIZU_OK;
 }
