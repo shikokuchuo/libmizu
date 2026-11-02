@@ -7,11 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-api-blue.svg)](https://shikokuchuo.net/libmizu/)
 
-libmizu is a C library for lock-free shared-memory IPC.
+Lock-free shared memory IPC at thread speed in C11.
 
-For runtimes that parallelize with processes rather than threads, libmizu uses shared memory to make communication between those processes fast enough to divide work at thread granularity.
-
-Round trips drop from tens of microseconds over sockets to < 1 µs (see [Performance](#performance)).
+libmizu is for runtimes that parallelize with processes rather than threads. Round trips drop from tens of microseconds over sockets to < 1 µs, fast enough to divide work at thread granularity (see [Performance](#performance)).
 
 Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting with the hot path bypassing the kernel, and peer death delivered as an OS event.
 
@@ -81,7 +79,7 @@ mizu_channel_close(ch, 5000);                    /* up to 5 s for the peer's clo
 The peer fills its binding with `mizu_binding_bytes()` too and attaches with `mizu_channel_attach(&ch, token, &binding)`.
 It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
 
-To move a language's own objects rather than byte buffers, register callbacks on the binding instead — the binding-author seam covered in [Writing a binding](#writing-a-binding):
+To move a language's own objects rather than byte buffers, register callbacks on the binding instead, the binding-author seam covered in [Writing a binding](#writing-a-binding):
 
 ```c
 mizu_binding binding;
@@ -99,7 +97,7 @@ The rendered API reference lives at [shikokuchuo.net/libmizu](https://shikokuchu
 A binding teaches libmizu to turn the language's values into frames and back.
 The `stage` and `read` callbacks from the quickstart do the conversion, and `exec` runs tasks on pool workers.
 libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
-To start without callbacks, the built-in bytes binding — `mizu_binding_bytes()` — sends and receives byte buffers, as the quickstart shows.
+To start without callbacks, the built-in bytes binding, `mizu_binding_bytes()`, sends and receives byte buffers, as the quickstart shows.
 
 Every operation is an exported function.
 A language with a foreign function interface can call libmizu from the shared library, with no C of its own.
