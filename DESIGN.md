@@ -11,7 +11,7 @@ Each struct in `include/mizu.h` is the wire format.
 Sizes are static-asserted, and alignment is 64 bytes.
 Each shared hot word owns a full cache line, so writes from the producer and the consumer never share a line.
 The layout is fixed: growth adds capability without moving anything.
-(One exception, pre-release: the cross-language work repurposed reserved bytes — the channel entity blocks' identity words, the pool header's `worker_ident`, and the layout headers' flags and validity words — recorded in the CHANGELOG; `MIZU_ABI_VERSION` stayed 1, as peers are same-build.)
+(One exception, pre-release: the cross-language work repurposed reserved bytes, namely the channel entity blocks' identity words, the pool header's `worker_ident`, and the layout headers' flags and validity words, as recorded in the CHANGELOG; `MIZU_ABI_VERSION` stayed 1, as peers are same-build.)
 `MIZU_ABI_VERSION` gates mixed builds.
 Peers validate it at attach, before any thread reads or writes a shared atomic.
 Bump it on each wire-format change.
@@ -52,19 +52,20 @@ An indefinite park uses `MIZU_PARK_NOMINAL_MS` and relies on directed unparks.
 ## Notify endpoints
 
 A waiting entity can own a notify endpoint: a named, pollable wake object the publisher signals at the same fenced checkpoint where it tests the parked announce.
-On POSIX the endpoint is a bound filesystem datagram socket under the liveness dir — `/dev/shm` on Linux, so the endpoint shares the regions' visibility scope exactly and the async surface has no precondition the sync surface lacks (a path past the `sun_path` budget fails the arm with a recorded error; unlink-before-bind absorbs a dead holder's residue); on Windows an auto-reset named event (`SetEvent` while signaled coalesces, the wait consumes it).
-Notify endpoints are a second wake-trigger class: like the death listeners, they are triggers only, never a verdict.
+On POSIX the endpoint is a bound filesystem datagram socket under the liveness dir, which is `/dev/shm` on Linux, so the endpoint shares the regions' visibility scope exactly and the async surface has no precondition the sync surface lacks (a path past the `sun_path` budget fails the arm with a recorded error; unlink-before-bind absorbs a dead holder's residue).
+On Windows the endpoint is an auto-reset named event (`SetEvent` while signaled coalesces, and the wait consumes it).
+Notify endpoints are a second wake-trigger class: like the death listeners, they are triggers only, not a verdict.
 The consumer's drain-and-recheck decides.
 
 The arm is the parker protocol's announce/re-check transplanted: arm stores the flag with a seq_cst RMW, fences, and reports availability, so either the publisher sees the flag or the armer sees the data.
 The flag is edge-triggered.
-It rides the word the publish already loads and tests — the channel's `parked` word as `MIZU_WAIT_NOTIFY` beside the park announce, the pool's `waiter_slot` as `MIZU_WS_NOTIFY` beside the submitter index — so the unarmed publish path runs the same load, the same compare, and the same not-taken branch as without the feature.
-The publisher clears the bit as it signals (the winner of the clear sends), so one signal moves per idle-to-data transition, never one per publish.
-The sender opens its cached tx before claiming the edge: an open failure leaves the announce in place and the next armed sighting retries — claiming first could consume the edge without sending.
-The pool coalesces per submitter: the slot's gate selects the endpoint wake, and the first publisher past it clears the submitter's `notify` word — one signal per burst, however many workers publish.
+It rides the word the publish already loads and tests (the channel's `parked` word as `MIZU_WAIT_NOTIFY` beside the park announce, the pool's `waiter_slot` as `MIZU_WS_NOTIFY` beside the submitter index), so the unarmed publish path runs the same load, the same compare, and the same not-taken branch as without the feature.
+The publisher clears the bit as it signals (the winner of the clear sends), so one signal moves per idle-to-data transition, not one per publish.
+The sender opens its cached tx before claiming the edge: an open failure leaves the announce in place and the next armed sighting retries, whereas claiming first could consume the edge without sending.
+The pool coalesces per submitter: the slot's gate selects the endpoint wake, and the first publisher past it clears the submitter's `notify` word, so there is one signal per burst, however many workers publish.
 That clear is load-gated: once the burst's first publisher has won the word, every later publish pays one shared acquire load, not a locked RMW on the submitter's line.
 Spurious and stale signals are absorbed by the drain-and-recheck; a datagram queued while disarmed is dropped at the next arm.
-That arm-time drain is an active consume on every platform — a non-blocking read of the endpoint socket on POSIX, a zero-timeout wait on the auto-reset event on Windows — so a signal queued while disarmed can never fire a later-installed watch.
+That arm-time drain is an active consume on every platform (a non-blocking read of the endpoint socket on POSIX, a zero-timeout wait on the auto-reset event on Windows), so a signal queued while disarmed cannot fire a later-installed watch.
 A re-arm of a continuously armed word skips both the drain (a datagram exists only once a publish clears the bit, and it never moved) and the RMW (the announce stands); the fence and the caller's re-check still close the protocol.
 
 A terminal that publishes nothing still wakes an armed consumer.
@@ -99,7 +100,7 @@ The tier contents are the binding's.
 
 The core is codec-agnostic: it never parses payload bytes.
 But readers dispatch on the first byte of every serialize tier (INLINE, ARENA and SHM_RAW alike), so the magic bytes need one owner.
-This registry is it — a header comment alone would drift.
+This registry is that owner, because a header comment alone would drift.
 
 - `'B'` (0x42), `'X'` (0x58): R native serialize streams (binary / XDR).
 - `'R'` (0x52, `MIZU_CODEC_MAGIC` in `mizu_ext.h`): the mizu compact codec.
@@ -108,21 +109,23 @@ This registry is it — a header comment alone would drift.
 - `'I'` (0x49, `MIZU_INTEROP_MAGIC` in `mizu_ext.h`): an interchange stream — the cross-language wire format of the Interchange codec section.
 
 A binding introducing a self-describing stream claims its byte here first.
-The drop's first-byte tags (`MIZU_DROP_*` in `mizu.h`) are a disjoint context — drop region byte 0, never an INLINE payload — and share letters deliberately: `MIZU_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.
+The drop's first-byte tags (`MIZU_DROP_*` in `mizu.h`) are a disjoint context (drop region byte 0, never an INLINE payload) and share letters by design: `MIZU_DROP_R` is 0x52 as well, since 'R' denotes an R-binding payload in both.
 
-The wire type tags (`mizu_type_e` in `mizu.h`) ride this registry's discipline: the numbers descend from R's SEXPTYPE space by history, but libmizu owns and freezes them from the first release — a future SEXPTYPE joins the wire only by an explicit allocation in `mizu.h`, as `INT64 = 32` already did.
+The wire type tags (`mizu_type_e` in `mizu.h`) ride this registry's discipline: the numbers descend from R's SEXPTYPE space by history, but libmizu owns and freezes them from the first release.
+A future SEXPTYPE joins the wire only by an explicit allocation in `mizu.h`, as `INT64 = 32` already did.
 
 ### The keeperless claim
 
 `MIZU_AUX_F_KEEPERLESS` (`UINT64_C(1)`) is bit 0 of the INLINE aux word: a stager-authored claim that staging this frame committed no retain-table entry.
-The core reads the claim, never verifies it; clear is always correct (at worst a spurious keeper-sweep wake).
-A wrongly-set bit defers reclaim, never frees early: the keeper drop is recorded unconditionally at collect — only the cross-process wake is gated.
+The core reads the claim and does not verify it; clear is always correct (at worst a spurious keeper-sweep wake).
+A wrongly set bit defers reclaim and never frees early: the keeper drop is recorded unconditionally at collect, and only the cross-process wake is gated.
 Only INLINE has a free aux bit (ARENA: chunk offset; SHM_RAW: stream length; RAWVEC/RAWSPILL: type tags; SHM_VEC: layout tag + used bytes; REF is keeper-ful by definition; NIL/RAWVEC/STR1 are kind-statics), so the claim is INLINE-only and every other kind tests keeper-ful unless immediate.
-The channel's reap gate is a pinned-keeper counter and is untouched — the win is pool collect only.
+The channel's reap gate is a pinned-keeper counter and is untouched; the claim benefits pool collect only.
 
 ## Interchange codec
 
-The cross-language wire format — what a value looks like when writer and reader are different languages — in one section: the identity negotiation, then the byte format.
+The cross-language wire format is what a value looks like when writer and reader are different languages.
+This section covers the identity negotiation, then the byte format.
 This section is the authority for the bytes.
 
 ### Languages, capabilities and the identity word
@@ -150,7 +153,7 @@ Three small registries ride the identity word:
 Three rules govern the capability bits:
 
 - **Readers ignore capability bits they do not know; they never reject them.**
-  This is the opposite of the reader's unknown-tag rule below, and it is deliberate.
+  This is the opposite of the reader's unknown-tag rule below, by design.
   A peer advertising a capability the writer does not know is harmless, because the writer never stages a layout or tag it does not implement.
   Absent means unsupported: channel and pool regions are created fresh and zero-filled (`mizu_shm_create_stack`: `ftruncate` on a fresh object / a pagefile-backed `CreateFileMappingA`), so a reader that has not set a bit is sent a copy.
   This is what lets the two bindings land a reader feature in either order — the reader flips its bit, and every writer follows without a change.
@@ -164,8 +167,9 @@ Three rules govern the capability bits:
   From the first tagged release the ABI bump rule resumes for the preamble-gated structs, and the bit discipline is the versioning for everything the mask gates.
 
 Language and capability values are additive, and language values are append-only: a value, once shipped, is never reassigned.
-The byte is equality-compared and the wire layout is unchanged by a move, so the ABI gate cannot catch a reassignment — it would fail behaviorally, as false join rejections across mixed builds.
-A new binding takes the next free value, whatever the ordering aesthetic.
+The byte is equality-compared and the wire layout is unchanged by a move, so the ABI gate cannot catch a reassignment.
+It would fail behaviorally, as false join rejections across mixed builds.
+A new binding takes the next free value.
 A worker cannot join a pool of another language (the pool word's exact-match join), so a foreign byte reaches a worker only through a task tag's target byte, which it fails with an error stream "task language mismatch" and never executes.
 
 Each channel side publishes its word in its entity block (`MIZU_ENTITY_IDENT` in `mizu.h`): the host at create, the peer at attach before `ready_set`.
@@ -178,24 +182,26 @@ Format words reject what they do not know; negotiation words tolerate it: the re
 
 The err tag's internals, the layout attribute blob's `'I'` form, the task tag's internals, the ref leaf (task arguments by reference) and the MIZL remote leaf (a per-column REF) are normative below.
 
-Invariants — the spine every interop decision hangs from: (1) a reader never meets a stream it cannot identify (the first-byte registry; an unlisted byte is an informative decline); (2) a writer never sends a value its peer cannot read (the identity word and capability mask; a decline fails at send); (3) same-language handles keep their private codecs (the fastest and most complete path; interop *value* streams appear on foreign handles only — the same-language uses are the layout attribute blob, an `'I'` encoding inside a region, and the err stream a peer shim sends for an uncaught error on every channel, neither a value the stage hook chose, plus one that is: mizu's small-table `'I'` form, an Arrow table at or under the size gate written as one stream straight off the Arrow buffers and read back through the validating foreign-shape builder, kept byte-identical with the foreign path — pymizu has no such use, its same-language small `Frame` still pickles); (4) no silent downgrades (an unknown tag or a reserved flag bit is an informative error, never a misparse or a coercion); (5) relays shift containers, never values (each far-side home shift is documented, and the corpus pins every one).
+Five invariants govern every interop decision: (1) a reader never meets a stream it cannot identify (the first-byte registry; an unlisted byte is an informative decline); (2) a writer never sends a value its peer cannot read (the identity word and capability mask; a decline fails at send); (3) same-language handles keep their private codecs (the fastest and most complete path; interop *value* streams appear on foreign handles only; the same-language uses are the layout attribute blob, an `'I'` encoding inside a region, and the err stream a peer shim sends for an uncaught error on every channel, neither a value the stage hook chose, plus one that is: mizu's small-table `'I'` form, an Arrow table at or under the size gate written as one stream straight off the Arrow buffers and read back through the validating foreign-shape builder, kept byte-identical with the foreign path; pymizu has no such use, its same-language small `Frame` still pickles); (4) no silent downgrades (an unknown tag or a reserved flag bit is an informative error, never a misparse or a coercion); (5) relays shift containers, never values (each far-side home shift is documented, and the corpus pins every one).
 
 **The MIZL remote leaf (directory tag 33).**
 A MIZL directory entry whose S4-masked sexptype is 33 is a remote leaf: the column lives in another region and crosses by reference.
-`data_offset` / `data_size` hold the identifier span — the view layer's identifier string, the same byte form as the 0x13 ref leaf's: the region name, optionally `name[i,j,...]` with 1-based decimal indices for a leaf inside another region's tree.
+`data_offset` / `data_size` hold the identifier span: the view layer's identifier string, in the same byte form as the 0x13 ref leaf's (the region name, optionally `name[i,j,...]` with 1-based decimal indices for a leaf inside another region's tree).
 The span keeps the 64-byte `data_offset` alignment rule, and `data_size` is the identifier byte count, 1–255 (the 0x13 form's u8 bound, reused).
-`length` is the referenced column's element count *as resolved* and `attrs_size` its attribute-blob size as resolved (0 when attribute-free): neither is checked against `data_size` (they describe the remote vector, not the local span), so the elt-size and string-geometry body checks skip tag 33, and the shared prologue's `attrs_size > data_size` reject exempts it — a 30-byte identifier span can reference a factor leaf with a 200-byte blob.
-The S4 bit is never set on a remote leaf — the referenced column's own layout carries its S4 bit — and a reader rejects a tag-33 entry with the bit set (format-word discipline, no silent downgrades).
-The validity pair is `{0, -1}` when the referenced column is known NA-free, else `{0, 0}` (unknown — the reader takes NA-ness from the referenced region's own validity state); `{0, -1}` is claimable only where the referenced form records known-NA-free itself (an MIZH header pair or an MIZL atomic leaf's table pair), so STR and serialized references always claim `{0, 0}`, and a nonzero validity offset rejects — a bitmap offset is region-local and cannot describe a remote column.
-The header validity pair describes the *local* leaves only, and the exclusion is forced, not cosmetic: `mizu_mizl_check` bounds the header `vcount` by the sum of local atomic leaf lengths (tag 33 adds nothing), so tallying remote nulls into the header emits a region that checks as corrupt (an all-remote frame with nulls — columns matched from different exports, where the whole-frame fast path cannot fire — would stamp `vcount > 0` with `sum == 0`).
-A remote column contributes no bitmap and no count to the header validity; its row, when a table exists, is the `{0,0}` / `{0,-1}` claim alone, and the writer's clean-run collapse stamps a header `{0, -1}` only when local nulls are zero *and* every remote column legitimately claims `{0, -1}` — otherwise the table is emitted, since a collapsed header makes a remote entry's claim read `{0, -1}` and the header must never speak for a remote column.
+`length` is the referenced column's element count *as resolved* and `attrs_size` its attribute-blob size as resolved (0 when attribute-free): neither is checked against `data_size` (they describe the remote vector, not the local span), so the elt-size and string-geometry body checks skip tag 33, and the shared prologue's `attrs_size > data_size` reject exempts it (a 30-byte identifier span can reference a factor leaf with a 200-byte blob).
+The S4 bit is never set on a remote leaf, because the referenced column's own layout carries its S4 bit, and a reader rejects a tag-33 entry with the bit set (format-word discipline, no silent downgrades).
+The validity pair is `{0, -1}` when the referenced column is known NA-free, else `{0, 0}` (unknown: the reader takes NA-ness from the referenced region's own validity state); `{0, -1}` is claimable only where the referenced form records known-NA-free itself (an MIZH header pair or an MIZL atomic leaf's table pair), so STR and serialized references always claim `{0, 0}`, and a nonzero validity offset rejects, because a bitmap offset is region-local and cannot describe a remote column.
+The header validity pair describes the *local* leaves only, and the exclusion is forced, not cosmetic: `mizu_mizl_check` bounds the header `vcount` by the sum of local atomic leaf lengths (tag 33 adds nothing), so tallying remote nulls into the header emits a region that checks as corrupt (an all-remote frame with nulls, with columns matched from different exports so that the whole-frame fast path cannot fire, would stamp `vcount > 0` with `sum == 0`).
+A remote column contributes no bitmap and no count to the header validity; its row, when a table exists, is the `{0,0}` / `{0,-1}` claim alone, and the writer's clean-run collapse stamps a header `{0, -1}` only when local nulls are zero *and* every remote column legitimately claims `{0, -1}`.
+Otherwise the table is emitted, since a collapsed header makes a remote entry's claim read `{0, -1}` and the header must never speak for a remote column.
 
-Validation at resolve: a reader meeting tag 33 resolves the identifier through the same machinery as a path REF (open the region, walk the optional path) and validates the entry's claims against the resolved leaf — element count, attrs-blob size, and NA-free-ness when `{0, -1}` is claimed.
-A `{0, -1}` claim against a referenced form that records no NA-free marker (a bare MIZS root, a serialized reference) declines as corrupt — the writer rules above forbid the claim ever being legitimate, so this is never an unvalidatable pass.
-A dangling identifier, a parse failure, or any mismatch declines as a corrupt region — the same shape as an unknown tag (meeting one unadvertised is the corrupt-or-newer decline).
-Emission gates on `MIZU_CAP_MIZL_REF` (bit 4) — the versioning rule's new-bit-for-a-gated-shape case: a tree the reader cannot walk fails the whole receive, unlike the ref leaf's per-task informative decline — and the gate is per frame: a frame with no remote leaves keeps the baseline conjunction, the bit joining only when the writer would emit remote leaves, so a peer short of it gets full layout leaves for every column, never a partial-remote tree.
+Validation at resolve: a reader meeting tag 33 resolves the identifier through the same machinery as a path REF (open the region, walk the optional path) and validates the entry's claims against the resolved leaf (element count, attrs-blob size, and NA-free-ness when `{0, -1}` is claimed).
+A `{0, -1}` claim against a referenced form that records no NA-free marker (a bare MIZS root, a serialized reference) declines as corrupt: the writer rules above forbid the claim ever being legitimate, so this is never an unvalidatable pass.
+A dangling identifier, a parse failure, or any mismatch declines as a corrupt region, the same shape as an unknown tag (meeting one unadvertised is the corrupt-or-newer decline).
+Emission gates on `MIZU_CAP_MIZL_REF` (bit 4), the versioning rule's new-bit-for-a-gated-shape case: a tree the reader cannot walk fails the whole receive, unlike the ref leaf's per-task informative decline.
+The gate is per frame: a frame with no remote leaves keeps the baseline conjunction, and the bit joins only when the writer would emit remote leaves, so a peer short of it gets full layout leaves for every column rather than a partial-remote tree.
 
-Byte 0: `'I'` (0x49). Byte 1: format version (0x01). Then exactly one value: a stream ends where its value ends, and bytes past it are malformed. The cursor's finishing check compares its position to the frame's `len` (the slot header's for INLINE, `aux` for SHM_RAW, the header-located `attrs_size` for a layout attribute blob), so a task with one field too many at top level fails there instead of leaving the field unread. The version byte moves only for a change to these two header bytes or to the *meaning* of an existing tag. Growth is by tags under the unknown-tag rule below, so 0x01 is the baseline every reader implements, and it may never move. A reader meeting a version it does not know declines with the same informative shape as an unknown tag ("interop format version 0xNN — the peer uses a newer format"), never a bare corrupt-stream error, and a writer never emits a version its peer has not advertised: a bump is a reader feature, so it takes a capability bit (the allocation policy above) or a field in the identity word's reserved bits 8–31, which readers already ignore. Little-endian throughout (all supported platforms are LE; the spec makes it explicit for the cross-language contract). Multi-byte fields sit at unaligned offsets — every count and value follows its tag byte directly, the task header's u64 identity is at bytes 7–14 behind its u16 flags, and the err tag's u64 index follows the u16 flags — so readers `memcpy`, never cast. Every element count is u64: the vector tags 0x06–0x0b, the containers 0x0c–0x0d, i64v, the 0x05 bytes scalar, and the attr tag's dict (a factor or a frame inherits it through its parts). Every count is bounds-checked before anything is allocated from it: a vector or bytes count against its element width and the bytes remaining in the stream, and a list, dict or strv count against the remaining byte length alone — every element costs at least one byte (a tag, or an i32 length), so `count ≤ remaining` is the pre-allocation bound the cursor enforces at the container begin, and a builder allocates only behind it. A count that fails it is truncation, the cursor's error, never a builder's out-of-memory. Only the byte length of a single string — the 0x04 scalar and the strv per-element length — is i32, with −1 = NA: R caps one string at 2^31 − 1 bytes, and a string vector pays that length once per element. A vector *nested* in a list or dict crosses inside the `'I'` stream whenever its tree takes the copy tiers (below the zero-copy floor, or to a peer without `MIZU_CAP_MIZL`), and a large stream rides SHM_RAW's u64 `aux` — a u32 count would have been the only cap on nested data. Recursive with a depth cap of 64. Past the cap the writer declines with reason `depth`, like any other non-qualifying value: a send-time raise, since only foreign handles write interop. It never writes a partial stream. A reader meeting an unrecognized tag declines with an informative error naming the tag byte ("unsupported interop tag 0xNN — the peer uses a newer format"), never a bare corrupt-stream error. Pinned now, this is what lets version 0x01 grow tags later without a wire change.
+Byte 0: `'I'` (0x49). Byte 1: format version (0x01). Then exactly one value: a stream ends where its value ends, and bytes past it are malformed. The cursor's finishing check compares its position to the frame's `len` (the slot header's for INLINE, `aux` for SHM_RAW, the header-located `attrs_size` for a layout attribute blob), so a task with one field too many at top level fails there instead of leaving the field unread. The version byte moves only for a change to these two header bytes or to the *meaning* of an existing tag. Growth is by tags under the unknown-tag rule below, so 0x01 is the baseline every reader implements, and it may never move. A reader meeting a version it does not know declines with the same informative shape as an unknown tag ("interop format version 0xNN — the peer uses a newer format") rather than a bare corrupt-stream error, and a writer never emits a version its peer has not advertised: a bump is a reader feature, so it takes a capability bit (the allocation policy above) or a field in the identity word's reserved bits 8–31, which readers already ignore. Little-endian throughout (all supported platforms are LE; the spec makes it explicit for the cross-language contract). Multi-byte fields sit at unaligned offsets (every count and value follows its tag byte directly, the task header's u64 identity is at bytes 7–14 behind its u16 flags, and the err tag's u64 index follows the u16 flags), so readers `memcpy` rather than cast. Every element count is u64: the vector tags 0x06–0x0b, the containers 0x0c–0x0d, i64v, the 0x05 bytes scalar, and the attr tag's dict (a factor or a frame inherits it through its parts). Every count is bounds-checked before anything is allocated from it: a vector or bytes count against its element width and the bytes remaining in the stream, and a list, dict or strv count against the remaining byte length alone: every element costs at least one byte (a tag, or an i32 length), so `count ≤ remaining` is the pre-allocation bound the cursor enforces at the container begin, and a builder allocates only behind it. A count that fails it is truncation, the cursor's error, not a builder's out-of-memory. Only the byte length of a single string (the 0x04 scalar and the strv per-element length) is i32, with −1 = NA: R caps one string at 2^31 − 1 bytes, and a string vector pays that length once per element. A vector *nested* in a list or dict crosses inside the `'I'` stream whenever its tree takes the copy tiers (below the zero-copy floor, or to a peer without `MIZU_CAP_MIZL`), and a large stream rides SHM_RAW's u64 `aux`, so a u32 count would have been the only cap on nested data. Recursive with a depth cap of 64. Past the cap the writer declines with reason `depth`, like any other non-qualifying value: a send-time raise, since only foreign handles write interop. It never writes a partial stream. A reader meeting an unrecognized tag declines with an informative error naming the tag byte ("unsupported interop tag 0xNN — the peer uses a newer format") rather than a bare corrupt-stream error. This rule, pinned now, is what lets version 0x01 grow tags later without a wire change.
 
 | Tag | Wire form | R | Python |
 |---|---|---|---|
@@ -216,18 +222,18 @@ Byte 0: `'I'` (0x49). Byte 1: format version (0x01). Then exactly one value: a s
 | 0x12 task | u8 target + u8 kind + u16 flags (reserved zero; a set bit is malformed — the field exists so a later header addition is a flag, never a moved identity) + u64 submitter identity, then the fields of its kind in registry order (the task kind registry below), each a tagged item, bare — no count and no wrapping container | not a value: the exec hook takes it at the top of an entry payload and the map descriptor reader as the descriptor's first element; every other builder reports "a task is not a value" | same |
 | 0x13 ref | u8 name_len (1–255 — 0 is malformed) + the identifier bytes: the view layer's identifier string (a region name, optionally name + path for a view into a tree), opaque to the cursor, which checks the length and bounds only | a view over the referenced region — the task-stream exec decode, the map descriptor reader and the collect-side result reader take it; every other builder declines informatively | same |
 
-Tagged versus bare: every value and every task field is a tagged item. The only bare fields are strings whose position fixes their type — dict keys and the err tag's three strings — so the cursor never meets an untyped value, and neither can be NA.
+Tagged versus bare: every value and every task field is a tagged item. The only bare fields are strings whose position fixes their type (dict keys and the err tag's three strings), so the cursor never meets an untyped value, and neither can be NA.
 
-Two tags are not ordinary values. The err tag (0x11) is a value — a received error is something user code decides to raise — but it is legal only as a stream's top-level value: the cursor rejects it nested, since nothing nests one. The task tag (0x12) is not a value at all: the cursor yields its fields wherever it appears — counting them as one element of kind-determined arity, so a task nests as a single list element — and three builders have a case for it — the worker's exec hook at the top of an entry payload, the map descriptor reader as the descriptor's first element, and the inspection hook (a test path: it builds, never evals). Every other builder reports "a task is not a value" for it, the same informative shape as an unknown tag. Both ride `'I'` rather than magics of their own: one magic means one cursor, one corpus grammar and one version story for every cross-language byte.
+Two tags are not ordinary values. The err tag (0x11) is a value (a received error is something user code decides to raise), but it is legal only as a stream's top-level value: the cursor rejects it nested, since nothing nests one. The task tag (0x12) is not a value at all: the cursor yields its fields wherever it appears, counting them as one element of kind-determined arity, so a task nests as a single list element. Three builders have a case for it: the worker's exec hook at the top of an entry payload, the map descriptor reader as the descriptor's first element, and the inspection hook (a test path: it builds and never evals). Every other builder reports "a task is not a value" for it, the same informative shape as an unknown tag. Both ride `'I'` rather than magics of their own: one magic means one cursor, one corpus grammar and one version story for every cross-language byte.
 
 **The err writer is bounded and cannot fail.**
 Each of the three strings truncates at a UTF-8 boundary past its share of the slot's inline budget: type past 128 bytes, message past half the budget (both bindings' task-flatten share), detail past what remains of the budget after the first two, less the 25-byte worst-case overhead (magic, version, tag, flags, the index, three counted lengths).
-The frame therefore fits the slot by construction: the writer stamps INLINE directly, with the keeperless claim set — the stream pins nothing.
-These properties — bounded by truncation, always inline, a writer that cannot fail (an ERR publish fails the task, never the worker) — come from the special-purpose writer, not the opening byte, which is why the err tag needs no magic of its own.
-Writers: a channel's peer shim, for an uncaught peer-source error, on every channel — same-language included, so the value a host receives depends on neither side's language; the ERR publish of a foreign-submitter task, "result not portable" and "task language mismatch"; and per-element map errors (the index field).
-A channel receives an error stream as a **value**, not a raised condition (sentinel discipline: transport states are values, payloads are values — user code decides to raise), and the same err-stream framer serves the pool's ERR publish through `inline_n`, whose writer faces the same cannot-fail rule.
+The frame therefore fits the slot by construction: the writer stamps INLINE directly, with the keeperless claim set, since the stream pins nothing.
+These properties (bounded by truncation, always inline, a writer that cannot fail, since an ERR publish fails the task and never the worker) come from the special-purpose writer, not the opening byte, which is why the err tag needs no magic of its own.
+Writers: a channel's peer shim, for an uncaught peer-source error, on every channel, same-language included, so the value a host receives depends on neither side's language; the ERR publish of a foreign-submitter task, "result not portable" and "task language mismatch"; and per-element map errors (the index field).
+A channel receives an error stream as a **value**, not a raised condition (sentinel discipline: transport states are values and payloads are values, so user code decides to raise), and the same err-stream framer serves the pool's ERR publish through `inline_n`, whose writer faces the same cannot-fail rule.
 
-**Task kind registry.** The kind byte selects an ordered field list, and the list's length is the cursor's arity for the tag: a task owns exactly that many following items, so it nests as one element and a shortfall is truncation. The registry is the spec's, not the cursor's — the table below is what the cursor's arity table implements, and a kind the cursor does not know is the informative decline ("unknown task kind 0xNN — the peer uses a newer format"). Adding a kind is a registry row plus the cursor's table entry, which rides the same re-vendor as the builders every binding needs for it anyway. The arity is derived, never carried: a count on the wire would duplicate what the kind already fixes and move the shape check from the one fuzzed cursor into each binding's builder, and a wrapping 0x0c list would still leave the cursor a task-specific rule (a task owns one following item) for nine bytes — so the fields ride bare, as the header does. Kind values are append-only, like language values.
+**Task kind registry.** The kind byte selects an ordered field list, and the list's length is the cursor's arity for the tag: a task owns exactly that many following items, so it nests as one element and a shortfall is truncation. The registry is the spec's, not the cursor's: the table below is what the cursor's arity table implements, and a kind the cursor does not know is the informative decline ("unknown task kind 0xNN — the peer uses a newer format"). Adding a kind is a registry row plus the cursor's table entry, which rides the same re-vendor as the builders every binding needs for it anyway. The arity is derived, not carried: a count on the wire would duplicate what the kind already fixes and move the shape check from the one fuzzed cursor into each binding's builder, and a wrapping 0x0c list would still leave the cursor a task-specific rule (a task owns one following item) for nine bytes, so the fields ride bare, as the header does. Kind values are append-only, like language values.
 
 | Kind | Name | Fields, in order | Emitted by |
 |---|---|---|---|
@@ -235,49 +241,51 @@ A channel receives an error stream as a **value**, not a raised condition (senti
 | 1 | source | code (0x04 str), positional (0x0c list), named (0x0d dict) | Pool tasks |
 | 2 | runner | region_name (0x04 str), generation (0x02 int: the runner ordinal in the high 32 bits, the morsel generation in the low 32 — one i64 because the registry row has three fields and both numbers ride it; a counter never approaches 2^63), seed (0x00 nil, or 0x0e i64v[2] = (seed, offset)) | Map runners |
 
-The field *tags* are the builder's check, not the cursor's: the cursor counts items and validates each as an ordinary value, and a field of the wrong tag fails the task in the exec hook with the informative error stream. The cursor parses every registry row unconditionally — the table's last column names the feature that emits the kind.
+The field *tags* are the builder's check, not the cursor's: the cursor counts items and validates each as an ordinary value, and a field of the wrong tag fails the task in the exec hook with the informative error stream. The cursor parses every registry row unconditionally, and the table's last column names the feature that emits the kind.
 
-Reader/writer notes: the R reader constructs integer64 the way `mizu_wire_alloc()` does (tag-driven allocation with the class re-applied), keeping one int64 construction site. Factor codes cross in R's own 1-based layout (the intv form verbatim — memcpy both ways on the R side); the Python side does the ±1 in its dictionary-column construction loop.
+Reader/writer notes: the R reader constructs integer64 the way `mizu_wire_alloc()` does (tag-driven allocation with the class re-applied), keeping one int64 construction site. Factor codes cross in R's own 1-based layout (the intv form verbatim, a memcpy both ways on the R side); the Python side does the ±1 in its dictionary-column construction loop.
 
 **The task tag's header fields sit at fixed offsets for a reason.**
-Byte 2 is the tag, byte 3 the **target** language (the worker language the task is written for, from the language registry — the misroute guard), byte 4 the **kind**, bytes 5–6 the u16 **flags** (reserved zero) and bytes 7–14 the u64 **submitter identity** (the submitting binding's whole identity word, copied verbatim).
-The worker reads the tag and target bytes without opening a cursor, and the offsets are stream offsets, not entry-payload offsets: a task stream past the inline budget spills to a named SHM_RAW region like any pool payload (the ordinary SHM_RAW retain; no keeperless claim — INLINE pins nothing, and the claim would be inert on a task entry either way, the collect-side gate reading only result-slot headers), so the exec hook resolves the entry first — an INLINE entry's payload in place, a SHM_RAW entry through the region open a value read would perform — and reads bytes 2 and 3 off the resolved bytes.
+Byte 2 is the tag, byte 3 the **target** language (the worker language the task is written for, from the language registry; this is the misroute guard), byte 4 the **kind**, bytes 5–6 the u16 **flags** (reserved zero) and bytes 7–14 the u64 **submitter identity** (the submitting binding's whole identity word, copied verbatim).
+The worker reads the tag and target bytes without opening a cursor, and the offsets are stream offsets, not entry-payload offsets: a task stream past the inline budget spills to a named SHM_RAW region like any pool payload (the ordinary SHM_RAW retain and no keeperless claim: INLINE pins nothing, and the claim would be inert on a task entry either way, the collect-side gate reading only result-slot headers), so the exec hook resolves the entry first (an INLINE entry's payload in place, a SHM_RAW entry through the region open a value read would perform) and reads bytes 2 and 3 off the resolved bytes.
 A target byte that differs from the worker's own language fails the task with an error stream "task language mismatch" and never executes.
-The check is defense only: joins are homogeneous and the target is always the pool word's language byte, so no well-formed path produces a mismatch — it is one byte compare, and it is what stands between a torn or mis-stamped task stream and executing code written for another language.
+The check is defense only: joins are homogeneous and the target is always the pool word's language byte, so no well-formed path produces a mismatch.
+It is one byte compare, and it is what stands between a torn or mis-stamped task stream and executing code written for another language.
 
 The submitter identity carries two things the target byte cannot.
-Its language byte (bits 0–7) is the ERR-format and result-policy key: a submitter of the worker's own language keeps the pool's private ERR format and result staging, and the target byte cannot serve here — after the misroute check it always equals the worker's language, so it cannot tell a foreign submitter from a same-language one using the spec verb on its own pool.
+Its language byte (bits 0–7) is the ERR-format and result-policy key: a submitter of the worker's own language keeps the pool's private ERR format and result staging, and the target byte cannot serve here.
+After the misroute check it always equals the worker's language, so it cannot tell a foreign submitter from a same-language one using the spec verb on its own pool.
 Its capability mask (bits 32–63) drives the worker's zero-copy filter on the result.
-A foreign submitter's ERR publishes as an error stream (the err tag above), and its result stages under the foreign writer policy — a non-portable result fails the task with an error stream ("result not portable", naming the value's type) instead of crossing as a value the submitter cannot read.
+A foreign submitter's ERR publishes as an error stream (the err tag above), and its result stages under the foreign writer policy: a non-portable result fails the task with an error stream ("result not portable", naming the value's type) instead of crossing as a value the submitter cannot read.
 The identity rides the task stream rather than the core because a pool can have submitters of several languages, each with its own reader; it carries the whole word under the same "ignore unknown bits" rule as a channel.
-A malformed stream — a wrong field tag or count for its kind, a torn header — fails the task with an informative error stream, never a bare corrupt-stream error and never worker death: the decode sits inside the worker's per-task error containment.
+A malformed stream (a wrong field tag or count for its kind, a torn header) fails the task with an informative error stream rather than a bare corrupt-stream error or worker death: the decode sits inside the worker's per-task error containment.
 
-For kinds 0 and 1 the code is a 0x04 string, the positional arguments a tagged 0x0c list and the named arguments a tagged 0x0d dict — both always present, either may be empty.
+For kinds 0 and 1 the code is a 0x04 string, the positional arguments a tagged 0x0c list and the named arguments a tagged 0x0d dict; both are always present, and either may be empty.
 An R mixed call maps unnamed arguments to the list and named ones to the dict, matching Python's `*args, **kwargs`.
 There is no name registry: a qualified name resolves through the worker's own namespace machinery (an R package's namespace, a Python module).
-Source kind evaluates the source in a fresh namespace with the named arguments bound as names, and the result is the trailing expression's value if the source ends with one, else NULL/None — one rule, both languages.
+Source kind evaluates the source in a fresh namespace with the named arguments bound as names, and the result is the trailing expression's value if the source ends with one, else NULL/None: one rule for both languages.
 
-A task frame that is not a task stream and whose first byte is another binding's magic — `'P'` or pickle's 0x80 at an R worker, `'R'` or an R_Serialize `'B'`/`'X'` at a Python worker, the same registry test the channel read hooks run — publishes a neutral error stream ("task in a foreign private codec") instead of a private ERR the submitter could not read.
+A task frame that is not a task stream and whose first byte is another binding's magic (`'P'` or pickle's 0x80 at an R worker, `'R'` or an R_Serialize `'B'`/`'X'` at a Python worker; the same registry test the channel read hooks run) publishes a neutral error stream ("task in a foreign private codec") instead of a private ERR the submitter could not read.
 
 **Task arguments by reference: the ref leaf.**
 A 0x13 ref leaf in a task stream's argument fields carries an argument by reference instead of by value: the identifier of an object already in shm.
-Two emission cases share the one leaf and the one resolve: a received view re-sent as an argument (the emitter ORs REFHELD into the region's flags word at emit — the identifier has escaped by reference), and a fresh layout-eligible value past the zero-copy floor (one layout write into the stage's single spill checkout, the producer-loan store, the leaf carrying the fresh region's name).
+Two emission cases share the one leaf and the one resolve: a received view re-sent as an argument (the emitter ORs REFHELD into the region's flags word at emit, since the identifier has escaped by reference), and a fresh layout-eligible value past the zero-copy floor (one layout write into the stage's single spill checkout, the producer-loan store, the leaf carrying the fresh region's name).
 The reader resolves the identifier to a view with the counted add inside its decode, before the claim completes; which loan the emitter held is the only difference between the cases.
-The leaf is an ordinary value in the cursor's grammar — it nests in the argument list and dict like any node — and builders without a case for it (the channel value readers, both directions) decline informatively and consume the payload, never a wedge.
-Growth is by tags, so the version byte stays 0x01: a reader without the tag declines informatively, which for a task stream fails the task with an error stream — no wedge.
+The leaf is an ordinary value in the cursor's grammar (it nests in the argument list and dict like any node), and builders without a case for it (the channel value readers, both directions) decline informatively and consume the payload, so the ring cannot wedge.
+Growth is by tags, so the version byte stays 0x01: a reader without the tag declines informatively, which for a task stream fails the task with an error stream and wedges nothing.
 To spare that round trip a submitter emits 0x13 only to a pool whose worker word sets `MIZU_CAP_TASKREF`: a spec carrying a ref-eligible argument to any other pool declines locally at submit, naming the remedy.
-A ref emission also filters on the peer's capability mask per the view's layout (the zero-copy-tier filter's behavior): an attributed or MIZL view refs only to a peer that can read it, else the value write — a missing reader feature declines locally, insufficient layout caps degrade to a copy.
-The fresh-value case rides the staging seam's single checkout: a stream carrying a checkout must otherwise fit the inline budget — it cannot also spill SHM_RAW.
+A ref emission also filters on the peer's capability mask per the view's layout (the zero-copy-tier filter's behavior): an attributed or MIZL view refs only to a peer that can read it, else the value write (a missing reader feature declines locally, and insufficient layout caps degrade to a copy).
+The fresh-value case rides the staging seam's single checkout: a stream carrying a checkout must otherwise fit the inline budget, since it cannot also spill SHM_RAW.
 So a spec whose pre-scan finds a ref-eligible argument runs the size pass ahead of any byte write, picks the first layout-eligible argument in document order (positional, then named, depth-first) such that the remainder of the stream fits the inline budget, and records the choice for the write pass; with no such candidate the write runs by value from the start and spills SHM_RAW as ever.
 Eligibility is a pure function of the value, the floor and the handle's churn flag, and no verbs run between the passes, so the two passes cannot disagree.
-A checkout failure mid-write abandons the stage and retries with the argument in its copy form — never a partial stream (the core rolls an uncommitted checkout back at the next verb entry).
+A checkout failure mid-write abandons the stage and retries with the argument in its copy form, and no partial stream is written (the core rolls an uncommitted checkout back at the next verb entry).
 
 The retain protocol mirrors the REF tier's handoff on both sides.
-The submit side pins: a REF emission leaves the emitter's own view object holding the region's count, and without a pin the region could recycle under an identifier in flight — so the stage pins the emitting spec (every view the argument trees carry) into the retain table, and a frame that can carry a ref never stamps the keeperless claim (a pinned loan is a retain-table entry, unlike a checkout loan).
+The submit side pins: a REF emission leaves the emitter's own view object holding the region's count, and without a pin the region could recycle under an identifier in flight, so the stage pins the emitting spec (every view the argument trees carry) into the retain table, and a frame that can carry a ref never stamps the keeperless claim (a pinned loan is a retain-table entry, unlike a checkout loan).
 The worker's counted add lands inside its decode, before the claim completes; the pin releases at the claim-side release point, and the count never reaches zero in between.
-The worker side releases deterministically: a GC-managed binding would otherwise linger the decoded argument views' adds across tasks, so the exec hook records every by-reference emission its outcome write makes — the result write or the ERR flatten, one list, every emission funnelling through the one mark from whatever graph position — and, once the outcome stream is written, force-releases each decoded argument view absent from the list.
-A view the write emitted keeps its loan: the publish pins the result value, and the submitter's collect-side add lands before the worker's consumer-done releases that pin — the same handoff on the worker side.
-A worker death mid-task leaks one count per decoded ref — the consumer-death rule of the retain table — and the regions are REFHELD, so a later producer death verdict leaks and unlinks rather than recycles into reuse.
+The worker side releases deterministically: a GC-managed binding would otherwise linger the decoded argument views' adds across tasks, so the exec hook records every by-reference emission its outcome write makes (the result write or the ERR flatten: one list, every emission funnelling through the one mark from whatever graph position) and, once the outcome stream is written, force-releases each decoded argument view absent from the list.
+A view the write emitted keeps its loan: the publish pins the result value, and the submitter's collect-side add lands before the worker's consumer-done releases that pin, the same handoff on the worker side.
+A worker death mid-task leaks one count per decoded ref (the consumer-death rule of the retain table), and the regions are REFHELD, so a later producer death verdict leaks and unlinks rather than recycles into reuse.
 The map descriptor shares the value grammar, so a view x crosses to foreign workers by the same leaf: the worker's map-context cache holds the resolved view between morsels, and the idle sweep or teardown releases it.
 
 The attr tag is the one form for every attributed value, inline and zero-copy alike: the same 0x0d attribute dict is the attribute blob of an MIZH/MIZS/MIZL layout, so a data.frame's inline and region-backed forms share one grammar, one qualification function (`mizu_interop_attrs_qualify`) and one shape builder per binding. Attribute values are ordinary values, and an attributed value nests where R nests one (a factor column inside a frame's column list, a `dimnames` list with names), but an attr never directly wraps an attr: R has one attribute set per object, and the cursor rejects the double wrap as malformed. The shape whitelist is the *foreign* reader's contract and part of the format-0x01 baseline:
@@ -290,7 +298,7 @@ The attr tag is the one form for every attributed value, inline and zero-copy al
 - **POSIXct**: value realv — seconds since the epoch, NA the `NA_real_` payload. Attrs exactly `class` (strv `["POSIXct", "POSIXt"]`) plus an optional `tzone` (strv of length 1, non-NA). The instants are UTC whatever the zone; `tzone` is display metadata, and `""` and absent are one value (naive). The Python home is naive `datetime64[us]` UTC — microsecond is the unit where Python datetimes, Arrow's default timestamp and an R double at the current epoch meet; sub-μs fractions round (documented; μs-integral values relay bitwise). NA ↔ NaT, and a genuine instant of exactly INT64_MIN μs reads as NA (the int64 sentinel collision, documented). A named zone survives only as `Frame` column metadata (Arrow `timestamp[us, tz]`), so a standalone named-zone vector arrives naive and its relay returns `tzone = "UTC"` — the factor standalone/in-frame precedent, values exact, display normalized. A naive `datetime64` writes `tzone = "UTC"`; an aware `datetime.datetime` scalar writes its zoneinfo key, so aware scalars relay exactly. A `timestamp[ns]` column is the carve-out: for a `MIZU_CAP_MIZL_TSN` peer the frame writer stages it verbatim — an i64v of counts, NaT the `INT64_MIN` sentinel, the dict gaining `tscale` = `"ns"` (the Arrow frame writer subsection).
 - **difftime**: value realv — durations in the declared units, NA the `NA_real_` payload. Attrs exactly `class` (strv `"difftime"`) and `units` (strv of length 1, one of `"secs"`, `"mins"`, `"hours"`, `"days"`, `"weeks"` — R's five; any other declines). The wire carries no precision choice: the value crosses in its declared units and each reader homes it — the Python home is `timedelta64[us]` (microsecond, the POSIXct precedent: where Python timedeltas, Arrow's `duration[us]` and an R double meet), NaT for NA, the five units converting to seconds by value (Arrow `duration` needs no day or week unit — those are 86400- and 604800-second counts on the wire). A relay normalizes the units to seconds — values exact, units display metadata (the `tzone` precedent). numpy `timedelta64` of any non-calendar unit writes the shape (counts to seconds doubles — a double second carries ns resolution to ~104 days), as do the scalar forms (`np.timedelta64`, stdlib `datetime.timedelta`): temporals have no scalar tag, so length-1 keeps the attr form. `[Y]`/`[M]` decline as calendar-dependent, finer-than-ns units as sub-resolution. A `timedelta64` numpy scalar exports its bytes as uint8 (the buffer protocol has no datetime), so the stage gate keeps it off the raw tier — the byte view is not the value (datetime64 scalars the same). The `tscale` carve-out of the POSIXct row applies alike: a `duration[ns]` column crosses verbatim for a `MIZU_CAP_MIZL_TSN` peer.
 
-Any other attribute set has no foreign home: the writer declines it at send on foreign handles (the qualification rules below), and a foreign-home reader meeting one anyway (pymizu's, or mizu's inline attr reader) declines informatively, naming the class and the attribute names. An R reader applies any dict, so on a same-language handle every *encodable* attribute set takes the `'I'` layout blob — the whitelist gates foreign handles only. A later shape is a whitelist entry plus a builder entry, and takes a capability bit like a later tag — never a new tag. The labeled shapes share one bit (`MIZU_CAP_LABELED`) because they land together in both bindings: a writer meeting one for a peer without the bit declines at send naming the capability — metadata is data, never silently stripped — and the gate stands at *every* emission site: the inline writer and each zero-copy filter. A reader without the bit that meets a labeled dict anyway (a version-skewed relay) fails on its exact-set guards, loud, never a silent drop.
+Any other attribute set has no foreign home: the writer declines it at send on foreign handles (the qualification rules below), and a foreign-home reader meeting one anyway (pymizu's, or mizu's inline attr reader) declines informatively, naming the class and the attribute names. An R reader applies any dict, so on a same-language handle every *encodable* attribute set takes the `'I'` layout blob, since the whitelist gates foreign handles only. A later shape is a whitelist entry plus a builder entry, and takes a capability bit like a later tag, not a new tag. The labeled shapes share one bit (`MIZU_CAP_LABELED`) because they land together in both bindings: a writer meeting one for a peer without the bit declines at send naming the capability (metadata is data, and is never silently stripped), and the gate stands at *every* emission site: the inline writer and each zero-copy filter. A reader without the bit that meets a labeled dict anyway (a version-skewed relay) fails loudly on its exact-set guards rather than dropping silently.
 
 The Python home of the data.frame shape is `pymizu.Frame`: column names, a row count, and per-column buffers.
 - It exports `__arrow_c_stream__` from pymizu's own C, with no Arrow import. Consumers take it in one line: `pl.from_arrow(f)`, `pa.table(f)`, or `pd.DataFrame.from_arrow(f)` (pandas ≥ 3).
@@ -369,15 +377,15 @@ Writer qualification rules (fidelity-preserving, fast to check):
 
 - **Both**: a declined value never partially writes. The size pass validates everything, so the write pass cannot *decline* (the existing `codec_size`/`codec_put` discipline in both bindings). The one mid-write failure is an ALTREP class whose region method raises (the R rules above), and transactional staging covers it.
 
-The byte grammar has one executable form, vendored with the core: `src/interop.c`'s validating pull cursor (`mizu_ix_open` / `mizu_ix_next` / `mizu_ix_end`) owns bounds, the depth cap, UTF-8 validity, the container arity accounting, the attr-frame positions, the top-level-only err rule, the reserved-flag rejections, and the informative unknown-tag / unknown-version / unknown-kind declines, while the `mizu_ix_put_*` dual-form helpers are the one emit half every binding's two-pass walk writes through — a binding keeps only a builder (native allocation per item) and a value walk. The golden corpus (`tests/interop/cases.txt` → `corpus.txt`, generated by the spec-derived stdlib reference `tools/interop_corpus.py` and certified by `tests/unit/test_interop.c` plus the `tests/fuzz/` cursor harness) pins the grammar once here, so each binding's conformance test can assert its own builder and walk against the fixtures instead of against a peer's writer. It is a library module the bindings call, not a transport path: the transport still never interprets a slot payload on its own.
+The byte grammar has one executable form, vendored with the core: `src/interop.c`'s validating pull cursor (`mizu_ix_open` / `mizu_ix_next` / `mizu_ix_end`) owns bounds, the depth cap, UTF-8 validity, the container arity accounting, the attr-frame positions, the top-level-only err rule, the reserved-flag rejections, and the informative unknown-tag / unknown-version / unknown-kind declines, while the `mizu_ix_put_*` dual-form helpers are the one emit half every binding's two-pass walk writes through, so a binding keeps only a builder (native allocation per item) and a value walk. The golden corpus (`tests/interop/cases.txt` → `corpus.txt`, generated by the spec-derived stdlib reference `tools/interop_corpus.py` and certified by `tests/unit/test_interop.c` plus the `tests/fuzz/` cursor harness) pins the grammar once here, so each binding's conformance test can assert its own builder and walk against the fixtures instead of against a peer's writer. It is a library module the bindings call, not a transport path: the transport still never interprets a slot payload on its own.
 
 ### The byte-shape helper registry
 
-The morsel.c / stage_raw.c / interop-cursor precedent, applied to the rest of the 'I' machinery that operates purely on byte spans and cursor items: the core owns protocol bytes; bindings own values.
+This subsection applies the morsel.c / stage_raw.c / interop-cursor precedent to the rest of the 'I' machinery that operates purely on byte spans and cursor items: the core owns protocol bytes, and bindings own values.
 This subsection is the specification of record for the helpers the core absorbs so that no byte-level rule keeps a second implementation free to drift across bindings; it lands as the ext surface it names, and the bindings adopt in that release (each deleting its copies in the adopting commit).
-No binding object crosses the boundary — every helper takes spans, counts and cursor items, never a SEXP or a PyObject.
+No binding object crosses the boundary: every helper takes spans, counts and cursor items, never a SEXP or a PyObject.
 A span is a (pointer, byte count) pair; the pointer shall reference at least the stated count.
-The bindings keep: the value walks, the attribute *qualification* (which attribute sets are encodable or whitelisted — it walks native objects), the error idioms (longjmp, `PyErr`), and the err stream's *mode* logic (which spans a condition contributes: mizu's remote-relay fields versus its flatten, the map runner's element-index extraction); the core takes resolved spans.
+The bindings keep: the value walks, the attribute *qualification* (which attribute sets are encodable or whitelisted; it walks native objects), the error idioms (longjmp, `PyErr`), and the err stream's *mode* logic (which spans a condition contributes: mizu's remote-relay fields versus its flatten, the map runner's element-index extraction); the core takes resolved spans.
 The wire does not change under any item here: byte-identity is pinned by the golden corpus, `MIZU_ABI_VERSION` is untouched, and the 'I' version byte stays 0x01.
 
 Requirement keywords in this subsection take the ISO/IEC reading: **shall** an absolute requirement, **shall not** an absolute prohibition, **should** a recommendation departed from only for recorded cause, **may** an allowed option.
@@ -391,8 +399,11 @@ A binding conforms to the 'I' format only when every shall here and in the forma
 | `mizu_ix_tag_of` | dual-form | the triplicated wire-type → vector-tag switch (`mizu_ix_put_vec`'s included) |
 | `MIZU_IX_ATTR_*` / `MIZU_IX_CLASS_*` / `MIZU_IX_UNIT_*` | macros | the shape whitelist's attr keys, class strings and difftime units, hard-coded in two languages |
 
-The form column carries one discipline, stated once: *dual-form* is the `mizu_ix_put_*` pattern — a `static inline` in `mizu_ext.h` plus a same-named exported symbol in `src/ext.c`, the body single-sourced in the header — and the classifier is self-containment: pure byte math over header-defined constants is dual-form (it exists for the hot paths, but a cold helper that is self-contained — the err framer — takes the same form); *exported only* is for code that wraps the cursor or records TLS errors, the cursor's own form; *macros* are compile-time constants and export no symbols.
-A helper that records TLS errors is never an inline — `mizu_err_record_tls` is internal, and the installed header references installed symbols only — and cold protocol code buys nothing from inlining, so the shim keeps the cursor's exported-only form.
+The form column carries one discipline.
+*Dual-form* is the `mizu_ix_put_*` pattern (a `static inline` in `mizu_ext.h` plus a same-named exported symbol in `src/ext.c`, the body single-sourced in the header), and the classifier is self-containment: pure byte math over header-defined constants is dual-form (it exists for the hot paths, but a cold helper that is self-contained, such as the err framer, takes the same form).
+*Exported only* is for code that wraps the cursor or records TLS errors, the cursor's own form.
+*Macros* are compile-time constants and export no symbols.
+A helper that records TLS errors is never an inline (`mizu_err_record_tls` is internal, and the installed header references installed symbols only), and cold protocol code gains nothing from inlining, so the shim keeps the cursor's exported-only form.
 Every declaration and macro here lives in `mizu_ext.h`'s interchange stream ('I') section, beside the cursor and the emit helpers.
 
 **The UTF-8 validator.**
@@ -401,7 +412,7 @@ Every declaration and macro here lives in `mizu_ext.h`'s interchange stream ('I'
 int mizu_ix_utf8_valid(const void *s, size_t n);
 ```
 
-Returns 1 when the `n` bytes at `s` are a well-formed UTF-8 byte sequence per RFC 3629 (the Unicode Standard's well-formed byte sequence table names the same set): shortest-form encodings only — overlong forms rejected — no UTF-16 surrogate code points U+D800–U+DFFF, no code point past U+10FFFF, no stray or truncated continuation bytes; 0 otherwise.
+Returns 1 when the `n` bytes at `s` are a well-formed UTF-8 byte sequence per RFC 3629 (the Unicode Standard's well-formed byte sequence table names the same set): shortest-form encodings only (overlong forms rejected), no UTF-16 surrogate code points U+D800–U+DFFF, no code point past U+10FFFF, no stray or truncated continuation bytes; 0 otherwise.
 The empty span is valid.
 `s` shall be NULL only when `n` is 0.
 A pure predicate: O(n), no allocation, no error record.
@@ -420,7 +431,7 @@ size_t mizu_ix_write_err(unsigned char *dst, uint32_t inline_max,
                          int has_index, uint64_t index);
 ```
 
-Composes a complete 'I' stream — the two-byte header, then the 0x11 err item — implementing the format section's bounded-and-cannot-fail writer.
+Composes a complete 'I' stream (the two-byte header, then the 0x11 err item), implementing the format section's bounded-and-cannot-fail writer.
 The caller passes resolved spans; the budget algorithm runs in size_t arithmetic:
 
 ```
@@ -431,10 +442,10 @@ dn = floor(detail, detail_n, avail - tn - mn)
 ```
 
 `floor(s, n, share)` is `n` when `n <= share`, else the largest `len <= share` that does not split a multi-byte sequence: `while (len > 0 && (s[len] & 0xC0) == 0x80) len--`.
-The three spans shall be valid UTF-8 — per `mizu_ix_utf8_valid` or the binding's source-encoding guarantee: the floor preserves validity under that precondition and is merely bounded without it; the framer never validates.
+The three spans shall be valid UTF-8, per `mizu_ix_utf8_valid` or the binding's source-encoding guarantee: the floor preserves validity under that precondition and is merely bounded without it; the framer never validates.
 The item is emitted with flags bit 0 = `has_index`, the `index` u64 present only when set, then the three truncated spans as the bare counted strings; the framer builds on `mizu_ix_put_err`, so the budget algorithm above is the single thing it adds, and it lives exactly here.
 The return is the stream size; a NULL `dst` is the size query, the `mizu_ix_put_*` convention.
-`inline_max` shall be at least `MIZU_IX_ERR_OVERHEAD`; the return is then at most `inline_max` — the fits-the-slot-by-construction guarantee, so the caller stamps INLINE with the keeperless claim and the writer cannot fail: no allocation, no error path, no TLS record.
+`inline_max` shall be at least `MIZU_IX_ERR_OVERHEAD`; the return is then at most `inline_max`, the fits-the-slot-by-construction guarantee, so the caller stamps INLINE with the keeperless claim and the writer cannot fail: no allocation, no error path, no TLS record.
 The u32 width of `inline_max` is the slot inline budget's own, and it bounds every truncated length into the wire's u32 count fields.
 The constants live in `mizu_ext.h` as the wire authority for the budget.
 
@@ -448,9 +459,9 @@ mizu_status mizu_ixt_want_list(mizu_ix *cur, mizu_ix_item *item);
 mizu_status mizu_ixt_want_dict(mizu_ix *cur, mizu_ix_item *item);
 ```
 
-`mizu_ixt_open` serves every task-stream decode — the exec decode, the runner decode, and the inspection hook's (mizu's `mizu_interop_read_task_call`, pymizu's `pymizu_ix_read_task_components`; a test and inspection path, not a worker).
-The `want_*` checks serve the decodes that read call fields — exec, inspection hook, and the map descriptor's spec half, which applies them after its own framing checks: the field tags are the builder's check, not the cursor's (the format section), and the shim is that check, once.
-`mizu_ixt_open` opens the cursor, pulls the first item, and requires the TASK header with `task_kind <= max_kind`, the decode site's ceiling within the cursor's registry — a runner stream at the exec decode fails informatively instead of misparsing.
+`mizu_ixt_open` serves every task-stream decode: the exec decode, the runner decode, and the inspection hook's (mizu's `mizu_interop_read_task_call`, pymizu's `pymizu_ix_read_task_components`; a test and inspection path, not a worker).
+The `want_*` checks serve the decodes that read call fields (exec, the inspection hook, and the map descriptor's spec half, which applies them after its own framing checks): the field tags are the builder's check, not the cursor's (the format section), and the shim is that check, once.
+`mizu_ixt_open` opens the cursor, pulls the first item, and requires the TASK header with `task_kind <= max_kind`, the decode site's ceiling within the cursor's registry, so a runner stream at the exec decode fails informatively instead of misparsing.
 On success `*item` is the header item and the submitter identity rides `item->u64[0]`: the binding stashes it by its own discipline ahead of the field reads (mizu's `mizu_curpool_ident`, pymizu's `ident_out`), so the shim takes no stash parameter and touches no binding state.
 The `want_*` checks pull the next item and require, respectively, a non-NA STR1 (the 0x04 code string), a LIST begin (the positional field), a DICT begin (the named field).
 Every failure is `MIZU_ERR` with the text recorded in the thread-local slot (the cursor's own discipline), so the texts are byte-identical across bindings by construction rather than by copying; each binding surfaces the slot with its own prefix, as both already do for cursor errors.
@@ -465,7 +476,7 @@ A failure from the cursor itself carries the cursor's own text; the shim adds ex
 | `want_dict` | `malformed task stream: the named field is not a dict` |
 
 The `0x%02X` text covers kinds inside the cursor's registry but above the site's ceiling; kinds past the registry stay the cursor's own `unknown task kind 0x%02X — the peer uses a newer format` decline.
-Binding-side, and explicitly out of the shim: the item pull itself (that is `mizu_ix_next` — an alias would add a symbol, not a check), the target-byte misroute guard (the worker's language is binding state), the runner stream's own field texts (`malformed runner stream: …`), the qualified-name resolution and per-kind call construction, the dict-key decode and duplicate rejection (builder work — the cursor holds no key set — whose texts differ by binding today), and the map descriptor's `list[task, x]` framing checks, whose texts name the descriptor.
+Binding-side, and explicitly out of the shim: the item pull itself (that is `mizu_ix_next`; an alias would add a symbol, not a check), the target-byte misroute guard (the worker's language is binding state), the runner stream's own field texts (`malformed runner stream: …`), the qualified-name resolution and per-kind call construction, the dict-key decode and duplicate rejection (builder work, as the cursor holds no key set; their texts differ by binding today), and the map descriptor's `list[task, x]` framing checks, whose texts name the descriptor.
 
 **The vector-tag table.**
 
@@ -474,12 +485,12 @@ int mizu_ix_tag_of(int wire_type);
 ```
 
 The wire-type → vector-tag mapping, one row per atomic wire type: LGL → 0x06, INT → 0x07, REAL → 0x08, CPLX → 0x09, RAW → 0x0a, INT64 → 0x0e.
-Any other input returns 0 — `MIZU_IX_TAG_NIL`, never a vector tag, so the failure is distinguishable from every mapping.
+Any other input returns 0 (`MIZU_IX_TAG_NIL`), which is never a vector tag, so the failure is distinguishable from every mapping.
 `mizu_ix_put_vec`'s internal switch single-sources through it, keeping the emit and the table in one place.
 
 **The attribute vocabulary.**
 
-The shape whitelist's wire strings, as macros — compile-time constants need no exported twin, and lengths ride `sizeof - 1` at the call sites that pass one:
+The shape whitelist's wire strings, as macros (compile-time constants need no exported twin, and lengths ride `sizeof - 1` at the call sites that pass one):
 
 ```c
 #define MIZU_IX_ATTR_NAMES    "names"
@@ -506,9 +517,10 @@ The shape whitelist's wire strings, as macros — compile-time constants need no
 #define MIZU_IX_UNIT_WEEKS "weeks"
 ```
 
-`mizu_ext.h` is the wire authority for these strings: they are the format-0x01 baseline's vocabulary, so the set is append-only under the language-value rule — a rename is a wire change and never happens; a later whitelist shape adds rows (and takes a capability bit, per the format section).
-The vocabulary is exactly the whitelist's: `"ordered"` never crosses (the writer declines it) and `"integer64"` rides the 0x0e value tag, so neither takes a constant; timezone names are an open value space — any zoneinfo key, pymizu's naive-datetime fallback `"UTC"` included — and take none either. `tscale` carries the one value `"ns"` — the verbatim temporal form's scale label, allocated with `MIZU_CAP_MIZL_TSN` (the Arrow frame writer subsection).
-Layout blobs in the whitelist shapes use these same constants; a same-language blob may also carry arbitrary attribute names — an open key space the vocabulary does not cover.
+`mizu_ext.h` is the wire authority for these strings: they are the format-0x01 baseline's vocabulary, so the set is append-only under the language-value rule: a rename is a wire change and never happens, and a later whitelist shape adds rows (and takes a capability bit, per the format section).
+The vocabulary is exactly the whitelist's: `"ordered"` never crosses (the writer declines it) and `"integer64"` rides the 0x0e value tag, so neither takes a constant; timezone names are an open value space (any zoneinfo key, pymizu's naive-datetime fallback `"UTC"` included) and take none either.
+`tscale` carries the one value `"ns"`, the verbatim temporal form's scale label, allocated with `MIZU_CAP_MIZL_TSN` (the Arrow frame writer subsection).
+Layout blobs in the whitelist shapes use these same constants; a same-language blob may also carry arbitrary attribute names, an open key space the vocabulary does not cover.
 
 **Verification and adoption.**
 
@@ -522,13 +534,13 @@ Layout blobs in the whitelist shapes use these same constants; a same-language b
 
 ### The Arrow frame writer
 
-The Arrow C Data Interface → MIZL frame writer (`src/arrow.c`), the morsel.c / stage_raw.c / interop-cursor precedent applied to the frame tier: one implementation both bindings stage through, promoted from pymizu's shmframe.c with the wire bytes pinned by the cross-language suite.
-The core owns the protocol bytes — the column classification, the batch vetting, the conversion kernels, the layout write and the attribute emitters — and the bindings keep what touches language objects: the import front-ends that produce the caller-owned Arrow structs, the provenance registry behind the remote-leaf override, and any emitters of their own driven off `mizu_arrow_col_info` (pymizu's inline frame forms).
+The Arrow C Data Interface → MIZL frame writer (`src/arrow.c`) applies the morsel.c / stage_raw.c / interop-cursor precedent to the frame tier: one implementation both bindings stage through, promoted from pymizu's shmframe.c with the wire bytes pinned by the cross-language suite.
+The core owns the protocol bytes (the column classification, the batch vetting, the conversion kernels, the layout write and the attribute emitters), and the bindings keep what touches language objects: the import front-ends that produce the caller-owned Arrow structs, the provenance registry behind the remote-leaf override, and any emitters of their own driven off `mizu_arrow_col_info` (pymizu's inline frame forms).
 
-The ABI structs are the spec's, defined in `mizu_ext.h` under its two include guards — frozen ABI, no headers, no dependency.
+The ABI structs are the spec's, defined in `mizu_ext.h` under its two include guards: frozen ABI, no headers, no dependency.
 The writer borrows them: the schema and the batches pointer array are caller-owned and shall outlive the handle until `mizu_arrow_close`, and the writer reads them only inside the write.
 
-`mizu_arrow_open` classifies every column off the schema (a struct schema) and vets every batch before a byte is staged — buffer counts, offsets, null-count range, column lengths, unnamed or duplicate names, a zero-column frame — and validates the dictionaries: batch 0's levels canonical and stable across batches, every index range-checked.
+`mizu_arrow_open` classifies every column off the schema (a struct schema) and vets every batch before a byte is staged (buffer counts, offsets, null-count range, column lengths, unnamed or duplicate names, a zero-column frame), and validates the dictionaries: batch 0's levels canonical and stable across batches, every index range-checked.
 The column kinds:
 
 - **CVT**: a fixed-width column through its `mizu_cvt_row` (the conversion table below), the identity rows included.
@@ -537,15 +549,16 @@ The column kinds:
 - **DATE / TS / TD**: date32 → a REAL leaf of days + the Date blob; `timestamp[unit, tz]` and `duration[unit]` (units s/m/u/n) → a REAL leaf of seconds + the POSIXct or difftime blob, the zone name riding the POSIXct blob. The ns unit is the `tscale` case below.
 
 The conversion kernels (`mizu_cvt_for_arrow` / `mizu_cvt_convert`) single-source the fixed-width rows every binding previously kept: identity copy, sign- and zero-widening narrow ints to int32, uint32 to double (exact) and uint64 to integer64 (in-range exact; past `INT64_MAX` the `INT64_MIN` sentinel, counted), float16 and float32 to double (exact), bool byte- and bit-packed to logical, complex64 to complex128.
-The producer's validity bitmap is authoritative (the validity-as-data section below) — copied into the region's validity tail verbatim for a single offset-0 batch, rebuilt honouring the batch offset otherwise — and the data carries the R NA sentinels at null slots, patched in the copy; an Arrow NaN is a value and stays NaN.
+The producer's validity bitmap is authoritative (the validity-as-data section below): it is copied into the region's validity tail verbatim for a single offset-0 batch and rebuilt honouring the batch offset otherwise, and the data carries the R NA sentinels at null slots, patched in the copy; an Arrow NaN is a value and stays NaN.
 A uint8 column's nulls declines (R raw has no NA).
-The loss events accumulate as counts (`mizu_arrow_warn`: uint64 past `INT64_MAX`, a genuine INT32_MIN, a genuine INT64_MIN) which the binding raises after the stage returns, never mid-stage; the sentinel counts run only on the masked walk (a null-free column takes no walk and never counts), and the verbatim rows (nanosecond temporal, uint64) are excluded — a cap-peer reads those lanes exactly.
-The write is always the foreign form — bulk CE_UTF8 marks and the validity tail — so the bytes are peer-agnostic: an R reader takes the sentinels and ignores the tail, a Python reader takes the bitmap.
+The loss events accumulate as counts (`mizu_arrow_warn`: uint64 past `INT64_MAX`, a genuine INT32_MIN, a genuine INT64_MIN) which the binding raises after the stage returns, not mid-stage; the sentinel counts run only on the masked walk (a null-free column takes no walk and never counts), and the verbatim rows (nanosecond temporal, uint64) are excluded, since a cap-peer reads those lanes exactly.
+The write is always the foreign form (bulk CE_UTF8 marks and the validity tail), so the bytes are peer-agnostic: an R reader takes the sentinels and ignores the tail, a Python reader takes the bitmap.
 
-**The verbatim nanosecond form.** A `timestamp[ns]` or `duration[ns]` column for a peer advertising `MIZU_CAP_MIZL_TSN` (bit 5) stages verbatim: an INT64 leaf (the identity i64 row, NaT the `INT64_MIN` sentinel) whose blob gains `tscale` (the 0x04 str scalar `"ns"`) beside `class` + `tzone` or `class` + `units` — the i64 counts' scale label, the non-verbatim blob needing none (its REAL values are always seconds, so `units` is fixed).
+**The verbatim nanosecond form.** A `timestamp[ns]` or `duration[ns]` column for a peer advertising `MIZU_CAP_MIZL_TSN` (bit 5) stages verbatim: an INT64 leaf (the identity i64 row, NaT the `INT64_MIN` sentinel) whose blob gains `tscale` (the 0x04 str scalar `"ns"`) beside `class` + `tzone` or `class` + `units`; `tscale` is the i64 counts' scale label, which the non-verbatim blob does not need (its REAL values are always seconds, so `units` is fixed).
 Without the bit the same column takes the REAL-seconds form (the 1e-9 rescale; sub-µs resolution rounds, as the whitelist rows document).
-One bit, one layout variant — the versioning rule's new-bit-for-a-gated-shape case.
-The uint64 column's verbatim form is the same shape: a `'L'` column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages as an INT64 leaf whose blob is `{u64 = TRUE}`, else the integer64 conversion (in-range exact, the `INT64_MIN` sentinel past `INT64_MAX`, counted — the by-value tiers' `i64v` form reads identically, so no capability bit gates the fallback) — the validity-as-data section below is normative for both.
+One bit, one layout variant: the versioning rule's new-bit-for-a-gated-shape case.
+The uint64 column's verbatim form is the same shape: a `'L'` column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages as an INT64 leaf whose blob is `{u64 = TRUE}`, else the integer64 conversion (in-range exact, the `INT64_MIN` sentinel past `INT64_MAX`, counted; the by-value tiers' `i64v` form reads identically, so no capability bit gates the fallback).
+The validity-as-data section below is normative for both.
 
 `mizu_arrow_stage` is the one-call stage over the handle seam, valid inside a binding's `stage` hook.
 The gate runs first, touching no shared state: the capability conjunction (`MIZU_CAP_MIZL` | `MIZU_CAP_ATTRS`, plus `MIZU_CAP_MIZS` when any column is a string) off the classification and the peer's mask, then the churn check.
@@ -553,34 +566,36 @@ Then the reap, the spill checkout, the layout write, the SHM_VEC stamp and the z
 A non-OK return claims nothing, so the binding's copy tiers take the gate's decline and the spill status alike.
 The two bindings' previously separate conjunction and churn rules have their one home here.
 
-The overrides re-run the memoized size pass on the next `mizu_arrow_size` / `mizu_arrow_stage` call: `mizu_arrow_remote` marks a column as a directory-tag-33 remote leaf (pymizu's provenance match; one REFHELD OR per distinct referenced region at write, a torn referenced tree leaving the column local); `mizu_arrow_root_blob` replaces the frame attribute dict (pymizu's custom row_names — absent the override the writer emits names + class data.frame + the automatic `c(NA, -n)` row.names); `mizu_arrow_tz` pins a POSIXct leaf's zone name (a same-language sender's naivety-preserving form; the classified default writes `"UTC"` for a naive timestamp).
+The overrides re-run the memoized size pass on the next `mizu_arrow_size` / `mizu_arrow_stage` call: `mizu_arrow_remote` marks a column as a directory-tag-33 remote leaf (pymizu's provenance match; one REFHELD OR per distinct referenced region at write, a torn referenced tree leaving the column local); `mizu_arrow_root_blob` replaces the frame attribute dict (pymizu's custom row_names; absent the override the writer emits names + class data.frame + the automatic `c(NA, -n)` row.names); `mizu_arrow_tz` pins a POSIXct leaf's zone name (a same-language sender's naivety-preserving form; the classified default writes `"UTC"` for a naive timestamp).
 
-Wire invariants: a frame is one self-contained MIZL region — the 64-byte header, one 32-byte directory entry per column, the column bodies at 64-byte-aligned offsets, the leaf blobs, the root frame blob, then the validity tail — framed SHM_VEC with the exact used byte count; remote leaves are the only outgoing references, their REFHELD pins the writer's own.
+Wire invariants: a frame is one self-contained MIZL region (the 64-byte header, one 32-byte directory entry per column, the column bodies at 64-byte-aligned offsets, the leaf blobs, the root frame blob, then the validity tail), framed SHM_VEC with the exact used byte count; remote leaves are the only outgoing references, and their REFHELD pins the writer's own.
 Staging is transactional: the writer is pure C over caller-owned memory until the layout write lands in the region.
 
 ### Validity as data
 
 When a MIZH or MIZL header's validity pair is not `{0, 0}`, the section it locates is the **authoritative null record** for the layout: the in-band sentinels (`NA_real_`'s NaN payload, `INT_MIN`, `INT64_MIN`) are the null-slot fill, not the record. `{0, -1}` asserts authoritatively null-free.
-The declaration is semantic, not byte-level: the section already exists, so it needs no capability bit — a pre-dating reader never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions. `MIZU_ABI_VERSION` stays 1.
+The declaration is semantic, not byte-level.
+The section already exists, so it needs no capability bit: a pre-dating reader never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions.
+`MIZU_ABI_VERSION` stays 1.
 
 **The fill invariant.** A writer that emits a section writes the wire type's sentinel at every clear bit.
-The bitmap and the sentinels never disagree in the null direction, so a reader that ignores the section (R's value reads) still reads every null as NA; they may disagree only in the other direction — a *set* bit over a sentinel value is a genuine value.
+The bitmap and the sentinels never disagree in the null direction, so a reader that ignores the section (R's value reads) still reads every null as NA; they may disagree only in the other direction: a *set* bit over a sentinel value is a genuine value.
 
 Readers split on whether the boundary has a null concept.
-At one (an Arrow export, a Frame export) a carried bitmap applies verbatim, and on an absent section (`{0, 0}`) the reader derives it lazily from the sentinels — one rule for every atomic wire type, REAL included (its test is the payload, not `isnan`: an Arrow NaN is a value and stays valid).
-At a boundary without one (R values, numpy) a set valid bit over a sentinel value is a genuine value; where the read walks the bitmap anyway it warns and names the fidelity accessor, but the landing itself is unchanged — the one irreducible collapse, R's data model.
+At one (an Arrow export, a Frame export) a carried bitmap applies verbatim, and on an absent section (`{0, 0}`) the reader derives it lazily from the sentinels, one rule for every atomic wire type, REAL included (its test is the payload, not `isnan`: an Arrow NaN is a value and stays valid).
+At a boundary without one (R values, numpy) a set valid bit over a sentinel value is a genuine value; where the read walks the bitmap anyway it warns and names the fidelity accessor, but the landing itself is unchanged, the one collapse that R's data model forces.
 
 Writers emit the section whenever the source carries a null record (an Arrow validity bitmap, a foreign fused build).
 A writer whose data model has no genuine-sentinel concept may leave `{0, 0}`; `{0, -1}` asserts null-free and makes a genuine sentinel a value on every Python read, so the stamp belongs on data the writer knows cannot carry a null.
-The `'I'` stream has no validity section — the sentinels are its whole null record, as the tag table's 0x02/0x03 cells document.
+The `'I'` stream has no validity section: the sentinels are its whole null record, as the tag table's 0x02/0x03 cells document.
 
-**The uint64 verbatim form.** A `'L'` (uint64) frame column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages verbatim: an INT64 leaf — the identity i64 lanes, the validity machinery unchanged — whose attrs blob carries a u64 marker key.
-Without the bit the same column takes the integer64 conversion (in range exact, the `INT64_MIN` sentinel past `INT64_MAX`, counted — the by-value tiers' `i64v` form reads identically, so no capability bit gates the fallback) — one bit, one layout variant, the TSN precedent.
+**The uint64 verbatim form.** A `'L'` (uint64) frame column for a peer advertising `MIZU_CAP_MIZL_U64V` (bit 6) stages verbatim: an INT64 leaf (the identity i64 lanes, the validity machinery unchanged) whose attrs blob carries a u64 marker key.
+Without the bit the same column takes the integer64 conversion (in range exact, the `INT64_MIN` sentinel past `INT64_MAX`, counted; the by-value tiers' `i64v` form reads identically, so no capability bit gates the fallback): one bit, one layout variant, the TSN precedent.
 Both bindings advertise the bit, so every current-version pair crosses uint64 frames verbatim; the R landing keeps the column a view (double + NA at materialization, exact at the Arrow export), which removes the sign-flip path and makes advertising safe there.
 A verbatim region relayed to a pre-cap reader splits by reader: an old pymizu declines on the unknown attr key (its attributed-column fill rejects an unmatched attrs set); an old mizu/mori applies the dict as-is and reads sign-flipped int64 with a stray attribute.
-The degradation is channel-scoped: pool worker joins CAS the whole identity word, so a pool's workers never mix versions — the conversion runs for pre-cap channel peers and mixed-version submitters only. `MIZU_ABI_VERSION` stays 1 under the append-only cap policy.
+The degradation is channel-scoped: pool worker joins CAS the whole identity word, so a pool's workers never mix versions, and the conversion runs for pre-cap channel peers and mixed-version submitters only. `MIZU_ABI_VERSION` stays 1 under the append-only cap policy.
 
-A dedicated null-mask tier was considered and rejected: it duplicates the section machinery, costs a capability bit, and buys nothing.
+A dedicated null-mask tier was considered and rejected: it duplicates the section machinery, costs a capability bit, and adds nothing.
 
 ## The binding seam
 
@@ -621,7 +636,7 @@ Four of them carry the correctness guarantees:
   A nonzero return unwinds the verb as `MIZU_ERR` with `MIZU_ERRCAT_INTERRUPTED` and consumes nothing.
 
 A forked child holds a copy of its parent's handles: every verb on one fails `MIZU_ERR`, and the teardown splits along the same line.
-`destroy` stays the owning process's verb — it writes cross-process words (the close signal, the rendezvous unlink, the shutdown broadcast, the slot release).
+`destroy` stays the owning process's verb, because it writes cross-process words (the close signal, the rendezvous unlink, the shutdown broadcast, the slot release).
 `mizu_channel_abandon` / `mizu_pool_abandon` are the inherited handle's verb: only the child's own copies (the mappings, the fds, the heap) are released, no cross-process word moves, so the parent's handle and the wire state are untouched.
 
 ### Staging policy
@@ -629,7 +644,7 @@ A forked child holds a copy of its parent's handles: every verb on one fails `MI
 `mizu_stage_raw` (dual-form in `mizu_ext.h`; the slow path is `stage_raw.c`) is the core-owned raw-tier reservation: the RAWVEC / arena-RAWSPILL / region-RAWSPILL / flat-SHM_VEC cascade both first-party bindings stage by the same rules.
 It composes the stager services and is valid only during `stage_fn`.
 The churn signal is read at most once per stage, gated behind the zero-copy size gate.
-A NULL return hands the object to the binding's serialized tiers: a reservation failure degrades, never errors.
+A NULL return hands the object to the binding's serialized tiers: a reservation failure degrades rather than erroring.
 Bare bytes carry no identifier, so the raw tiers pin nothing; the flat SHM_VEC reserve writes the MIZH header before `mizu_stage_retain_zc` stores the producer loan.
 Object eligibility (which values are raw) stays binding-side, as do the string and list-tree layouts.
 
@@ -638,7 +653,7 @@ Object eligibility (which values are raw) stays binding-side, as do the string a
 A binding's parallel map rides one fresh region per map call: a 128-byte header, the descriptor stream, an optional bare-bytes x section, the morsel state, and an optional template output area.
 The protocol is core-owned (`morsel.c`, `mizu_morsel_*` in `mizu_ext.h`); the descriptor codec, the x-section element I/O, the batch loop, and the gather stay binding-side.
 The one magic is `MIZU_MORSEL_MAGIC`, stamped and checked by the module itself; the descriptor's codec identity rides the descriptor stream's own first byte (R_Serialize, pickle, or `'I'`), which is where each binding's reader dispatches.
-A cross-language map is this same region with the `'I'` descriptor form — one stream, `list[task, x | nil]`: the f spec nested as a kind 0/1 task tag, the list-x values as a bare 0x0c list (nil when the raw section carries them, a 0x13 ref leaf when x is a received view — the descriptor shares the value grammar, so a view x crosses by reference and the worker's map context holds the resolved view between morsels) — and kind-2 runner tasks in place of private runner frames.
+A cross-language map is this same region with the `'I'` descriptor form, one stream `list[task, x | nil]` (the f spec nested as a kind 0/1 task tag, the list-x values as a bare 0x0c list: nil when the raw section carries them, or a 0x13 ref leaf when x is a received view, since the descriptor shares the value grammar, so a view x crosses by reference and the worker's map context holds the resolved view between morsels), and kind-2 runner tasks in place of private runner frames.
 The worker's exec hook dispatches kind 2 to its own binding's native runner loop, so the runner is always same-language as the worker.
 The runner's *result* shape stays binding-private, and a foreign collect normalizes: mizu's runners publish `(morsel starts, morsel counts, values)` triples, pymizu's publish `(element ranges, values)` pairs; element ranges and morsel pairs convert through the region's morsel size, so the lost-set scan and the splice work over either.
 
@@ -667,12 +682,12 @@ An SHM_VEC region recycles only after its zc refcount reaches zero.
 A nonzero region waits in the lent-region ledger.
 Busy paths sweep the ledger with a quota.
 Idle paths and free-list misses sweep it in full.
-On Linux a free-list miss with lent bytes past `MIZU_ZC_LENT_BUDGET` sets the handle's churn flag and staging degrades to the copy tiers — below the budget a fresh create (pre-faulted, SIGBUS-proof) beats the copy floor, past it the copy tiers' deterministic reuse caps tmpfs growth.
+On Linux a free-list miss with lent bytes past `MIZU_ZC_LENT_BUDGET` sets the handle's churn flag and staging degrades to the copy tiers: below the budget a fresh create (pre-faulted, SIGBUS-proof) beats the copy floor, and past it the copy tiers' deterministic reuse caps tmpfs growth.
 Sweeps and force-reclaims clear the flag once reclaims bring lent bytes back under the budget; a pool submitter sweeps at submit time while churned (the busy-path sweep is worker-loop-only, and its pops stop missing once the copy tiers take over), so the fallback lifts on the first reclaim instead of never.
 
 If the consumer dies, its counts leak.
 The death verdict on the producer then force-reclaims its lent regions.
-Ledger keys carry the consumer's kind (worker or submitter slot) in the high half, so a pool verdict reclaims exactly one namespace — a worker handle lends result regions to submitters and task-arg regions to workers under colliding slot numbers.
+Ledger keys carry the consumer's kind (worker or submitter slot) in the high half, so a pool verdict reclaims exactly one namespace, since a worker handle lends result regions to submitters and task-arg regions to workers under colliding slot numbers.
 REFHELD-flagged regions (their identifiers escaped by reference) leak and unlink instead.
 On a ledger overflow, the entry closes the mapping but keeps the name, so a REF in flight can still resolve.
 The unlink lands at handle teardown.
@@ -696,7 +711,7 @@ Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge
 A worker announces its claim (`in_flight_rs`) before it CASes.
 The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current.
 An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
-On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper — the flock re-acquire on one OFD is not a mutual exclusion.
+On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper, because the flock re-acquire on one OFD is not a mutual exclusion.
 On Linux a region create fails fast when a statvfs probe shows the region cannot fit in tmpfs; the reservation itself (a one-fault-per-extent touch + `MADV_COLLAPSE` huge-folio create on kernels >= 6.1, `MADV_POPULATE_WRITE`, `posix_fallocate` on kernels < 5.14) remains the enforcement point, so no later write fault can SIGBUS.
 
 ## Threading contract
@@ -705,9 +720,9 @@ Each handle role is confined to one thread at a time (`include/mizu.h` states th
 The roles: a channel side (all of its send/recv verbs, both directions), a pool submitter's producing half (the submit family), a pool submitter's waiting half (the collect family), and a pool worker's driver (worker_run, the help path of a nested collect).
 A role may migrate threads across a happens-before edge, and one submitter's two halves may live on two threads.
 The single-writer words the confinement protects: the producer-side ring tails and handle-local cursors, the staging checkout and spill free list, the result-slot scan and mint, the waiter announces, the deque owner side.
-They carry no CAS by design — a mutex on the hot path would void the lock-free proposition — so concurrent verbs within one role race them, and most outcomes are silent: torn ring entries, double keeper surrenders aliasing the free list, duplicated or dropped channel messages.
+They carry no CAS by design (a mutex on the hot path would void the lock-free proposition), so concurrent verbs within one role race them, and most outcomes are silent: torn ring entries, double keeper surrenders aliasing the free list, duplicated or dropped channel messages.
 The guards that do exist (the terminal-to-FREE collect CAS, the zombie incarnation check, the claimant CASes) catch a violation only after the damage is staged, or not at all.
-Safe from any thread: `mizu_pool_cancel`, `mizu_pool_task_release`, `mizu_pool_task_state`, and the introspection reads — the status-word CAS verbs, deliberately so (GC finalizers and racy probes).
+Safe from any thread: `mizu_pool_cancel`, `mizu_pool_task_release`, `mizu_pool_task_state`, and the introspection reads, which are the status-word CAS verbs, kept thread-safe for GC finalizers and racy probes.
 Destroy/leave/close must not race verbs in flight on the same handle; bindings pin them (pymizu's in-flight count, a free-threaded build needing a real one).
 Bindings answer for the contract in their own idiom: pymizu raises `ConcurrentUseError` from a non-blocking guard on the producer and channel-side verbs; R is single-threaded per session.
 

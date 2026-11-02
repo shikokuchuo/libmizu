@@ -1,12 +1,12 @@
 # Contributing
 
-Contributions are welcome — bug reports and pull requests alike.
+Bug reports and pull requests are welcome.
 libmizu is pre-release and the API can change at any time, so open an issue to discuss larger changes before doing the work.
 
 ## Reporting bugs
 
 Open a GitHub issue with a minimal reproducer, your platform and compiler, and the kernel version on Linux.
-For a hang or a lost wakeup, name the transport (channel or pool) and the operation in flight — the wait paths are per-OS.
+For a hang or a lost wakeup, name the transport (channel or pool) and the operation in flight, since the wait paths are per-OS.
 
 ## Pull requests
 
@@ -26,7 +26,8 @@ Conventions:
 - New behavior needs a test.
   Unit tests are in-process and deterministic, one binary per `.c` file; integration tests compile against `mizu.h` only, as the API's compile-time contract check.
 - `include/mizu.h` is the pinned API contract.
-  After an intended ABI change, regenerate the export list with `tools/check-exports.sh --write` — CI diffs the shared library's exported `mizu_*` symbols against it.
+  After an intended ABI change, regenerate the export list with `tools/check-exports.sh --write`.
+  CI diffs the shared library's exported `mizu_*` symbols against it.
 - Bump `MIZU_ABI_VERSION` on any wire-format change (the structs in `mizu.h`).
 - `DESIGN.md` is the design authority: a change that alters an invariant updates it alongside.
 - Keep the public headers' comments doxygen-formed (`/** ... */` blocks, `/**< ... */` trailing on members); `make docs` builds the API reference.

@@ -12,11 +12,11 @@
      (libmizu.so.N = MIZU_VERSION_MAJOR) tracks its ABI; opaque handles +
      size-field structs keep it stable. The stable promise starts at
      1.0; until then any line may still move.
-   - mizu_ext.h (installed alongside): the binding-author API — the
-     callback seam, stager/read/publish services, and promoted
-     internals. Version-pinned per minor release, may change without
-     deprecation, ever. Language bindings compile against it (the
-     first-party ones vendor the sources at a pinned commit).
+   - mizu_ext.h (installed alongside): the binding-author API (the callback
+     seam, stager/read/publish services, and promoted internals). Version-pinned
+     per minor release, may change without deprecation, ever. Language bindings
+     compile against it (the first-party ones vendor the sources at a pinned
+     commit).
    - src/internal.h: private, never installed.
 
    Two versioned contracts:
@@ -30,8 +30,8 @@
    - Handles are opaque typedefs; struct definitions live in
      src/internal.h. Nothing public passes or returns a struct by value;
      extensible structs carry a size field for ABI evolution.
-   - Every public operation is a real exported function (MIZU_API). Macros
-     and `static inline` are internal-only — an FFI cannot reach them.
+   - Every public operation is a real exported function (MIZU_API). Macros and
+     `static inline` are internal-only, since an FFI cannot reach them.
    - Functions return mizu_status; destructors return void. Terminal
      transport states (FULL/TIMEOUT/CLOSED/PEER_GONE) are values, not
      errors; MIZU_ERR comes with a category + message (see Errors).
@@ -41,19 +41,17 @@
      death-watch callbacks run on OS listener threads; stage/read/drop
      and the check/park hooks run on the verb-calling thread.
      Documented per-function below.
-   - Handle threading: confine each handle role to one thread at a
-     time. The roles: a channel side (all of its send/recv verbs, both
-     directions), a pool submitter's producing half (the submit
-     family), a pool submitter's waiting half (the collect family),
-     and a pool worker's driver (mizu_pool_worker_run, the help path
-     of a nested collect). A role may
-     migrate threads across a happens-before edge, and one submitter's
-     two halves may live on two threads. Safe from any thread:
-     mizu_pool_cancel, mizu_pool_task_release, mizu_pool_task_state,
-     and the introspection reads. Anything else run concurrently
-     within one role races the single-writer words (ring tails, the
-     staging checkout, waiter announces) — silently, by design: the
-     wire structs carry no mutex. destroy/leave/close must not race
+   - Handle threading: confine each handle role to one thread at a time. The
+     roles: a channel side (all of its send/recv verbs, both directions), a pool
+     submitter's producing half (the submit family), a pool submitter's waiting
+     half (the collect family), and a pool worker's driver
+     (mizu_pool_worker_run, the help path of a nested collect). A role may
+     migrate threads across a happens-before edge, and one submitter's two
+     halves may live on two threads. Safe from any thread: mizu_pool_cancel,
+     mizu_pool_task_release, mizu_pool_task_state, and the introspection reads.
+     Anything else run concurrently within one role races the single-writer
+     words (ring tails, the staging checkout, waiter announces), and the race is
+     silent: the wire structs carry no mutex. destroy/leave/close must not race
      verbs in flight on the same handle; bindings pin them.
 
    Not here: the binding seam (mizu_binding, the mizu_stage_* services,
@@ -83,10 +81,10 @@ extern "C" {
 #  define MIZU_STATIC_ASSERT _Static_assert
 #endif
 
-/** Export macro. MIZU_API defaults to empty: static linkage — vendored
-   and amalgamated builds, the first-party packages — needs no macro.
-   Shared-library builds define MIZU_SHARED, plus MIZU_BUILDING when
-   compiling the library itself on Windows. */
+/** Export macro. MIZU_API defaults to empty: static linkage (vendored and
+   amalgamated builds, the first-party packages) needs no macro. Shared-library
+   builds define MIZU_SHARED, plus MIZU_BUILDING when compiling the library
+   itself on Windows. */
 #if defined(MIZU_SHARED)
 #  if defined(_WIN32)
 #    if defined(MIZU_BUILDING)
@@ -112,8 +110,8 @@ MIZU_API const char *mizu_version(void);
 
 /** The verb result. MIZU_FULL: ring/slot capacity exhausted (try-send).
    MIZU_TIMEOUT: deadline passed. MIZU_CLOSED: orderly close. MIZU_PEER_GONE:
-   the peer's liveness lock is released (the death verdict; listeners are
-   wake triggers only). MIZU_ERR: a real error — category + message. */
+   the peer's liveness lock is released (the death verdict; listeners are wake
+   triggers only). MIZU_ERR: a real error, with a category and a message. */
 typedef enum mizu_status_e {
   MIZU_OK = 0,
   MIZU_FULL,
@@ -169,27 +167,26 @@ typedef struct mizu_preamble_s {
   uint64_t host_pid;         /**< the peer death listener's watch target */
   uint64_t arena_size;       /**< bytes per direction, multiple of 128, 0 disables */
   uint64_t drop_offset;      /**< peer bootstrap bytes, exact-sized (opaque */
-  uint64_t drop_size;        /**<   to the core; tagged — see MIZU_DROP_*) */
+  uint64_t drop_size;        /**<   to the core; tagged, see MIZU_DROP_*) */
   uint64_t livedir_offset;   /**< directory holding the two liveness files */
   uint64_t livedir_size;
 } mizu_preamble;
 
 MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire format");
 
-/** The drop's first byte is a wire-format tag, so a foreign child can
-   dispatch on it: MIZU_DROP_R — a native serialize stream (the
-   homogeneous format); MIZU_DROP_SOURCE — UTF-8 source text in the peer's language,
-   the cross-language lingua franca. The core treats the drop as opaque
-   bytes; the tag is a binding convention. */
+/** The drop's first byte is a wire-format tag, so a foreign child can dispatch
+   on it: MIZU_DROP_R is a native serialize stream (the homogeneous format);
+   MIZU_DROP_SOURCE is UTF-8 source text in the peer's language, the
+   cross-language lingua franca. The core treats the drop as opaque bytes; the
+   tag is a binding convention. */
 #define MIZU_DROP_R       0x52u   /**< 'R' */
 #define MIZU_DROP_SOURCE  0x53u   /**< 'S' */
 
-/** Fixed channel layout: preamble (0), rendezvous line (64), one entity
-   block per side (128 host, 192 peer), then the four ring index lines
-   from 256 — one full cache line per shared index, and the lines paired
-   by writer so no 128-byte span carries two processes' stores: [256,384)
-   is host-written only (HP tail, PH head), [384,512) peer-written only
-   (PH tail, HP head). */
+/** Fixed channel layout: preamble (0), rendezvous line (64), one entity block
+   per side (128 host, 192 peer), then the four ring index lines from 256: one
+   full cache line per shared index, with the lines paired by writer so no
+   128-byte span carries two processes' stores. [256,384) is host-written only
+   (HP tail, PH head), [384,512) peer-written only (PH tail, HP head). */
 #define MIZU_ENTITY_HOST  0
 #define MIZU_ENTITY_PEER  1
 #define MIZU_ENTITY_OFFSET(i)  ((size_t) 128 + 64 * (size_t) (i))
@@ -204,19 +201,19 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
 #define MIZU_ENTITY_EPOCH   0
 #define MIZU_ENTITY_PARKED  4
 #define MIZU_ENTITY_REG     8
-/** The entity block's parked word (MIZU_ENTITY_PARKED) is a bitmask: bit 0
-   is the park announce (the publisher's `!= 0` test keeps its meaning);
-   bit 1 arms the side's notify endpoint ("signal my endpoint when data is
-   published for me" — the publisher clears it as it signals, so one signal
-   per idle transition); bit 2 is reserved. The word has two writers (the
-   side itself and the publisher's clear): every store is an RMW. */
+/** The entity block's parked word (MIZU_ENTITY_PARKED) is a bitmask: bit 0 is
+   the park announce (the publisher's `!= 0` test keeps its meaning); bit 1 arms
+   the side's notify endpoint ("signal my endpoint when data is published for
+   me"; the publisher clears it as it signals, so one signal per idle
+   transition); bit 2 is reserved. The word has two writers (the side itself and
+   the publisher's clear): every store is an RMW. */
 #define MIZU_WAIT_PARKED  1u
 #define MIZU_WAIT_NOTIFY  2u
-/** Offset 16 of the 64-byte entity block: the side's identity word
-   (MIZU_IDENT in mizu_ext.h — language byte, reader-capability mask).
-   The host writes it at create, before the token exists; the peer at
-   attach, before ready_set (whose release store orders it for the host's
-   ready_wait acquire). Immutable thereafter. */
+/** Offset 16 of the 64-byte entity block: the side's identity word (MIZU_IDENT
+   in mizu_ext.h: language byte, reader-capability mask). The host writes it at
+   create, before the token exists; the peer at attach, before ready_set (whose
+   release store orders it for the host's ready_wait acquire). Immutable
+   thereafter. */
 #define MIZU_ENTITY_IDENT   16
 
 #define MIZU_OFF_HP_TAIL    ((size_t) 256)
@@ -243,16 +240,16 @@ MIZU_STATIC_ASSERT(MIZU_OFF_HP_TAIL / 128 == MIZU_OFF_PH_HEAD / 128 &&
      payload = name; aux = exact stream length).
    - RAWVEC: bare bytes of an attribute-free atomic vector, slot-resident
      (len = byte count; aux = wire type tag).
-   - RAWSPILL: RAWVEC out of line — len is the byte count and aux & 0xff
+   - RAWSPILL: RAWVEC out of line. len is the byte count and aux & 0xff
      the wire type tag in both framings. Channel: an arena chunk
      (aux = type, payload = uint64 offset). Pool: a spill region
      (aux = type | name length << 8, payload = name).
    - SHM_VEC: name of a region holding an MIZU* layout object (len = name
      length, payload = name; aux = layout type tag | exact used bytes
-     << 8) — the consumer wraps a zero-copy view.
+     << 8); the consumer wraps a zero-copy view.
    - REF: the /mizu_ identifier of an object already in shm (payload =
      identifier; aux = 0).
-   - NIL: immediate empty value — no bytes move.
+   - NIL: an immediate empty value; no bytes move.
    - STR1: a length-1 string (bytes in the payload, aux the encoding;
      MIZU_STR1_NA marks the missing string). */
 typedef enum mizu_kind_e {
@@ -267,13 +264,12 @@ typedef enum mizu_kind_e {
   MIZU_KIND_RAWSPILL
 } mizu_kind;
 
-/** Bit 0 of the INLINE aux word: the stager's claim that staging this
-   frame committed no retain-table entry, so a pool collect need not wake
-   the producer's keeper sweep. Claim-only — the core reads but never
-   verifies it, and cores predating the flag never read INLINE aux at
-   all; clear is always correct (at worst a spurious keeper-sweep wake).
-   Only INLINE carries the claim: every other kind's aux is fully
-   assigned (see the kind docs above). */
+/** Bit 0 of the INLINE aux word: the stager's claim that staging this frame
+   committed no retain-table entry, so a pool collect need not wake the
+   producer's keeper sweep. Claim-only: the core reads but never verifies it,
+   and cores predating the flag never read INLINE aux at all. Clear is always
+   correct (at worst a spurious keeper-sweep wake). Only INLINE carries the
+   claim: every other kind's aux is fully assigned (see the kind docs above). */
 #define MIZU_AUX_F_KEEPERLESS UINT64_C(1)
 
 #define MIZU_STR1_NA UINT64_MAX   /**< cannot alias an encoding (0-3) */
@@ -296,12 +292,11 @@ typedef struct mizu_slot_hdr_s {
 
 MIZU_STATIC_ASSERT(sizeof(mizu_slot_hdr) == 16, "mizu_slot_hdr is the wire format");
 
-/** Wire type tags, fixed by the wire format (RAWVEC aux, MIZU* layout
-   headers). Bindings map their own element types onto these. The numbers
-   are libmizu-owned and frozen from the first release: they descend from
-   R's SEXPTYPE space by history, never by dependency — a future SEXPTYPE
-   joins the wire only by an explicit allocation here, as INT64 = 32
-   already did. */
+/** Wire type tags, fixed by the wire format (RAWVEC aux, MIZU* layout headers).
+   Bindings map their own element types onto these. The numbers are
+   libmizu-owned and frozen from the first release: they descend from R's
+   SEXPTYPE space by history, not by dependency, and a future SEXPTYPE joins the
+   wire only by an explicit allocation here, as INT64 = 32 already did. */
 typedef enum mizu_type_e {
   MIZU_TYPE_LGL = 10,         /**< int32 logical; INT_MIN is the missing sentinel */
   MIZU_TYPE_INT = 13,         /**< int32; INT_MIN is the missing sentinel */
@@ -337,62 +332,59 @@ MIZU_API size_t mizu_type_elt_size(int type);
 
 /** Region magics (first 4 bytes): atomic vector, string vector, list tree.
    Every layout opens with a 64-byte header; bytes [24-63] were reserved
-   (written zero) — the zc protocol owns [24-31], and the two words below
-   are now assigned: the format flags word and the validity section.
+   (written zero). The zc protocol owns [24-31], and the two words below are now
+   assigned: the format flags word and the validity section.
 
-   Header bytes [32-35] are the format flags word. Bit 0 is the S4 object
-   bit, which the layouts otherwise cannot carry; every other bit is
-   reserved zero. This is a format word, not a negotiation word: a reader
-   rejects a set bit it does not know as a corrupt or newer region (the
-   identity word's reserved bits are the opposite — ignored). */
+   Header bytes [32-35] are the format flags word. Bit 0 is the S4 object bit,
+   which the layouts otherwise cannot carry; every other bit is reserved zero.
+   This is a format word, not a negotiation word: a reader rejects a set bit it
+   does not know as a corrupt or newer region (the identity word's reserved bits
+   are the opposite: ignored). */
 #define MIZU_HDR_FLAGS_OFF ((size_t) 32)
 #define MIZU_HDR_FLAG_S4   1u
 
-/** Header bytes [40-47] and [48-55] are the optional validity-bitmap
-   section of every MIZH and MIZL header (nested MIZL included; MIZS
-   carries its bitmap in the string block instead): an i64 offset and an
-   i64 null count, three states. {0, 0}: absent — a pre-section region,
-   the core's flat reserve, or a same-language write; the reader's lazy
-   fallback. {0, -1}: known-NA-free (no section materialized). Else the
-   offset of a 64-byte-aligned section: for MIZH a ceil(n / 8)-byte
-   LSB-first bitmap (1 = present, the MIZS string block's convention);
-   for MIZL a table of n {i64 offset, i64 null count} leaf entries, one
-   per directory entry — a VECSXP or STRSXP entry's pair is {0, 0} (the
-   nested header / the string block carries its own), and [48-55] is the
-   total null count across that header's remaining leaves. Reserved-zero
-   means absent, so a pre-dating reader never looks; the section
-   needs no capability bit. When the pair is not {0, 0} the section is the
-   authoritative null record: the in-band sentinels are the null-slot fill,
-   and a writer emitting a section writes the wire type's sentinel at every
-   clear bit (DESIGN.md's validity-as-data rules are normative). */
+/** Header bytes [40-47] and [48-55] are the optional validity-bitmap section of
+   every MIZH and MIZL header (nested MIZL included; MIZS carries its bitmap in
+   the string block instead): an i64 offset and an i64 null count, three states.
+   {0, 0}: absent (a pre-section region, the core's flat reserve, or a
+   same-language write), the reader's lazy fallback. {0, -1}: known-NA-free (no
+   section materialized). Else the offset of a 64-byte-aligned section: for MIZH
+   a ceil(n / 8)-byte LSB-first bitmap (1 = present, the MIZS string block's
+   convention); for MIZL a table of n {i64 offset, i64 null count} leaf entries,
+   one per directory entry; a VECSXP or STRSXP entry's pair is {0, 0} (the
+   nested header / the string block carries its own), and [48-55] is the total
+   null count across that header's remaining leaves. Reserved-zero means absent,
+   so a pre-dating reader never looks; the section needs no capability bit. When
+   the pair is not {0, 0} the section is the authoritative null record: the
+   in-band sentinels are the null-slot fill, and a writer emitting a section
+   writes the wire type's sentinel at every clear bit (DESIGN.md's
+   validity-as-data rules are normative). */
 #define MIZU_HDR_VALID_OFF   ((size_t) 40)
 #define MIZU_HDR_VALID_COUNT ((size_t) 48)
 
-/** MIZH (atomic vector): [4-7] i32 wire type, [8-15] i64 element count,
-   [16-23] i64 attrs blob size; bare element bytes at 64, the attrs blob
-   trailing. MIZS (string vector): [4-7] i32 attrs blob size, [8-15] i64
-   string count, [16-23] i64 string-block byte size; the string block at
-   64, the attrs blob trailing it. The string block (also the form of an
-   MIZL STRSXP leaf): a ceil(n / 8)-byte validity bitmap, (n + 1) i64
-   offsets, n encoding bytes (MIZU_CE_*), and the packed string bytes —
-   each section 64-byte aligned from the block start. The first, second
-   and fourth are Arrow large_utf8's three buffers verbatim; the encoding
-   section is R's per-CHARSXP mark. MIZL (list tree): [4-7] i32 element
-   count n, [8-15] i64 attrs blob offset, [16-23] i64 attrs blob size;
-   then n 32-byte directory entries, each { i64 data_offset (64-byte
-   aligned), i64 data_size, i32 sexptype, i32 attrs_size, i64 length }.
-   The entry's data is the bare element bytes (an atomic leaf), a string
-   block (STRSXP), a nested MIZL (VECSXP) or a serialized stream
-   (sexptype 0); the leaf's attrs blob is the last attrs_size bytes of
-   data_size. Bit 30 of the entry's sexptype is the leaf's S4 bit; the
-   remainder is a listed tag — 0 (serialized), the atomic tags, STR, VEC,
-   and 32 (MIZU_TYPE_INT64 is legal on MIZL leaves). Tag 33 is a remote
-   leaf: the column lives in another region and crosses by reference.
-   data_offset / data_size hold the identifier span — the region name,
-   optionally name[i,j,...] with 1-based decimal indices, 1-255 bytes —
-   length and attrs_size describe the referenced column as resolved, the
-   S4 bit is never set, and the validity pair is a {0,0} / {0,-1} claim
-   alone (DESIGN.md's remote-leaf rules are normative). */
+/** MIZH (atomic vector): [4-7] i32 wire type, [8-15] i64 element count, [16-23]
+   i64 attrs blob size; bare element bytes at 64, the attrs blob trailing. MIZS
+   (string vector): [4-7] i32 attrs blob size, [8-15] i64 string count, [16-23]
+   i64 string-block byte size; the string block at 64, the attrs blob trailing
+   it. The string block (also the form of an MIZL STRSXP leaf): a ceil(n /
+   8)-byte validity bitmap, (n + 1) i64 offsets, n encoding bytes (MIZU_CE_*),
+   and the packed string bytes, each section 64-byte aligned from the block
+   start. The first, second and fourth are Arrow large_utf8's three buffers
+   verbatim; the encoding section is R's per-CHARSXP mark. MIZL (list tree):
+   [4-7] i32 element count n, [8-15] i64 attrs blob offset, [16-23] i64 attrs
+   blob size; then n 32-byte directory entries, each { i64 data_offset (64-byte
+   aligned), i64 data_size, i32 sexptype, i32 attrs_size, i64 length }. The
+   entry's data is the bare element bytes (an atomic leaf), a string block
+   (STRSXP), a nested MIZL (VECSXP) or a serialized stream (sexptype 0); the
+   leaf's attrs blob is the last attrs_size bytes of data_size. Bit 30 of the
+   entry's sexptype is the leaf's S4 bit; the remainder is a listed tag: 0
+   (serialized), the atomic tags, STR, VEC, and 32 (MIZU_TYPE_INT64 is legal on
+   MIZL leaves). Tag 33 is a remote leaf: the column lives in another region and
+   crosses by reference. data_offset / data_size hold the identifier span (the
+   region name, optionally name[i,j,...] with 1-based decimal indices, 1-255
+   bytes); length and attrs_size describe the referenced column as resolved, the
+   S4 bit is never set, and the validity pair is a {0,0} / {0,-1} claim alone
+   (DESIGN.md's remote-leaf rules are normative). */
 #define MIZU_MIZL_S4 0x40000000
 
 #define MIZU_MAGIC_VEC   0x4D495A48u  /**< "MIZH" */
@@ -420,22 +412,22 @@ typedef struct mizu_pool_hdr_s {
   uint64_t owner_pid;        /**< the workers' death-listener watch target */
   uint64_t livedir_offset;
   uint64_t livedir_size;
-  /** The workers' identity word (MIZU_IDENT in mizu_ext.h): 0 until the
-     first worker join CASes its binding's word in; a join whose word
-     differs fails, an exact match proceeds. Set for the pool's lifetime —
-     never reset, so homogeneity is per pool, not per worker generation.
-     The one field written after create: read it through the mapping,
-     never the validated handle copy, which is stale the moment it lands. */
+  /** The workers' identity word (MIZU_IDENT in mizu_ext.h): 0 until the first
+     worker join CASes its binding's word in; a join whose word differs fails,
+     an exact match proceeds. Set for the pool's lifetime and never reset, so
+     homogeneity is per pool, not per worker generation. The one field written
+     after create: read it through the mapping, never the validated handle copy,
+     which is stale the moment it lands. */
   MIZU_ATOMIC(uint64_t) worker_ident;
 } mizu_pool_hdr;
 
 MIZU_STATIC_ASSERT(sizeof(mizu_pool_hdr) == 64, "mizu_pool_hdr is the wire format");
 
-/** Worker registry slot: two 128-byte spans — admin + owner-written fields
-   on the first, the thief-CAS'd deque_top apart on the second, so no span
-   carries two processes' stores. in_flight_rs/_seq are announced before
-   any claim and read only post-mortem by a reaper serialized by the
-   liveness lock. */
+/** Worker registry slot: two 128-byte spans, with the admin and owner-written
+   fields on the first and the thief-CAS'd deque_top apart on the second, so no
+   span carries two processes' stores. in_flight_rs/_seq are announced before
+   any claim and read only post-mortem by a reaper serialized by the liveness
+   lock. */
 typedef struct mizu_wk_slot_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_WK_* */
   int32_t          id;
@@ -463,9 +455,9 @@ typedef struct mizu_wk_slot_s {
 
 MIZU_STATIC_ASSERT(sizeof(mizu_wk_slot) == 256, "mizu_wk_slot is the wire format");
 
-/** Submitter registry slot: one 128-byte span per submitter — stat_spills
-   is a per-checkout RMW and notify the publishers' clear, so adjacent
-   submitters must not share one. */
+/** Submitter registry slot: one 128-byte span per submitter. stat_spills is a
+   per-checkout RMW and notify the publishers' clear, so adjacent submitters
+   must not share one. */
 typedef struct mizu_sub_slot_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_SUB_* */
   MIZU_ATOMIC(uint32_t) park_epoch;
@@ -528,23 +520,22 @@ typedef enum mizu_wk_status_e { MIZU_WK_FREE = 0, MIZU_WK_CLAIMING, MIZU_WK_LIVE
                                MIZU_WK_LEAVING, MIZU_WK_REAPING } mizu_wk_status;
 typedef enum mizu_sub_status_e { MIZU_SUB_FREE = 0, MIZU_SUB_LIVE,
                                 MIZU_SUB_REAPING } mizu_sub_status;
-/** DIED is the reaper's terminal: status-word only, no payload — a reap
-   cannot write payload bytes without racing a live worker's concurrent
-   publish. The "worker died" error object is built collect-side, keyed
-   off the status. LOST is the same shape without a death verdict: the
-   task's out-of-line payload vanished before it could run, so the claim
-   performs no force-reclaim of the claimant's lent regions and the
-   collect builds no claimant record. */
+/** DIED is the reaper's terminal: status-word only, no payload, since a reap
+   cannot write payload bytes without racing a live worker's concurrent publish.
+   The "worker died" error object is built collect-side, keyed off the status.
+   LOST is the same shape without a death verdict: the task's out-of-line
+   payload vanished before it could run, so the claim performs no force-reclaim
+   of the claimant's lent regions and the collect builds no claimant record. */
 typedef enum mizu_rs_status_e { MIZU_RS_FREE = 0, MIZU_RS_PENDING, MIZU_RS_OK,
                                MIZU_RS_ERR, MIZU_RS_CANCEL,
                                MIZU_RS_DIED, MIZU_RS_LOST } mizu_rs_status;
 typedef enum mizu_park_state_e { MIZU_WPK_RUNNING = 0, MIZU_WPK_IDLE,
                                 MIZU_WPK_PARKED, MIZU_WPK_WAKING } mizu_park_state;
 
-/** Injection ring metadata (256 B), tier words (256 B) and control block
-   (384 B): unrelated hot words, one 128-byte span each — tail and head,
-   inj_ready and full_waiters, shutdown and the park/help words are written
-   by different processes. */
+/** Injection ring metadata (256 B), tier words (256 B) and control block (384
+   B): unrelated hot words, one 128-byte span each, since tail and head,
+   inj_ready and full_waiters, shutdown and the park/help words are written by
+   different processes. */
 #define MIZU_INJ_META_SIZE     ((size_t) 256)
 #define MIZU_INJ_TAIL_OFF      ((size_t) 0)
 #define MIZU_INJ_HEAD_OFF      ((size_t) 128)
@@ -564,18 +555,17 @@ MIZU_STATIC_ASSERT(MIZU_INJ_HEAD_OFF % 128 == 0 &&
 
 // Regions (mizu_shm) ----------------------------------------------------------------
 
-/** Heap-only (the stack form stays internal). create pre-faults on
-   Linux. open maps read-only; open_rw maps writable (populate
-   pre-faults); open_view is the zc consumer open: page 0 RW (the
-   refcount word), the rest read-only — and performs the zc counted add
-   itself, so a binding cannot hold a view mapping without the count.
-   open_view_flags is the flags form: MIZU_OPEN_VIEW_NOCOUNT skips the
-   counted add — the caller then owns the mizu_zc_ref timing and must
-   complete it before its consumer-done signal (a binding whose wrap can
-   fail between map and count opens first and counts at wrap).
-   close unmaps and frees the handle; unlink != 0 also removes the name.
-   On failure these return MIZU_ERR with the category in the thread-local
-   error slot. addr/size/name are borrowed reads, valid until close. */
+/** Heap-only (the stack form stays internal). create pre-faults on Linux. open
+   maps read-only; open_rw maps writable (populate pre-faults); open_view is the
+   zc consumer open: page 0 RW (the refcount word), the rest read-only. It
+   performs the zc counted add itself, so a binding cannot hold a view mapping
+   without the count. open_view_flags is the flags form: MIZU_OPEN_VIEW_NOCOUNT
+   skips the counted add, and the caller then owns the mizu_zc_ref timing and
+   must complete it before its consumer-done signal (a binding whose wrap can
+   fail between map and count opens first and counts at wrap). close unmaps and
+   frees the handle; unlink != 0 also removes the name. On failure these return
+   MIZU_ERR with the category in the thread-local error slot. addr/size/name are
+   borrowed reads, valid until close. */
 #define MIZU_OPEN_VIEW_NOCOUNT 1u /**< caller performs the counted add itself */
 MIZU_API mizu_status mizu_shm_create(mizu_shm **out, size_t size);
 MIZU_API mizu_status mizu_shm_open(mizu_shm **out, const char *name);
@@ -589,10 +579,10 @@ MIZU_API void *mizu_shm_addr(mizu_shm *);
 MIZU_API size_t mizu_shm_size(const mizu_shm *);
 MIZU_API const char *mizu_shm_name(const mizu_shm *);
 
-/** Reap /mizu_ orphans of dead creators. Returns a malloc'd array of
-   malloc'd names (free each, then the array), *n the count; NULL when
-   none — including on platforms that cannot enumerate the shm namespace
-   (Windows, where a mapping cannot outlive its creator). */
+/** Reap /mizu_ orphans of dead creators. Returns a malloc'd array of malloc'd
+   names (free each, then the array), *n the count; NULL when none, including on
+   platforms that cannot enumerate the shm namespace (Windows, where a mapping
+   cannot outlive its creator). */
 MIZU_API char **mizu_shm_reap(int *n);
 
 /** The consumer side of the zc refcount protocol (header bytes [24-31] of
@@ -639,37 +629,34 @@ MIZU_API mizu_status mizu_channel_token(const mizu_channel *,
                                      char *buf, size_t cap);
 MIZU_API mizu_status mizu_channel_attach(mizu_channel **out, const char *token,
                                       const mizu_binding *);
-/** The peer bootstrap payload staged at create (the preamble's drop):
-   borrowed bytes, valid until destroy. The peer's binding must consume
-   them (for example, unserialize the expression) before ready_set —
-   the host holds everything they reference alive exactly until ready. */
+/** The peer bootstrap payload staged at create (the preamble's drop): borrowed
+   bytes, valid until destroy. The peer's binding must consume them (for
+   example, unserialize the expression) before ready_set, since the host holds
+   everything they reference alive only until ready. */
 MIZU_API void mizu_channel_drop(const mizu_channel *, const uint8_t **bytes,
                               uint64_t *n);
 MIZU_API mizu_status mizu_channel_ready_set(mizu_channel *);
 MIZU_API mizu_status mizu_channel_ready_wait(mizu_channel *, double timeout_ms);
 
-/** send stages obj with the binding's stage_fn: MIZU_OK, MIZU_FULL (ring
-   full — sends never block for ring space; retry or drop is the
-   caller's), MIZU_CLOSED, MIZU_PEER_GONE. send_batch moves up to n objects
-   in one batched tail store and sets *accepted_out — short of n when the
-   ring filled or the channel closed midway (still MIZU_OK; send the next
-   element singly to learn which).
-   recv hands back the read_fn's product in *obj_out: MIZU_OK, MIZU_TIMEOUT,
-   MIZU_CLOSED, MIZU_PEER_GONE. A terminal state is reported only once the
-   ring is drained — the published messages of a closed or dead peer are
-   complete and valid — and MIZU_PEER_GONE is sticky once returned.
-   recv_batch waits for the first message exactly like recv (*n_out is 0
-   on a terminal status), then drains up to cap already-published
-   messages without waiting further. A batch returns every message it
-   consumed: a read failure on the first message returns MIZU_ERR as
-   recv does, but a failure after it ends the batch early with MIZU_OK
-   and the messages read so far. The failing slot stays at the head, so
-   the next receive reproduces the failure exactly (and consumes the
-   slot if the binding marks it MIZU_READ_CONSUME). MIZU_READ_CONSUME
-   is honoured on a single receive and on a batch's first message
-   only; past that the consume decision defers to the next receive.
-   Callbacks run on the calling thread; the wait parks on the caller's
-   entity. */
+/** send stages obj with the binding's stage_fn: MIZU_OK, MIZU_FULL (ring full;
+   sends never block for ring space, so retry or drop is the caller's choice),
+   MIZU_CLOSED, MIZU_PEER_GONE. send_batch moves up to n objects in one batched
+   tail store and sets *accepted_out, short of n when the ring filled or the
+   channel closed midway (still MIZU_OK; send the next element singly to learn
+   which). recv hands back the read_fn's product in *obj_out: MIZU_OK,
+   MIZU_TIMEOUT, MIZU_CLOSED, MIZU_PEER_GONE. A terminal state is reported only
+   once the ring is drained (the published messages of a closed or dead peer are
+   complete and valid), and MIZU_PEER_GONE is sticky once returned. recv_batch
+   waits for the first message exactly like recv (*n_out is 0 on a terminal
+   status), then drains up to cap already-published messages without waiting
+   further. A batch returns every message it consumed: a read failure on the
+   first message returns MIZU_ERR as recv does, but a failure after it ends the
+   batch early with MIZU_OK and the messages read so far. The failing slot stays
+   at the head, so the next receive reproduces the failure exactly (and consumes
+   the slot if the binding marks it MIZU_READ_CONSUME). MIZU_READ_CONSUME is
+   honoured on a single receive and on a batch's first message only; past that
+   the consume decision defers to the next receive. Callbacks run on the calling
+   thread; the wait parks on the caller's entity. */
 MIZU_API mizu_status mizu_channel_send(mizu_channel *, void *obj);
 MIZU_API mizu_status mizu_channel_send_batch(mizu_channel *, void **objs,
                                           size_t n, size_t *accepted_out);
@@ -679,56 +666,52 @@ MIZU_API mizu_status mizu_channel_recv_batch(mizu_channel *, void **objs,
                                           size_t cap, size_t *n_out,
                                           double timeout_ms);
 
-/** The sink-callback form of recv_batch: each message is handed to sink
-   as it is read, so a binding can anchor every object (a GC protect, a
-   refcount) before the next read allocates — the array form forces a
-   binding to hold n unanchored products across the remaining reads.
-   Same wait and status discipline as recv_batch (which is a thin
-   adapter over this). */
+/** The sink-callback form of recv_batch: each message is handed to sink as it
+   is read, so a binding can anchor every object (a GC protect, a refcount)
+   before the next read allocates; the array form would force a binding to hold
+   n unanchored products across the remaining reads. Same wait and status
+   discipline as recv_batch (which is a thin adapter over this). */
 typedef void (*mizu_obj_sink)(void *ctx, size_t i, void *obj);
 MIZU_API mizu_status mizu_channel_recv_batch_fn(mizu_channel *, size_t cap,
                                              size_t *n_out, mizu_obj_sink,
                                              void *ctx, double timeout_ms);
 
-/** close signals this side's close bit, then waits up to timeout_ms for
-   the peer's close bit or its death — the rendezvous that makes it safe
-   to release the sent-payload pins, since the peer sets its bit only
-   after draining. MIZU_OK: rendezvoused, resources released, the region
-   unlinked, and the handle dead (destroy is a no-op after). MIZU_TIMEOUT:
-   the handle stays usable and the rendezvous is retried at destroy.
-   Idempotent. close_signal only sets this side's bit (the peer half of
-   the protocol). After either side signals, sends on both sides return
-   MIZU_CLOSED and receives drain before reporting it.
-   alive is the peer-liveness verdict (lock probe, not the listener
-   flag); a peer that closed but still runs reads as alive.
-   destroy is the GC-finalizer target: idempotent, never blocks; on a
-   handle that never rendezvoused it signals close and releases what the
-   (non-blocking) rendezvous check completes — the death verdict and
-   mizu_shm_reap backstop the rest.
-   Handles are process-private and do not survive fork(): verbs on an
-   inherited handle fail MIZU_ERR; alive, peer_ident, and drop answer
-   empty. destroy on an inherited handle is a contract violation —
-   teardown belongs to the creating process; abandon is the inherited
-   handle's verb. */
+/** close signals this side's close bit, then waits up to timeout_ms for the
+   peer's close bit or its death. That rendezvous is what makes it safe to
+   release the sent-payload pins, since the peer sets its bit only after
+   draining. MIZU_OK: rendezvoused, resources released, the region unlinked, and
+   the handle dead (destroy is a no-op after). MIZU_TIMEOUT: the handle stays
+   usable and the rendezvous is retried at destroy. Idempotent. close_signal
+   only sets this side's bit (the peer half of the protocol). After either side
+   signals, sends on both sides return MIZU_CLOSED and receives drain before
+   reporting it. alive is the peer-liveness verdict (lock probe, not the
+   listener flag); a peer that closed but still runs reads as alive. destroy is
+   the GC-finalizer target: idempotent, never blocks; on a handle that never
+   rendezvoused it signals close and releases what the (non-blocking) rendezvous
+   check completes; the death verdict and mizu_shm_reap backstop the rest.
+   Handles are process-private and do not survive fork(): verbs on an inherited
+   handle fail MIZU_ERR; alive, peer_ident, and drop answer empty. destroy on an
+   inherited handle is a contract violation, since teardown belongs to the
+   creating process; abandon is the inherited handle's verb. */
 MIZU_API mizu_status mizu_channel_close(mizu_channel *, double timeout_ms);
 MIZU_API mizu_status mizu_channel_close_signal(mizu_channel *);
 /** Logically a read; the probe can run survivor cleanup internally. */
 MIZU_API int mizu_channel_alive(const mizu_channel *);
 /** Signal close and release the handle: the close bit is set and the peer
-   woken, then — while the peer is alive — the teardown waits (bounded; a
-   peer death confirmed by the liveness verdict ends it early) for the
-   peer to drain in-flight payloads before any payload region is
-   unlinked, so a producer exiting right after publishing never strands a
-   live consumer's read with a dangling region name. Blocks at most the
-   drain bound; frees the handle, and the pointer is dead on return. */
+   woken, then, while the peer is alive, the teardown waits (bounded; a peer
+   death confirmed by the liveness verdict ends it early) for the peer to drain
+   in-flight payloads before any payload region is unlinked, so a producer
+   exiting right after publishing never strands a live consumer's read with a
+   dangling region name. Blocks at most the drain bound; frees the handle, and
+   the pointer is dead on return. */
 MIZU_API void mizu_channel_destroy(mizu_channel *);
 /** The forked-child teardown: releases only the process-local half of an
-   inherited handle — the child's copies of the mapping and fds and its
-   heap — writing no cross-process word (no close signal, no unlink, no
-   parker or refcount change), so the creating process's handle and the
-   wire state are untouched. Never blocks; as destroy, it frees the
-   handle and the pointer is dead on return. In the owning process
-   abandon is a contract violation (destroy is the verb). */
+   inherited handle (the child's copies of the mapping and fds and its heap),
+   writing no cross-process word (no close signal, no unlink, no parker or
+   refcount change), so the creating process's handle and the wire state are
+   untouched. Never blocks; as destroy, it frees the handle and the pointer is
+   dead on return. In the owning process abandon is a contract violation
+   (destroy is the verb). */
 MIZU_API void mizu_channel_abandon(mizu_channel *);
 
 /** Handle-local + wire-state snapshot. name is borrowed. Counters are
@@ -773,12 +756,12 @@ typedef struct mizu_pool_opts_s {
 
 MIZU_API void mizu_pool_opts_init(mizu_pool_opts *);
 
-/** A task handle: an 8-byte value identifying one result slot at one
-   sequence — 40-bit sequence in the low bits, 24-bit result-slot index
-   in the high (result_slots is capped at 2^24 at create). Core-filled
-   at submit; bindings store and pass back by pointer. The 8-byte size
-   lets a binding pack the whole handle into an external-pointer address
-   (zero heap traffic per task). All-zero is the invalid value. */
+/** A task handle: an 8-byte value identifying one result slot at one sequence,
+   with a 40-bit sequence in the low bits and a 24-bit result-slot index in the
+   high (result_slots is capped at 2^24 at create). Core-filled at submit;
+   bindings store and pass back by pointer. The 8-byte size lets a binding pack
+   the whole handle into an external-pointer address (zero heap traffic per
+   task). All-zero is the invalid value. */
 typedef struct mizu_task_s {
   uint64_t word;
 } mizu_task;
@@ -807,10 +790,10 @@ MIZU_API mizu_status mizu_pool_token(const mizu_pool *, char *buf, size_t cap);
 MIZU_API mizu_status mizu_pool_ready_wait(mizu_pool *, const uint32_t *slots,
                                        size_t n, double timeout_ms);
 MIZU_API void mizu_pool_destroy(mizu_pool *);
-/** The forked-child teardown: as mizu_channel_abandon — the child's
-   copies of the mapping and fds plus its heap, no cross-process word
-   (no shutdown broadcast, no slot release, no parker or refcount
-   change). In the owning process destroy is the verb. */
+/** The forked-child teardown: as mizu_channel_abandon, it releases the child's
+   copies of the mapping and fds plus its heap, and writes no cross-process word
+   (no shutdown broadcast, no slot release, no parker or refcount change). In
+   the owning process destroy is the verb. */
 MIZU_API void mizu_pool_abandon(mizu_pool *);
 
 /** Submitter side: attach joins a live pool from another process,
@@ -819,23 +802,21 @@ MIZU_API void mizu_pool_abandon(mizu_pool *);
 MIZU_API mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
                                    const mizu_binding *);
 
-/** Worker side: join attaches to token as worker `slot` (liveness lock
-   before the status CAS; the binding's exec_fn is registered at
-   join). run is the worker loop shell —
-   claims/steals tasks and invokes exec_fn on this thread — blocking
-   until it returns an exit reason. A nonzero exec_fn return is an
-   infrastructure failure and takes the worker down (MIZU_EXIT_ERROR); a
-   task's own error never reaches run — exec_fn flattens and publishes
-   it through the sink. A retired worker (MIZU_EXIT_RETIRED) lingers as
-   the lifetime anchor for its uncollected results: the binding loops
-   lame_duck on a plain sleep (no unpark can reach a released slot)
-   until it returns nonzero — shutdown or owner death ends the linger;
-   a probe on a handle of any other role returns nonzero without touching
-   it.
-   leave is the clean-exit handshake: an announced in-flight claim (an
-   exec_fn escape left unpublished) fails as DIED there, so an orderly
-   leave after an infrastructure failure never strands a task — the
-   collector's worker-death verdict, no reaper required. */
+/** Worker side: join attaches to token as worker `slot` (liveness lock before
+   the status CAS; the binding's exec_fn is registered at join). run is the
+   worker loop shell: it claims or steals tasks and invokes exec_fn on this
+   thread, blocking until it returns an exit reason. A nonzero exec_fn return is
+   an infrastructure failure and takes the worker down (MIZU_EXIT_ERROR); a
+   task's own error never reaches run, because exec_fn flattens and publishes it
+   through the sink. A retired worker (MIZU_EXIT_RETIRED) lingers as the
+   lifetime anchor for its uncollected results: the binding loops lame_duck on a
+   plain sleep (no unpark can reach a released slot) until it returns nonzero
+   (shutdown or owner death ends the linger); a probe on a handle of any other
+   role returns nonzero without touching it. leave is the clean-exit handshake:
+   an announced in-flight claim (an exec_fn escape left unpublished) fails as
+   DIED there, so an orderly leave after an infrastructure failure never strands
+   a task. The collector sees the worker-death verdict, with no reaper required.
+   */
 typedef enum mizu_worker_exit_e { MIZU_EXIT_SHUTDOWN = 0,
                                  MIZU_EXIT_OWNER_GONE,
                                  MIZU_EXIT_RETIRED,
@@ -847,18 +828,18 @@ MIZU_API mizu_worker_exit mizu_pool_worker_run(mizu_pool *);
 MIZU_API int mizu_pool_lame_duck(mizu_pool *);
 MIZU_API mizu_status mizu_pool_leave(mizu_pool *);
 
-/** Controller only: ask one worker to exit cleanly — non-blocking, never
-   preemptive; the worker observes between tasks and releases its slot,
-   and the remaining workers consume its queued work in place. */
+/** Controller only: ask one worker to exit cleanly. Non-blocking and never
+   preemptive: the worker observes between tasks and releases its slot, and the
+   remaining workers consume its queued work in place. */
 MIZU_API mizu_status mizu_pool_retire(mizu_pool *, uint32_t slot);
 
 /** One claim at a time, for deterministic in-process harnesses (the
    pool_pair/pool_step discipline). Returns MIZU_STEP_TASK after a task,
-   MIZU_STEP_IDLE on timeout, MIZU_STEP_SHUTDOWN on shutdown or owner
-   death, MIZU_STEP_RETIRED on a retire request. An exec_fn infrastructure
-   failure (its nonzero return) or an interrupt abandon records the error
-   on the handle and returns MIZU_STEP_SHUTDOWN — the worker cannot
-   continue; mizu_pool_errcat distinguishes it from a real shutdown. */
+   MIZU_STEP_IDLE on timeout, MIZU_STEP_SHUTDOWN on shutdown or owner death,
+   MIZU_STEP_RETIRED on a retire request. An exec_fn infrastructure failure (its
+   nonzero return) or an interrupt abandon records the error on the handle and
+   returns MIZU_STEP_SHUTDOWN, since the worker cannot continue;
+   mizu_pool_errcat distinguishes it from a real shutdown. */
 typedef enum mizu_step_result_e { MIZU_STEP_IDLE = 0, MIZU_STEP_TASK = 1,
                                  MIZU_STEP_SHUTDOWN = -1,
                                  MIZU_STEP_RETIRED = -2 } mizu_step_result;
@@ -892,34 +873,30 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
                                             mizu_task *out, size_t *n_out,
                                             double timeout_ms);
 
-/** collect waits for the task's terminal state and sets *value_out to
-   the read_fn's product — including for non-OK outcomes, where
-   ctx.outcome (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED /
-   MIZU_RS_LOST) lets the
-   read_fn build the binding's error object (a binding re-raises it: the task's
-   own condition, the cancellation, or the worker-death error).
-   MIZU_TIMEOUT consumes nothing. A task is collected exactly once: the
-   slot is released as the value is produced. Valid on worker handles
-   too — a nested collect helps (executes/steals) instead of sleeping,
-   so exec_fn reenters from inside collect; on submitter handles
-   (exec == NULL) the wait parks. (A binding's collect may omit
-   the pool argument: its task handle carries the pool reference.)
-   collect_any returns the first terminal handle (*index_out, 0-based;
-   ties among already-terminal handles break to the earliest position);
-   the reported handle is consumed, the rest stay collectible.
-   collect_all fills values_out in input order once every task is
-   terminal. On the first non-OK outcome by position it reports that
-   handle only: *err_index_out is its index, the reported handle is
-   consumed (its error object rides read_fn like any value into
-   values_out[err]), and every other handle — the OK results ahead of
-   it included — stays collectible. *err_index_out == n means all OK.
-   A read failure after an all-OK wait returns MIZU_ERR with
-   *err_index_out the failing slot's index (unconsumed when retryable)
-   and *consumed_out the number of leading results already handed to
-   the sink / written to values_out — the consumed prefix, for the
-   binding to return or attach; every handle past the prefix stays
-   collectible. *consumed_out is n on a fully collected run, 0 when the
-   run reported a non-OK outcome. MIZU_TIMEOUT consumes nothing: every
+/** collect waits for the task's terminal state and sets *value_out to the
+   read_fn's product, including for non-OK outcomes, where ctx.outcome
+   (MIZU_RS_ERR / MIZU_RS_CANCEL / MIZU_RS_DIED / MIZU_RS_LOST) lets the read_fn
+   build the binding's error object (a binding re-raises it: the task's own
+   condition, the cancellation, or the worker-death error). MIZU_TIMEOUT
+   consumes nothing. A task is collected exactly once: the slot is released as
+   the value is produced. Valid on worker handles too: a nested collect helps
+   (executes/steals) instead of sleeping, so exec_fn reenters from inside
+   collect; on submitter handles (exec == NULL) the wait parks. (A binding's
+   collect may omit the pool argument: its task handle carries the pool
+   reference.) collect_any returns the first terminal handle (*index_out,
+   0-based; ties among already-terminal handles break to the earliest position);
+   the reported handle is consumed, the rest stay collectible. collect_all fills
+   values_out in input order once every task is terminal. On the first non-OK
+   outcome by position it reports that handle only: *err_index_out is its index,
+   the reported handle is consumed (its error object rides read_fn like any
+   value into values_out[err]), and every other handle, the OK results ahead of
+   it included, stays collectible. *err_index_out == n means all OK. A read
+   failure after an all-OK wait returns MIZU_ERR with *err_index_out the failing
+   slot's index (unconsumed when retryable) and *consumed_out the number of
+   leading results already handed to the sink / written to values_out (the
+   consumed prefix, for the binding to return or attach); every handle past the
+   prefix stays collectible. *consumed_out is n on a fully collected run, 0 when
+   the run reported a non-OK outcome. MIZU_TIMEOUT consumes nothing: every
    handle stays valid. */
 MIZU_API mizu_status mizu_pool_collect(mizu_pool *, const mizu_task *,
                                     void **value_out, double timeout_ms);
@@ -946,9 +923,9 @@ MIZU_API mizu_status mizu_pool_collect_all_fn(mizu_pool *, const mizu_task *,
 
 /** Task lifecycle trace hook: per-handle, per-process; NULL removes.
    Worker-side events fire on the worker thread, MIZU_TRACE_SUBMIT on the
-   calling thread. A hook error is an infrastructure failure at its site
-   (on a worker, it takes the worker down) — unlike a task's own error,
-   which is that task's ERR result. */
+   calling thread. A hook error is an infrastructure failure at its site (on a
+   worker, it takes the worker down), unlike a task's own error, which is that
+   task's ERR result. */
 typedef enum mizu_trace_event_e { MIZU_TRACE_SUBMIT = 0, MIZU_TRACE_START,
                                  MIZU_TRACE_DONE, MIZU_TRACE_ERROR,
                                  MIZU_TRACE_DROP,
@@ -957,18 +934,17 @@ typedef void (*mizu_trace_fn)(mizu_trace_event event, uint64_t task_id,
                              void *ctx);
 MIZU_API mizu_status mizu_pool_set_trace(mizu_pool *, mizu_trace_fn, void *ctx);
 
-/** Advisory and discard-only, never preemptive: a still-queued task is
-   skipped; an executing one runs to completion and its result is
-   dropped. Returns 1 when this call cancelled the task, 0 when too
-   late (completed, already cancelled, pool gone) — every edge folds
-   into 0, there is no error path. A completed slot is left collectible;
-   releasing a handle that will never be collected is
-   mizu_pool_task_release. A cancelled slot is instead consumed
-   asynchronously by the worker — its publish or claim skip moves the
-   slot CANCEL to FREE without resequencing, so a later collect of the
-   cancelled handle may report the task already collected. A drain after
-   cancel must tolerate that: mizu_pool_task_state distinguishes a
-   drained sibling from a terminal outcome ahead of the collect. */
+/** Advisory and discard-only, never preemptive: a still-queued task is skipped;
+   an executing one runs to completion and its result is dropped. Returns 1 when
+   this call cancelled the task, 0 when too late (completed, already cancelled,
+   pool gone); every edge folds into 0, and there is no error path. A completed
+   slot is left collectible; releasing a handle that will never be collected is
+   mizu_pool_task_release. A cancelled slot is instead consumed asynchronously
+   by the worker: its publish or claim skip moves the slot CANCEL to FREE
+   without resequencing, so a later collect of the cancelled handle may report
+   the task already collected. A drain after cancel must tolerate that:
+   mizu_pool_task_state distinguishes a drained sibling from a terminal outcome
+   ahead of the collect. */
 MIZU_API int mizu_pool_cancel(mizu_pool *, const mizu_task *);
 /** The finalizer release for a task handle that was never collected: a
    still-pending task is cancelled (as mizu_pool_cancel); a completed
@@ -988,12 +964,12 @@ MIZU_API int mizu_pool_task_state(mizu_pool *, const mizu_task *);
    shutdown the same way, without the wait. */
 MIZU_API mizu_status mizu_pool_stop(mizu_pool *, double timeout_ms);
 
-/** Snapshots. info reads shm-resident wire state; dump adds
-   handle-local counters (free list, open caches, collect parks) — the
-   cold-path introspection API behind a binding's dump output.
-   Per-slot arrays are indexed by slot; only the first n_workers /
-   n_submitters entries are valid. The per-slot worker states are what a
-   resize scans for free slots. All borrowed; valid until the next call. */
+/** Snapshots. info reads shm-resident wire state; dump adds handle-local
+   counters (free list, open caches, collect parks), the cold-path introspection
+   API behind a binding's dump output. Per-slot arrays are indexed by slot; only
+   the first n_workers / n_submitters entries are valid. The per-slot worker
+   states are what a resize scans for free slots. All borrowed; valid until the
+   next call. */
 typedef struct mizu_pool_info_s {
   uint32_t size;
   const char *name;
@@ -1059,10 +1035,10 @@ typedef struct mizu_rs_row_s {
 MIZU_API mizu_status mizu_pool_info_get(const mizu_pool *,
                                      mizu_pool_info *out);
 MIZU_API mizu_status mizu_pool_dump_get(const mizu_pool *, mizu_pool_dump *out);
-/** The dump's task table, paged by the caller: fills up to cap rows in
-   slot order (non-FREE slots only) and sets *n_out to the total non-FREE
-   count, so a short buffer is answered by a second call with a bigger
-   one. States can move mid-fill — a cold-path snapshot, like dump. */
+/** The dump's task table, paged by the caller: fills up to cap rows in slot
+   order (non-FREE slots only) and sets *n_out to the total non-FREE count, so a
+   short buffer is answered by a second call with a bigger one. States can move
+   mid-fill; this is a cold-path snapshot, like dump. */
 MIZU_API mizu_status mizu_pool_tasks_get(const mizu_pool *, mizu_rs_row *out,
                                       uint32_t cap, uint32_t *n_out);
 
