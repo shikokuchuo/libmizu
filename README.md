@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shikokuchuo/libmizu/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-api-blue.svg)](https://shikokuchuo.net/libmizu/)
 
 Lock-free shared memory IPC at thread speed in C11.
@@ -157,7 +157,7 @@ tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the repository layout and contributor notes.
+See [CONTRIBUTING.md](https://github.com/shikokuchuo/libmizu/blob/main/CONTRIBUTING.md) for the repository layout and contributor notes.
 
 ## License
 
