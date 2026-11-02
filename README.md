@@ -9,9 +9,9 @@
 
 Lock-free shared memory IPC at thread speed in C11.
 
-libmizu is for runtimes that parallelize with processes rather than threads. Round trips drop from tens of microseconds over sockets to < 1 µs, fast enough to divide work at thread granularity (see [Performance](#performance)).
+libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to < 1 µs, so you can divide work as finely as you would with threads (see [Performance](#performance)).
 
-Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting with the hot path bypassing the kernel, and peer death delivered as an OS event.
+Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting that stays out of the kernel on the hot path, and OS notification when a peer dies.
 
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R and [pymizu](https://github.com/shikokuchuo/pymizu) for Python.
@@ -19,9 +19,9 @@ The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R a
 
 - Lock-free SPSC rings and work-stealing deques over shared memory
 - Bounded, microsecond-latency waiting: futex, `__ulock`, or `WaitOnAddress` per platform
-- Event-driven wakeups: edge-triggered notify endpoints signaled on the publish path, with no polling threads
-- Peer crashes detected at OS notification latency — kernel-released locks, no heartbeats or polling
-- Crash-atomic claims (copy-then-CAS): a dead peer never wedges a queue
+- Event-driven wakeups: edge-triggered notify endpoints signaled by the publisher; no polling threads
+- Peer death detected by OS notification and confirmed by a kernel-released lock; no heartbeats or polling
+- Crash-atomic claims (copy-then-CAS): a dead peer never leaves a queue stuck
 - FFI-safe ABI: opaque handles, exported functions only, `mizu_status` sentinels on hot paths
 - C11, 64-bit: Linux, macOS, and Windows
 
@@ -41,7 +41,7 @@ Representative figures from the C bench suite (`make bench`), measured on an App
 | Pool submit + collect (4 KiB payload) | 1.0 µs |
 | Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
 
-The full dated records, including parker wake latency and spill-region costs, live in [`bench/notes.md`](https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md).
+See [`bench/notes.md`](https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md) for the full dated records, including parker wake latency and spill-region costs.
 
 ## Quickstart
 
@@ -74,12 +74,14 @@ mizu_bytes *in = obj;                            /* in->data, in->len */
 mizu_bytes_free(in);
 
 mizu_channel_close(ch, 5000);                    /* up to 5 s for the peer's close */
+mizu_channel_destroy(ch);
 ```
 
 The peer fills its binding with `mizu_binding_bytes()` too and attaches with `mizu_channel_attach(&ch, token, &binding)`.
 It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
 
-To move a language's own objects rather than byte buffers, register callbacks on the binding instead, the binding-author seam covered in [Writing a binding](#writing-a-binding):
+To move a language's own objects rather than byte buffers, register callbacks on the binding.
+This is the seam that [Writing a binding](#writing-a-binding) covers:
 
 ```c
 mizu_binding binding;
@@ -90,19 +92,19 @@ binding.read  = my_read;    /* the receive-side materializer */
 
 [`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
 [`DESIGN.md`](DESIGN.md) gives the invariants.
-The rendered API reference lives at [shikokuchuo.net/libmizu](https://shikokuchuo.net/libmizu/).
+The rendered API reference is at [shikokuchuo.net/libmizu](https://shikokuchuo.net/libmizu/).
 
 ## Writing a binding
 
-A binding teaches libmizu to turn the language's values into frames and back.
+A binding tells libmizu how to turn the language's values into frames and back.
 The `stage` and `read` callbacks from the quickstart do the conversion, and `exec` runs tasks on pool workers.
 libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing.
-To start without callbacks, the built-in bytes binding, `mizu_binding_bytes()`, sends and receives byte buffers, as the quickstart shows.
+The built-in bytes binding, `mizu_binding_bytes()`, needs no callbacks and moves byte buffers, as the quickstart shows.
 
 Every operation is an exported function.
 A language with a foreign function interface can call libmizu from the shared library, with no C of its own.
 Every handle is opaque, so libmizu's internals can change without breaking the binding.
-Bindings that compile C can add the amalgamation to their own build instead: `tools/amalgamate.sh` writes `mizu.c`, `mizu.h`, and `mizu_ext.h`.
+Bindings that compile C can add the amalgamation to their own build instead, as described under [Building](#building).
 
 ## API tiers
 
@@ -111,7 +113,7 @@ The headers form two tiers:
 - **`mizu.h`** — the consumer API, stable from 1.0.
   The soname tracks its ABI.
 - **`mizu_ext.h`** — the binding-author API: the callback seam (`stage`, `read`, `exec`, ...), the stager/read/publish services, the built-in bytes binding, and promoted internals (parker, liveness, preamble, map support).
-  It is version-pinned per minor release and can change without deprecation. Binding authors rebuild (or re-vendor) per minor release.
+  It is pinned per minor release and can change without deprecation, so binding authors rebuild or re-vendor when they move to a new minor.
 
 A third header, `src/internal.h`, is private. It is never installed, and bindings never include it.
 
@@ -138,11 +140,11 @@ make install            # honors PREFIX (/usr/local) and DESTDIR;
 ```
 
 On Windows, run `tools\build-win.bat` instead.
-The script builds with clang-cl because MSVC C11 atomics are experimental, and it needs LLVM (clang-cl) and the Visual Studio C++ build tools.
+The script builds with clang-cl, since MSVC's C11 atomics are experimental, so it needs LLVM and the Visual Studio C++ build tools.
 GitHub Windows runners have both preinstalled.
 
-Static builds need no defines: `MIZU_API` is empty by default.
-This covers vendored and amalgamated builds: the first-party packages compile the sources into their own modules.
+Static builds need no defines, because `MIZU_API` is empty by default.
+That covers vendored and amalgamated builds, where the first-party packages compile the sources into their own modules.
 If you build libmizu as a shared library, define `MIZU_SHARED`.
 If you compile the library itself on Windows, also define `MIZU_BUILDING`.
 The Makefile and `build-win.bat` set these defines for you.
@@ -155,7 +157,7 @@ tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 
 ## Contributing
 
-The repository layout and contributor notes live in [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the repository layout and contributor notes.
 
 ## License
 
