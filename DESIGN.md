@@ -11,7 +11,6 @@ Each struct in `include/mizu.h` is the wire format.
 Sizes are static-asserted, and alignment is 64 bytes.
 Each shared hot word owns a full cache line, so writes from the producer and the consumer never share a line.
 The layout is fixed: growth adds capability without moving anything.
-(One exception, pre-release: the cross-language work repurposed reserved bytes, namely the channel entity blocks' identity words, the pool header's `worker_ident`, and the layout headers' flags and validity words, as recorded in the CHANGELOG; `MIZU_ABI_VERSION` stayed 1, as peers are same-build.)
 `MIZU_ABI_VERSION` gates mixed builds.
 Peers validate it at attach, before any thread reads or writes a shared atomic.
 Bump it on each wire-format change.
@@ -161,7 +160,7 @@ Three rules govern the capability bits:
   One bit per reader feature a writer must gate on.
   Features that always land together in every binding share a bit.
 - **A bit names a byte layout, not a feature.**
-  The mask is the only version gate the layouts have — `MIZU_ABI_VERSION` stays 1 while peers are same-build, and a region reached by REF sits behind no preamble at all — so an incompatible change to a layout, tag or shape a bit gates never rides the same bit.
+  The mask is the only version gate the layouts have — a region reached by REF sits behind no preamble at all — so an incompatible change to a layout, tag or shape a bit gates never rides the same bit.
   It allocates a new bit and retires the old, which is never reassigned: a peer that set the old bit against the old geometry is sent the old form or a copy, never the new bytes under the old promise.
   The MIZS re-shape (16-byte entries → the Arrow block) is the precedent: it landed before any bit existed, and would take a fresh bit today.
   From the first tagged release the ABI bump rule resumes for the preamble-gated structs, and the bit discipline is the versioning for everything the mask gates.
@@ -576,7 +575,6 @@ Staging is transactional: the writer is pure C over caller-owned memory until th
 When a MIZH or MIZL header's validity pair is not `{0, 0}`, the section it locates is the **authoritative null record** for the layout: the in-band sentinels (`NA_real_`'s NaN payload, `INT_MIN`, `INT64_MIN`) are the null-slot fill, not the record. `{0, -1}` asserts authoritatively null-free.
 The declaration is semantic, not byte-level.
 The section already exists, so it needs no capability bit: a pre-dating reader never looks, and a new reader on an absent section falls back to the sentinel scan, today's behavior in both directions.
-`MIZU_ABI_VERSION` stays 1.
 
 **The fill invariant.** A writer that emits a section writes the wire type's sentinel at every clear bit.
 The bitmap and the sentinels never disagree in the null direction, so a reader that ignores the section (R's value reads) still reads every null as NA; they may disagree only in the other direction: a *set* bit over a sentinel value is a genuine value.
@@ -593,7 +591,7 @@ The `'I'` stream has no validity section: the sentinels are its whole null recor
 Without the bit the same column takes the integer64 conversion (in range exact, the `INT64_MIN` sentinel past `INT64_MAX`, counted; the by-value tiers' `i64v` form reads identically, so no capability bit gates the fallback): one bit, one layout variant, the TSN precedent.
 Both bindings advertise the bit, so every current-version pair crosses uint64 frames verbatim; the R landing keeps the column a view (double + NA at materialization, exact at the Arrow export), which removes the sign-flip path and makes advertising safe there.
 A verbatim region relayed to a pre-cap reader splits by reader: an old pymizu declines on the unknown attr key (its attributed-column fill rejects an unmatched attrs set); an old mizu/mori applies the dict as-is and reads sign-flipped int64 with a stray attribute.
-The degradation is channel-scoped: pool worker joins CAS the whole identity word, so a pool's workers never mix versions, and the conversion runs for pre-cap channel peers and mixed-version submitters only. `MIZU_ABI_VERSION` stays 1 under the append-only cap policy.
+The degradation is channel-scoped: pool worker joins CAS the whole identity word, so a pool's workers never mix versions, and the conversion runs for pre-cap channel peers and mixed-version submitters only.
 
 A dedicated null-mask tier was considered and rejected: it duplicates the section machinery, costs a capability bit, and adds nothing.
 
