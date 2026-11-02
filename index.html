@@ -97,7 +97,7 @@ $(function(){initNavTree('index.html','',''); });
 <div class="contents">
 <div class="textblock"><p><a class="anchor" id="md_README"></a></p>
 <p><a href="https://shikokuchuo.net/libmizu/"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" alt="libmizu logo" align="right" width="240" style="pointer-events: none;" class="inline"/></a></p>
-<p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE) <a href="https://shikokuchuo.net/libmizu/"><img src="https://img.shields.io/badge/docs-api-blue.svg" alt="Docs" style="pointer-events: none;" class="inline"/></a></p>
+<p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> <a href="https://github.com/shikokuchuo/libmizu/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/></a> <a href="https://shikokuchuo.net/libmizu/"><img src="https://img.shields.io/badge/docs-api-blue.svg" alt="Docs" style="pointer-events: none;" class="inline"/></a></p>
 <p>Lock-free shared memory IPC at thread speed in C11.</p>
 <p>libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to &lt; 1 µs, so you can divide work as finely as you would with threads (see Performance).</p>
 <p>Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting that stays out of the kernel on the hot path, and OS notification when a peer dies.</p>
@@ -215,7 +215,7 @@ Building</h1>
 <div class="fragment"><div class="line">tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h</div>
 </div><!-- fragment --><h1 class="doxsection"><a class="anchor" id="autotoc_md6"></a>
 Contributing</h1>
-<p>See CONTRIBUTING.md for the repository layout and contributor notes.</p>
+<p>See <a href="https://github.com/shikokuchuo/libmizu/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> for the repository layout and contributor notes.</p>
 <h1 class="doxsection"><a class="anchor" id="autotoc_md7"></a>
 License</h1>
 <p>MIT. <span class="tt">LICENSE.note</span> has the third-party attributions (RngStreams jump matrices, vendored doxygen stylesheet). </p>
