@@ -157,7 +157,7 @@ tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the repository layout and contributor notes.
+See [CONTRIBUTING.md](https://github.com/shikokuchuo/libmizu/blob/main/CONTRIBUTING.md) for the repository layout and contributor notes.
 
 ## License
 
