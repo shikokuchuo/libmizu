@@ -96,7 +96,7 @@ $(function(){initNavTree('structmizu__morsel__span__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>Worker-death lost set: issued = [0, bound), lost = issued minus the union of the collected batch histories — a batch in no history was issued but never completed (its claimant died, or the map fn errored mid-batch); a dead runner's whole history lands here too — it publishes only at exhaustion.  
+<p>Worker-death lost set: issued = [0, bound), lost = issued minus the union of the collected batch histories.  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu__ext_8h_source.html">mizu_ext.h</a>&gt;</code></p>
@@ -109,8 +109,8 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>lo</b></td></tr>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>hi</b></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Worker-death lost set: issued = [0, bound), lost = issued minus the union of the collected batch histories — a batch in no history was issued but never completed (its claimant died, or the map fn errored mid-batch); a dead runner's whole history lands here too — it publishes only at exhaustion. </p>
-<p>spans (caller-assembled from the histories, element space, lo &lt;= hi) is sorted in place; the gaps (at most n + 1) land in out as 0-based half-open ranges; returns the gap count. </p>
+<div class="textblock"><p>Worker-death lost set: issued = [0, bound), lost = issued minus the union of the collected batch histories. </p>
+<p>A batch in no history was issued but never completed (its claimant died, or the map fn errored mid-batch), and a dead runner's whole history lands here too, since it publishes only at exhaustion. spans (caller-assembled from the histories, element space, lo &lt;= hi) is sorted in place; the gaps (at most n + 1) land in out as 0-based half-open ranges; returns the gap count. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu__ext_8h_source.html">mizu_ext.h</a></li>
 </ul>

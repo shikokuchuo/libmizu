@@ -96,7 +96,7 @@ $(function(){initNavTree('structmizu__task__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>A task handle: an 8-byte value identifying one result slot at one sequence — 40-bit sequence in the low bits, 24-bit result-slot index in the high (result_slots is capped at 2^24 at create).  
+<p>A task handle: an 8-byte value identifying one result slot at one sequence, with a 40-bit sequence in the low bits and a 24-bit result-slot index in the high (result_slots is capped at 2^24 at create).  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
@@ -107,7 +107,7 @@ Data Fields</h2></td></tr>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>word</b></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>A task handle: an 8-byte value identifying one result slot at one sequence — 40-bit sequence in the low bits, 24-bit result-slot index in the high (result_slots is capped at 2^24 at create). </p>
+<div class="textblock"><p>A task handle: an 8-byte value identifying one result slot at one sequence, with a 40-bit sequence in the low bits and a 24-bit result-slot index in the high (result_slots is capped at 2^24 at create). </p>
 <p>Core-filled at submit; bindings store and pass back by pointer. The 8-byte size lets a binding pack the whole handle into an external-pointer address (zero heap traffic per task). All-zero is the invalid value. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>

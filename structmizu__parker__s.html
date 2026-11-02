@@ -109,7 +109,7 @@ uint32_t *&#160;</td><td class="memItemRight" valign="bottom"><b>epoch</b></td><
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>One parker per waiting entity: a 32-bit monotonic epoch word in the shared region plus, on Windows only, one named auto-reset event (the epoch compare is not atomic with the sleep there). </p>
-<p>Park sites follow snapshot -&gt; announce -&gt; re-check -&gt; sleep-bounded; any unpark that observes the announcement bumps the epoch after the snapshot, so the sleep returns immediately. Spurious wakes are absorbed by the caller's re-check. This handshake is the sole guarantee against lost wakeups — no watchdog sits behind it. </p>
+<p>Park sites follow snapshot -&gt; announce -&gt; re-check -&gt; sleep-bounded; any unpark that observes the announcement bumps the epoch after the snapshot, so the sleep returns immediately. Spurious wakes are absorbed by the caller's re-check. This handshake is the sole guarantee against lost wakeups; no watchdog sits behind it. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu__ext_8h_source.html">mizu_ext.h</a></li>
 </ul>

@@ -144,7 +144,7 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>livedir_size</b><
 </div><div class="memdoc">
 
 <p>The workers' identity word (MIZU_IDENT in <a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a>): 0 until the first worker join CASes its binding's word in; a join whose word differs fails, an exact match proceeds. </p>
-<p>Set for the pool's lifetime — never reset, so homogeneity is per pool, not per worker generation. The one field written after create: read it through the mapping, never the validated handle copy, which is stale the moment it lands. </p>
+<p>Set for the pool's lifetime and never reset, so homogeneity is per pool, not per worker generation. The one field written after create: read it through the mapping, never the validated handle copy, which is stale the moment it lands. </p>
 
 </div>
 </div>

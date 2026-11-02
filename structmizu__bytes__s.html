@@ -110,7 +110,7 @@ size_t&#160;</td><td class="memItemRight" valign="bottom"><b>len</b></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>A byte buffer. </p>
-<p>Send: the consumer fills {data, len} and passes its address as the verb's obj. Recv: the binding returns a malloc'd <a class="el" href="mizu__ext_8h.html#ac1540e12c395259c1813e676d941d7cb" title="A byte buffer.">mizu_bytes</a> (data rides the same allocation); release with mizu_bytes_free — an export, not documented free(), so a shared-library build never crosses allocator domains. Fixed layout, never extended. </p>
+<p>Send: the consumer fills {data, len} and passes its address as the verb's obj. Recv: the binding returns a malloc'd <a class="el" href="mizu__ext_8h.html#ac1540e12c395259c1813e676d941d7cb" title="A byte buffer.">mizu_bytes</a> (data rides the same allocation); release with mizu_bytes_free (an export rather than a documented free(), so a shared-library build never crosses allocator domains). Fixed layout, never extended. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu__ext_8h_source.html">mizu_ext.h</a></li>
 </ul>

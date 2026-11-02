@@ -96,7 +96,7 @@ $(function(){initNavTree('structmizu__sub__slot__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one.  
+<p>Submitter registry slot: one 128-byte span per submitter.  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
@@ -131,7 +131,8 @@ uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>notify</b></td></
 uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad</b> [68]</td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Submitter registry slot: one 128-byte span per submitter — stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one. </p>
+<div class="textblock"><p>Submitter registry slot: one 128-byte span per submitter. </p>
+<p>stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>

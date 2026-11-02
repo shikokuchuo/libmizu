@@ -96,7 +96,7 @@ $(function(){initNavTree('structmizu__wk__slot__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores.  
+<p>Worker registry slot: two 128-byte spans, with the admin and owner-written fields on the first and the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores.  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
@@ -155,7 +155,7 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_helps</b></t
 uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad2</b> [64]</td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Worker registry slot: two 128-byte spans — admin + owner-written fields on the first, the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores. </p>
+<div class="textblock"><p>Worker registry slot: two 128-byte spans, with the admin and owner-written fields on the first and the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores. </p>
 <p>in_flight_rs/_seq are announced before any claim and read only post-mortem by a reaper serialized by the liveness lock. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>

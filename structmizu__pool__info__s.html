@@ -147,7 +147,7 @@ int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>shutdown</b></td><
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Snapshots. </p>
-<p>info reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks) — the cold-path introspection API behind a binding's dump output. Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
+<p>info reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks), the cold-path introspection API behind a binding's dump output. Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>
