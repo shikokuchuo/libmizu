@@ -31,7 +31,7 @@
   <td id="projectalign">
    <div id="projectname">libmizu<span id="projectnumber">&#160;0.1.0</span>
    </div>
-   <div id="projectbrief">Lock-free shared-memory IPC</div>
+   <div id="projectbrief">Lock-free shared memory IPC at thread speed in C11</div>
   </td>
  </tr>
  </tbody>
@@ -98,9 +98,8 @@ $(function(){initNavTree('index.html','',''); });
 <div class="textblock"><p><a class="anchor" id="md_README"></a></p>
 <p><a href="https://shikokuchuo.net/libmizu/"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" alt="libmizu logo" align="right" width="240" style="pointer-events: none;" class="inline"/></a></p>
 <p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> [<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/>](LICENSE) <a href="https://shikokuchuo.net/libmizu/"><img src="https://img.shields.io/badge/docs-api-blue.svg" alt="Docs" style="pointer-events: none;" class="inline"/></a></p>
-<p>libmizu is a C library for lock-free shared-memory IPC.</p>
-<p>For runtimes that parallelize with processes rather than threads, libmizu uses shared memory to make communication between those processes fast enough to divide work at thread granularity.</p>
-<p>Round trips drop from tens of microseconds over sockets to &lt; 1 µs (see Performance).</p>
+<p>Lock-free shared memory IPC at thread speed in C11.</p>
+<p>libmizu is for runtimes that parallelize with processes rather than threads. Round trips drop from tens of microseconds over sockets to &lt; 1 µs, fast enough to divide work at thread granularity (see Performance).</p>
 <p>Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting with the hot path bypassing the kernel, and peer death delivered as an OS event.</p>
 <p>Bindings share one wire format, so processes in different languages can exchange data over the same channel. The first-party bindings are <a href="https://github.com/shikokuchuo/mizu">mizu</a> for R and <a href="https://github.com/shikokuchuo/pymizu">pymizu</a> for Python. Writing a binding covers other languages.</p>
 <ul>
@@ -122,7 +121,7 @@ Performance</h1>
 <tr class="markdownTableHead">
 <th class="markdownTableHeadNone">Benchmark  </th><th class="markdownTableHeadNone">Best observed  </th></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Channel round trip (nil / 64 B payload)  </td><td class="markdownTableBodyNone">0.3–0.4 µs  </td></tr>
+<td class="markdownTableBodyNone">Channel round trip (nil / 64 B payload)  </td><td class="markdownTableBodyNone">0.3 to 0.4 µs  </td></tr>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">Channel round trip (64 KiB, arena tier)  </td><td class="markdownTableBodyNone">4.0 µs  </td></tr>
 <tr class="markdownTableRowOdd">
@@ -173,7 +172,7 @@ Quickstart</h1>
 <div class="ttc" id="amizu__ext_8h_html_a042a682dea0415ddb6fd1fc43deb19a8"><div class="ttname"><a href="mizu__ext_8h.html#a042a682dea0415ddb6fd1fc43deb19a8">mizu_binding_bytes</a></div><div class="ttdeci">void mizu_binding_bytes(mizu_binding *)</div><div class="ttdoc">Fill binding with the bytes binding: stage/read only — exec, check, park, sweep, drop are NULL (a byt...</div></div>
 <div class="ttc" id="amizu__ext_8h_html_ac1540e12c395259c1813e676d941d7cb"><div class="ttname"><a href="mizu__ext_8h.html#ac1540e12c395259c1813e676d941d7cb">mizu_bytes</a></div><div class="ttdeci">struct mizu_bytes_s mizu_bytes</div><div class="ttdoc">A byte buffer.</div></div>
 </div><!-- fragment --><p>The peer fills its binding with <span class="tt"><a class="el" href="mizu__ext_8h.html#a042a682dea0415ddb6fd1fc43deb19a8" title="Fill binding with the bytes binding: stage/read only — exec, check, park, sweep, drop are NULL (a byt...">mizu_binding_bytes()</a></span> too and attaches with <span class="tt">mizu_channel_attach(&amp;ch, token, &amp;binding)</span>. It reads the bootstrap payload with <span class="tt"><a class="el" href="mizu_8h.html#a1d6ca373964e6d903353066cee5b2255" title="The peer bootstrap payload staged at create (the preamble&#39;s drop): borrowed bytes,...">mizu_channel_drop()</a></span> and signals <span class="tt">mizu_channel_ready_set()</span>.</p>
-<p>To move a language's own objects rather than byte buffers, register callbacks on the binding instead — the binding-author seam covered in Writing a binding:</p>
+<p>To move a language's own objects rather than byte buffers, register callbacks on the binding instead, the binding-author seam covered in Writing a binding:</p>
 <div class="fragment"><div class="line"><a class="code hl_typedef" href="mizu_8h.html#a45b2d42fa0c3f45254015021ef8f2b0e">mizu_binding</a> binding;</div>
 <div class="line"><a class="code hl_function" href="mizu__ext_8h.html#ac35be488db7c9e90b63694583e568342">mizu_binding_init</a>(&amp;binding);</div>
 <div class="line">binding.stage = my_stage;   <span class="comment">/* frame your objects as (hdr, payload) */</span></div>
@@ -182,7 +181,7 @@ Quickstart</h1>
 </div><!-- fragment --><p><a href="include/mizu.h"><span class="tt">include/mizu.h</span></a> documents the full contract for each declaration: ownership, threading, and the <span class="tt"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578" title="The verb result.">mizu_status</a></span> values that each verb returns. <a class="el" href="md_DESIGN.html"><span class="tt">DESIGN.md</span></a> gives the invariants. The rendered API reference lives at <a href="https://shikokuchuo.net/libmizu/">shikokuchuo.net/libmizu</a>.</p>
 <h1 class="doxsection"><a class="anchor" id="autotoc_md3"></a>
 Writing a binding</h1>
-<p>A binding teaches libmizu to turn the language's values into frames and back. The <span class="tt">stage</span> and <span class="tt">read</span> callbacks from the quickstart do the conversion, and <span class="tt">exec</span> runs tasks on pool workers. libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing. To start without callbacks, the built-in bytes binding — <span class="tt"><a class="el" href="mizu__ext_8h.html#a042a682dea0415ddb6fd1fc43deb19a8" title="Fill binding with the bytes binding: stage/read only — exec, check, park, sweep, drop are NULL (a byt...">mizu_binding_bytes()</a></span> — sends and receives byte buffers, as the quickstart shows.</p>
+<p>A binding teaches libmizu to turn the language's values into frames and back. The <span class="tt">stage</span> and <span class="tt">read</span> callbacks from the quickstart do the conversion, and <span class="tt">exec</span> runs tasks on pool workers. libmizu does the rest: the rings, waiting and waking, peer-death detection, and work-stealing. To start without callbacks, the built-in bytes binding, <span class="tt"><a class="el" href="mizu__ext_8h.html#a042a682dea0415ddb6fd1fc43deb19a8" title="Fill binding with the bytes binding: stage/read only — exec, check, park, sweep, drop are NULL (a byt...">mizu_binding_bytes()</a></span>, sends and receives byte buffers, as the quickstart shows.</p>
 <p>Every operation is an exported function. A language with a foreign function interface can call libmizu from the shared library, with no C of its own. Every handle is opaque, so libmizu's internals can change without breaking the binding. Bindings that compile C can add the amalgamation to their own build instead: <span class="tt">tools/amalgamate.sh</span> writes <span class="tt">mizu.c</span>, <span class="tt"><a class="el" href="mizu_8h.html" title="libmizu public API: SPSC channels and work-stealing task pools between processes on one machine.">mizu.h</a></span>, and <span class="tt"><a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a></span>.</p>
 <h1 class="doxsection"><a class="anchor" id="autotoc_md4"></a>
 API tiers</h1>
