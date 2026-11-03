@@ -46,8 +46,12 @@
      submitter's producing half (the submit family), a pool submitter's waiting
      half (the collect family), and a pool worker's driver
      (mizu_pool_worker_run, the help path of a nested collect). A role may
-     migrate threads across a happens-before edge, and one submitter's two
-     halves may live on two threads. Safe from any thread: mizu_pool_cancel,
+     migrate threads across a happens-before edge. One submitter's two
+     halves may live on two threads only when its binding sets
+     MIZU_BINDING_SPLIT_WAITER (mizu_ext.h): the collect family then hands
+     its releases to the submit family instead of touching the handle's
+     free list; without the flag the two halves are one role. Safe from any
+     thread: mizu_pool_cancel,
      mizu_pool_task_release, mizu_pool_task_state, and the introspection reads.
      Anything else run concurrently within one role races the single-writer
      words (ring tails, the staging checkout, waiter announces), and the race is

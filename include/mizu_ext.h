@@ -216,8 +216,8 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      the validated capacity as limit (inline_max for slot-resident
      frames). The kinds are NOT rewritten. For a pool collect,
      ctx->outcome carries the result's terminal state (MIZU_RS_OK/ERR
-     with a payload frame; MIZU_RS_CANCEL/DIED without one; read_fn
-     builds the binding's error object for all three). A vanished
+     with a payload frame; MIZU_RS_CANCEL/DIED/LOST without one; read_fn
+     builds the binding's error object for every non-OK outcome). A vanished
      out-of-line region: mizu_read_region sets ctx->gone and read_fn
      propagates by returning NULL. A NULL return consumes nothing unless
      the read first set ctx->flags |= MIZU_READ_CONSUME, in which case the
@@ -272,9 +272,23 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      released: at the consumer-done points (collect, slot reuse, the
      worker keeper sweep), on a cancelled publish, on a staging
      rollback, and at handle teardown. `pin` is the opaque token the
-     stager registered with mizu_stage_pin. Fires only on the
-     handle-owning thread. NULL when the binding never pins.
-   ctx: opaque to the core. */
+     stager registered with mizu_stage_pin. Fires only on the thread
+     running the producing verbs (submit, the worker loop): under
+     MIZU_BINDING_SPLIT_WAITER a collect's release is handed to that
+     thread and fires at its next submit or reap point, never on the
+     collecting thread. NULL when the binding never pins.
+   ctx: opaque to the core.
+   flags: MIZU_BINDING_* bits; an unknown bit fails create/attach/join.
+     MIZU_BINDING_SPLIT_WAITER declares that this handle's collect family
+     may run on a thread other than its submit family's (mizu.h, Handle
+     threading): the collect verbs then touch no producer-owned state
+     (the spill free list, the lent-region ledger, the pin drops) and
+     hand each release to the producing thread through a per-slot mask,
+     drained at its next submit; a worker handle's halves are one thread
+     by construction, so the flag is inert there. Without it the two
+     halves must share a thread, and every release runs at the collect.
+     The handle's error record stays one slot either way: read it on the
+     thread that received MIZU_ERR, before that thread's next verb. */
 
 typedef int (*mizu_stage_fn)(void *obj, mizu_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,
@@ -325,7 +339,15 @@ typedef struct mizu_binding_s {
   void        *ctx;     /**< opaque to the core */
   uint64_t     ident;   /**< MIZU_IDENT word; a zero language byte is
    rejected at create, attach and join */
+  uint32_t     flags;   /**< MIZU_BINDING_* bits (the seam comment above);
+   zero from mizu_binding_init */
 } mizu_binding;
+
+/** mizu_binding.flags: the collect family may run on a second thread
+   (the seam comment above). The other bits are reserved; a set one
+   fails create/attach/join. */
+#define MIZU_BINDING_SPLIT_WAITER 1u
+#define MIZU_BINDING_FLAGS_ALL    MIZU_BINDING_SPLIT_WAITER
 
 /** Zero and size-stamp a binding struct. Call before filling the fn pointers. */
 MIZU_API void mizu_binding_init(mizu_binding *);

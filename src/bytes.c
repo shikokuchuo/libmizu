@@ -59,17 +59,12 @@ static int mizu_bytes_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
 
 // Read ----------------------------------------------------------------------------
 
-/* Copy the frame's bytes into a fresh mizu_bytes (data rides the same
-   allocation) — ring slots are reused and arena chunks FIFO-reclaim, so
-   anything short of a copy dangles past consumer-done. The copy tiers of
-   a foreign peer (RAWVEC/RAWSPILL/STR1) read as their bare bytes; the
-   view tiers (SHM_VEC/REF) are binding-owned by design and fail the
-   read. A pool collect's non-OK outcome builds no error object: NULL,
-   surfaced by the verb's mizu_status alone. */
-static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
-                            size_t limit, mizu_read_ctx *ctx) {
-  if (ctx->outcome != MIZU_RS_OK) return NULL;
-
+/* Resolve a frame to its byte range: the copy tiers of a foreign peer
+   (RAWVEC/RAWSPILL/STR1) read as their bare bytes; the view tiers
+   (SHM_VEC/REF) are binding-owned by design and fail the read. */
+static int bytes_resolve(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                         size_t limit, mizu_read_ctx *ctx,
+                         const unsigned char **src_out, size_t *n_out) {
   const unsigned char *src = payload;
   size_t n = 0;
 
@@ -81,7 +76,7 @@ static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
   case MIZU_KIND_STR1:
     /* resolved or slot-resident bytes; len bounds-checked against the
        validated capacity (STR1's NA marker reads as empty) */
-    if (hdr->len > limit) return NULL;
+    if (hdr->len > limit) return -1;
     n = hdr->len;
     break;
   case MIZU_KIND_ARENA:
@@ -95,18 +90,18 @@ static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
          kind is resolved by the transport before the call) */
       uint32_t name_len = (uint32_t) (hdr->aux >> 8);
       mizu_shm *shm = mizu_read_region(ctx, payload, name_len);
-      if (shm == NULL) return NULL;
-      if (hdr->len > shm->size) return NULL;
+      if (shm == NULL) return -1;
+      if (hdr->len > shm->size) return -1;
       src = (const unsigned char *) shm->addr;
       n = hdr->len;
       break;
     }
-    if (hdr->len > limit) return NULL;
+    if (hdr->len > limit) return -1;
     n = hdr->len;
     break;
   case MIZU_KIND_SHM_RAW: {
     mizu_shm *shm = mizu_read_region(ctx, payload, hdr->len);
-    if (shm == NULL) return NULL;
+    if (shm == NULL) return -1;
     /* aux is the exact stream length: a recycled region is larger than
        the stream it carries, and the slack bytes are a previous
        payload's */
@@ -118,8 +113,38 @@ static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
   default:
     /* SHM_VEC / REF: view tiers — the mapping would need the zc counted
        add and a release hook, which a plain buffer cannot carry */
+    return -1;
+  }
+  *src_out = src;
+  *n_out = n;
+  return 0;
+}
+
+/* Copy the frame's bytes into a fresh mizu_bytes (data rides the same
+   allocation) — ring slots are reused and arena chunks FIFO-reclaim, so
+   anything short of a copy dangles past consumer-done. A pool collect's
+   non-OK outcome builds no error object: NULL, surfaced by the verb's
+   mizu_status. An ERR outcome consumes its slot (a NULL read without
+   MIZU_READ_CONSUME would leave the slot ERR until mizu_pool_task_release,
+   one leaked result slot per failed task) and carries the envelope's
+   bytes in the handle's error record, since a plain-bytes consumer has
+   no error object to receive them in. */
+static void *mizu_bytes_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                            size_t limit, mizu_read_ctx *ctx) {
+  const unsigned char *src = payload;
+  size_t n = 0;
+  if (ctx->outcome != MIZU_RS_OK) {
+    if (ctx->outcome == MIZU_RS_ERR) {
+      ctx->flags |= MIZU_READ_CONSUME;
+      if (bytes_resolve(hdr, payload, limit, ctx, &src, &n) == 0 && n != 0)
+        mizu_err_record(ctx->handle, MIZU_ERRCAT_OTHER, "task failed: %.*s",
+                       (int) (n < 200 ? n : 200), (const char *) src);
+      else
+        mizu_err_record(ctx->handle, MIZU_ERRCAT_OTHER, "task failed");
+    }
     return NULL;
   }
+  if (bytes_resolve(hdr, payload, limit, ctx, &src, &n) != 0) return NULL;
 
   mizu_bytes *b = malloc(sizeof(*b) + (n != 0 ? n : 1));
   if (b == NULL) return NULL;

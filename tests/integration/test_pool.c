@@ -47,7 +47,7 @@ static int go_pipe[2] = { -1, -1 };   /* parent -> child go-ahead */
 static int joined_wr = -1;            /* child -> parent join signal */
 
 enum { ROLE_WORKER, ROLE_NEST, ROLE_SUB_CANCEL, ROLE_SUB_ECHO,
-       ROLE_SUB_WATCH_ABANDON };
+       ROLE_SUB_WATCH_ABANDON, ROLE_WORKER_HOLD };
 
 static void sleep_ms(long ms) {
   struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
@@ -82,6 +82,51 @@ static void child_binding(mizu_binding *b, int worker) {
   if (worker) b->exec = child_exec;
 }
 
+/* A worker that keeps a view on every spilled task argument it sees
+   (mizu_shm_open_view's counted add, never released), so the controller's
+   lent-region ledger holds the region after the collect — the state a
+   held zero-copy view leaves on a worker death. */
+static int child_exec_hold(const mizu_slot_hdr *hdr, const uint8_t *payload,
+                           size_t limit, mizu_result_sink *sink,
+                           int catching, mizu_read_ctx *ctx) {
+  if (hdr->kind == MIZU_KIND_SHM_RAW) {
+    char name[MIZU_NAME_MAX + 1];
+    assert(hdr->len <= MIZU_NAME_MAX);
+    memcpy(name, payload, hdr->len);
+    name[hdr->len] = '\0';
+    mizu_shm *view = NULL;
+    assert(mizu_shm_open_view(&view, name) == MIZU_OK);   /* held for life */
+    mizu_bytes b = { (void *) "ack", 3 };
+    return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
+  }
+  return child_exec(hdr, payload, limit, sink, catching, ctx);
+}
+
+/* The controller's stage for the hold scenario: past the inline budget
+   the bytes go to a spill region under a zero-copy loan (an SHM_VEC-style
+   retain), named in the frame as SHM_RAW. */
+static int zc_loan_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
+                         uint32_t inline_max, mizu_handle *h, void *ctx) {
+  (void) ctx;
+  mizu_bytes *b = obj;
+  if (b->len <= inline_max) {
+    hdr->kind = MIZU_KIND_INLINE;
+    hdr->len = (uint32_t) b->len;
+    hdr->aux = 0;
+    memcpy(payload, b->data, b->len);
+    return 0;
+  }
+  mizu_shm *shm;
+  if (mizu_stage_spill_get(h, 64 + b->len, &shm) != MIZU_OK) return 1;
+  memcpy((unsigned char *) mizu_shm_addr(shm) + 64, b->data, b->len);
+  mizu_stage_retain_zc(h, shm);
+  hdr->kind = MIZU_KIND_SHM_RAW;
+  hdr->len = (uint32_t) strlen(mizu_shm_name(shm));
+  hdr->aux = b->len;
+  memcpy(payload, mizu_shm_name(shm), hdr->len);
+  return 0;
+}
+
 /* Join + run; leave, linger if asked, and exit 0 on the expected reason. */
 static void run_worker(uint32_t slot, mizu_worker_exit expect, int linger) {
   mizu_binding b;
@@ -97,6 +142,20 @@ static void run_worker(uint32_t slot, mizu_worker_exit expect, int linger) {
   if (mizu_pool_leave(p) != MIZU_OK) _exit(5);
   if (linger)
     while (!mizu_pool_lame_duck(p)) sleep_ms(10);
+  mizu_pool_destroy(p);
+  _exit(0);
+}
+
+/* Join with the view-holding evaluator and run to shutdown or death. */
+static void run_worker_hold(uint32_t slot) {
+  mizu_binding b;
+  child_binding(&b, 1);
+  b.exec = child_exec_hold;
+  mizu_pool *p;
+  if (mizu_pool_worker_join(&p, child_token, slot, &b) != MIZU_OK) _exit(3);
+  mizu_worker_exit ex = mizu_pool_worker_run(p);
+  if (ex != MIZU_EXIT_SHUTDOWN) _exit(4);
+  if (mizu_pool_leave(p) != MIZU_OK) _exit(5);
   mizu_pool_destroy(p);
   _exit(0);
 }
@@ -194,6 +253,7 @@ static pid_t spawn(int role, uint32_t slot) {
     case ROLE_SUB_CANCEL: run_submitter_cancel(); break;
     case ROLE_SUB_ECHO: run_submitter_echo(); break;
     case ROLE_SUB_WATCH_ABANDON: run_sub_watch_abandon(); break;
+    case ROLE_WORKER_HOLD: run_worker_hold(child_slot); break;
     }
     _exit(2);
   }
@@ -498,6 +558,12 @@ static void test_fork_abandon(void) {
   pid_t a = fork();
   assert(a >= 0);
   if (a == 0) {
+    /* every verb on an inherited handle refuses, the teardown verbs
+       included: leave would free the parent's slot, stop would broadcast
+       shutdown and unlink, the lame-duck beat would release */
+    if (mizu_pool_leave(wk) != MIZU_ERR) _exit(9);
+    if (mizu_pool_stop(ctrl, 0) != MIZU_ERR) _exit(10);
+    if (mizu_pool_lame_duck(wk) != 1) _exit(11);
     mizu_pool_abandon(ctrl);
     mizu_pool_abandon(wk);
     _exit(0);
@@ -565,8 +631,123 @@ static void test_abandon_watches(void) {
   puts("ok abandon_watches");
 }
 
+/* A worker killed while parked: the death watch's reap clears its park
+   announce, so the submits that follow wake the live worker instead of
+   the corpse. Before the fix, every other submit's wake was absorbed
+   (the corpse's PARKED -> WAKING CAS "delivered" it) and the task sat
+   unclaimed for the survivor's nominal park. */
+static void test_parked_death(void) {
+  mizu_pool *ctrl = make_pool(2, 2);
+  child_expect = MIZU_EXIT_SHUTDOWN;
+  child_linger = 0;
+  pid_t w0 = spawn(ROLE_WORKER, 0);
+  pid_t w1 = spawn(ROLE_WORKER, 1);
+  uint32_t slots[2] = { 0, 1 };
+  assert(mizu_pool_ready_wait(ctrl, slots, 2, 5000) == MIZU_OK);
+  /* a warm-up round trip, then both workers park */
+  {
+    mizu_bytes tb = { (void *) "warm", 4 };
+    mizu_task t;
+    void *obj = NULL;
+    assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
+    assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+    mizu_bytes_free(obj);
+  }
+  mizu_pool_info info;
+  int both = 0;
+  for (int i = 0; i < 500 && !both; i++) {
+    assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
+    both = (info.parked_mask & 3ull) == 3ull;
+    if (!both) sleep_ms(10);
+  }
+  assert(both);
+  kill(w0, SIGKILL);
+  assert(wait_signalled(w0) == SIGKILL);
+  int reaped = 0;
+  for (int i = 0; i < 500 && !reaped; i++) {
+    assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
+    reaped = info.worker_state[0] == MIZU_WK_FREE;
+    if (!reaped) sleep_ms(10);
+  }
+  assert(reaped);
+  assert((info.parked_mask & 1ull) == 0);   /* the announce died with it */
+  for (int round = 0; round < 4; round++) {
+    mizu_bytes tb = { (void *) "hi", 2 };
+    mizu_task t;
+    void *obj = NULL;
+    assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
+    assert(mizu_pool_collect(ctrl, &t, &obj, 3000) == MIZU_OK);
+    mizu_bytes *rb = obj;
+    assert(rb->len == 2 && memcmp(rb->data, "hi", 2) == 0);
+    mizu_bytes_free(rb);
+  }
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  assert(wait_exit(w1) == 0);
+  mizu_pool_destroy(ctrl);
+  puts("ok parked_death");
+}
+
+/* A worker that dies idle while holding a view on a region the
+   controller lent it: the death watch's off-thread reap hands the
+   force-reclaim to the controller's thread, whose next verb runs it —
+   the lent-region ledger empties and the region rejoins the free list.
+   Before the fix no path on the controller ever forced it. */
+static void test_idle_death_force(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 2;
+  opts.injection_cap = 8;
+  opts.per_worker_cap = 8;
+  opts.result_slots = 16;
+  opts.slot_size = 512;
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  b.stage = zc_loan_stage;
+  mizu_pool *ctrl;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, child_token, sizeof child_token) == MIZU_OK);
+  pid_t w = spawn(ROLE_WORKER_HOLD, 0);
+  uint32_t slot0 = 0;
+  assert(mizu_pool_ready_wait(ctrl, &slot0, 1, 5000) == MIZU_OK);
+
+  static unsigned char big[4096];
+  memset(big, 0x5A, sizeof big);
+  mizu_bytes tb = { big, sizeof big };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &tb, &t, 1000) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+  mizu_bytes_free(obj);
+  static mizu_pool_dump d;
+  assert(mizu_pool_dump_get(ctrl, &d) == MIZU_OK);
+  assert(d.ledger_entries == 1 && d.fl_entries == 0);   /* lent: the view */
+
+  kill(w, SIGKILL);
+  assert(wait_signalled(w) == SIGKILL);
+  mizu_pool_info info;
+  int reaped = 0;
+  for (int i = 0; i < 500 && !reaped; i++) {
+    assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
+    reaped = info.worker_state[0] == MIZU_WK_FREE;
+    if (!reaped) sleep_ms(10);
+  }
+  assert(reaped);
+  mizu_bytes small = { (void *) "x", 1 };
+  mizu_task t2;
+  assert(mizu_pool_submit(ctrl, &small, &t2, 1000) == MIZU_OK);   /* drains */
+  assert(mizu_pool_dump_get(ctrl, &d) == MIZU_OK);
+  assert(d.ledger_entries == 0 && d.fl_entries == 1);   /* force-reclaimed */
+  assert(mizu_pool_cancel(ctrl, &t2) == 1);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  mizu_pool_destroy(ctrl);
+  puts("ok idle_death_force");
+}
+
 int main(void) {
   test_worker_death();
+  test_parked_death();
+  test_idle_death_force();
   test_orphan_deque_drain();
   test_owner_death();
   test_submitter_death();

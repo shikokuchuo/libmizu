@@ -161,16 +161,32 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
 }
 #undef ARROW_CVT_WIDEN
 
-/* Fill n lanes with the wire type's missing sentinel. */
+/* Fill n lanes with the wire type's missing sentinel, at the type's
+   lane width. */
 static void cvt_fill_na(uint8_t *dst, size_t n, int wire) {
-  if (wire == MIZU_TYPE_REAL) {
+  switch (wire) {
+  case MIZU_TYPE_REAL:
     for (size_t i = 0; i < n; i++) mizu_store_na_real(dst + 8 * i);
-  } else if (wire == MIZU_TYPE_INT64) {
+    break;
+  case MIZU_TYPE_CPLX:   /* NA_complex_: both parts the real sentinel */
+    for (size_t i = 0; i < n; i++) {
+      mizu_store_na_real(dst + 16 * i);
+      mizu_store_na_real(dst + 16 * i + 8);
+    }
+    break;
+  case MIZU_TYPE_INT64: {
     const int64_t na = MIZU_NA_INT64;   /* reads as NA_integer64_ in R */
     for (size_t i = 0; i < n; i++) memcpy(dst + 8 * i, &na, 8);
-  } else {
+    break;
+  }
+  case MIZU_TYPE_RAW:    /* no sentinel: a zero byte per lane */
+    memset(dst, 0, n);
+    break;
+  default: {
     const int32_t na = MIZU_NA_INT32;   /* INT and LGL share the sentinel */
     for (size_t i = 0; i < n; i++) memcpy(dst + 4 * i, &na, 4);
+    break;
+  }
   }
 }
 

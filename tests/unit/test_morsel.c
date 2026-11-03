@@ -89,6 +89,18 @@ static void check_tests(void) {
   memcpy(shm->addr, &bad, sizeof bad);
   assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) !=
          NULL);
+  /* morsel_size is bounded by n as the layout bounds it; near 2^64 the
+     n + morsel_size - 1 sum wraps and would validate n_morsels == 0 */
+  bad = h;
+  bad.morsel_size = h.n + 1;
+  bad.n_morsels = 1;
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
+  bad = h;
+  bad.morsel_size = UINT64_MAX;
+  bad.n_morsels = 0;
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) != NULL);
   bad = h;
   bad.n_morsels += 1;
   memcpy(shm->addr, &bad, sizeof bad);

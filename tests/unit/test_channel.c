@@ -942,6 +942,16 @@ int main(int argc, char **argv) {
     void *obj = NULL;
     assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
     assert(strcmp(mizu_channel_error(peer), "corrupt payload slot") == 0);
+    /* the core's own consume: the torn slot never wedges the ring — the
+       next message reads, and a receive on an empty ring reports so */
+    send_bytes(host, mid, sizeof(mid));
+    recv_bytes(peer, mid, sizeof(mid));
+    assert(mizu_channel_recv(peer, &obj, 0) == MIZU_TIMEOUT);
+    size_t nb = 7;
+    void *got1[1];
+    assert(mizu_channel_recv_batch_fn(peer, 0, &nb, array_sink, got1, 0) ==
+           MIZU_ERR);
+    assert(nb == 0);   /* the argument error sets *n_out like every path */
     mizu_channel_destroy(host);
     mizu_channel_destroy(peer);
   }
@@ -968,6 +978,9 @@ int main(int argc, char **argv) {
     assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
     assert(strcmp(mizu_channel_error(peer), "corrupt payload slot") == 0);
     rawspill_mode = 0;
+    assert(mizu_channel_send(host, &b) == MIZU_OK);   /* consumed: next reads */
+    assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+    mizu_bytes_free(obj);
     mizu_channel_destroy(host);
     mizu_channel_destroy(peer);
   }

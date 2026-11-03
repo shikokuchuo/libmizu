@@ -670,6 +670,7 @@ Payload lifetime is explicit, not GC-inherited.
 Each handle owns a retain table of `{ region, pin, key, kind }` entries.
 The transport commits an entry at publish.
 It releases the entry at a consumer-done point: collect, slot reuse, the worker keeper sweep, or the channel head-advance reap.
+A collect on a second thread (the split-waiter seam of the threading contract) flags the slot instead, and the producing thread releases it at its next submit.
 The region half is core-owned.
 The pin is an opaque binding token, and the core calls the binding's `drop` hook with it at release.
 One uncommitted checkout (region plus pin) rides `fl->staging*`.
@@ -708,7 +709,9 @@ The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 
 Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge a queue.
 A worker announces its claim (`in_flight_rs`) before it CASes.
-The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current.
+The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current — and only while no other worker has stamped `worker_slot`, the winner's first act past the claim CAS: a loser that died with its announce standing must not fail the task its rival is executing.
+The publish CAS re-reads the slot's sequence first, so a result for an incarnation the collector has already freed and the submitter recommitted drops instead of landing in the new task.
+A worker's park announce dies with the worker: the reap clears its bit in the parked mask and resets its park state, so a later wake reaches a live worker rather than the corpse.
 An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
 On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper, because the flock re-acquire on one OFD is not a mutual exclusion.
 On Linux a region create fails fast when a statvfs probe shows the region cannot fit in tmpfs; the reservation itself (a one-fault-per-extent touch + `MADV_COLLAPSE` huge-folio create on kernels >= 6.1, `MADV_POPULATE_WRITE`, `posix_fallocate` on kernels < 5.14) remains the enforcement point, so no later write fault can SIGBUS.
@@ -717,8 +720,17 @@ On Linux a region create fails fast when a statvfs probe shows the region cannot
 
 Each handle role is confined to one thread at a time (`include/mizu.h` states the contract; this section is its rationale).
 The roles: a channel side (all of its send/recv verbs, both directions), a pool submitter's producing half (the submit family), a pool submitter's waiting half (the collect family), and a pool worker's driver (worker_run, the help path of a nested collect).
-A role may migrate threads across a happens-before edge, and one submitter's two halves may live on two threads.
+A role may migrate threads across a happens-before edge.
+One submitter's two halves may live on two threads only when its binding sets `MIZU_BINDING_SPLIT_WAITER`; without the flag they are one role.
 The single-writer words the confinement protects: the producer-side ring tails and handle-local cursors, the staging checkout and spill free list, the result-slot scan and mint, the waiter announces, the deque owner side.
+
+The split-waiter seam is what makes the two-thread form sound without a lock.
+The spill free list and the lent-region ledger have one owner, the producing thread, and the collect family never touches them: under the flag a collect's task-keeper release and a DIED verdict's ledger force are handed over through two per-handle masks — one bit per task-table slot for releases, one bit per worker slot for forces — set with a single fetch-or, and the producing thread drains both at submit entry (an exchange per word, then the ordinary release or force).
+No thread waits on another anywhere in the hand-off; the cost when nothing is pending is one load per submit.
+The drain releases a flagged slot only while it reads FREE: FREE means freed and not recommitted (a recommit is PENDING again), so the entry is the previous incarnation's or already released, and a stale bit — a lost CAS race, a stale handle — can never release a recommitted slot's keeper.
+The same masks serve every off-thread verdict regardless of the flag: `mizu_pool_task_release` (any thread, a GC finalizer's verb) flags the slot instead of releasing, and the controller's death-callback reap flags the dead worker's force for the handle thread, which no path reached before.
+When the halves share a thread (the flag clear, every worker handle), the collect family drains the masks itself and releases at the collect as before.
+The handle's error record stays one slot under the flag: a binding reads it on the thread that received `MIZU_ERR`, before that thread's next verb.
 They carry no CAS by design (a mutex on the hot path would void the lock-free proposition), so concurrent verbs within one role race them, and most outcomes are silent: torn ring entries, double keeper surrenders aliasing the free list, duplicated or dropped channel messages.
 The guards that do exist (the terminal-to-FREE collect CAS, the zombie incarnation check, the claimant CASes) catch a violation only after the damage is staged, or not at all.
 Safe from any thread: `mizu_pool_cancel`, `mizu_pool_task_release`, `mizu_pool_task_state`, and the introspection reads, which are the status-word CAS verbs, kept thread-safe for GC finalizers and racy probes.

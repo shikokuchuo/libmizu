@@ -114,7 +114,9 @@ const char *mizu_morsel_hdr_check(const void *base, size_t size,
   if (h.desc_off != sizeof(mizu_morsel_hdr) || h.desc_len == 0 ||
       h.desc_len > size - h.desc_off)
     return "descriptor lies outside the region";
-  if (h.morsel_size == 0 ||
+  /* morsel_size <= n as the layout requires, ahead of the identity: a
+     morsel_size near 2^64 wraps the sum and validates n_morsels == 0 */
+  if (h.morsel_size == 0 || h.morsel_size > h.n ||
       h.n_morsels != (h.n + h.morsel_size - 1) / h.morsel_size)
     return "morsel geometry is inconsistent";
   if (h.x_kind == MIZU_MORSEL_X_RAW) {

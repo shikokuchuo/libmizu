@@ -581,7 +581,16 @@ static void test_err_publish(void) {
   mizu_task t3 = submit_bytes(ctrl, "x", 1);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   assert(mizu_pool_collect(ctrl, &t3, &obj, 1000) == MIZU_ERR);
-  assert(strcmp(mizu_pool_error(ctrl), "task failed") == 0);
+  /* the bytes binding carries the envelope in the record and consumes
+     the slot: a second collect reports it collected, and the slot is
+     reusable (no leak per failed task) */
+  assert(strcmp(mizu_pool_error(ctrl), "task failed: boom") == 0);
+  assert(mizu_pool_task_state(ctrl, &t3) == MIZU_RS_FREE);
+  assert(mizu_pool_collect(ctrl, &t3, &obj, 0) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "task handle already collected") == 0);
+  mizu_pool_info pi;
+  assert(mizu_pool_info_get(ctrl, &pi) == MIZU_OK);
+  assert(pi.tasks_by_state[MIZU_RS_ERR] == 0);
   exec_mode = 0;
   pool_end();
   puts("ok err_publish");
@@ -682,7 +691,7 @@ static void test_unwind(void) {
 
   void *obj = NULL;
   assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_ERR);
-  assert(strcmp(mizu_pool_error(ctrl), "task failed") == 0);
+  assert(strcmp(mizu_pool_error(ctrl), "task failed: eval blew up") == 0);
 
   exec_mode = 0;
   mizu_task t2 = submit_bytes(ctrl, "ok", 2);
@@ -3879,6 +3888,290 @@ static void test_owner_dead_ring_full(void) {
 }
 #endif
 
+/* The control block's parked-workers word, worker slot 0 and the result
+   slot array, through a fresh writable mapping (the fields are plain
+   shared memory). */
+static mizu_shm *ctrl_words(_Atomic uint64_t **parked, mizu_wk_slot **w0,
+                            unsigned char **results, uint32_t *slot) {
+  char name[80];
+  int nl = snprintf(name, sizeof(name), MIZU_PREFIX_LITERAL "%s", token);
+  assert(nl > 0 && (size_t) nl < sizeof(name));
+  mizu_shm *shm = NULL;
+  assert(mizu_shm_open_rw(&shm, name, 0) == MIZU_OK);
+  unsigned char *base = mizu_shm_addr(shm);
+  mizu_pool_hdr h;
+  memcpy(&h, base, sizeof(h));
+  size_t rs_off = 128 + (size_t) h.max_workers * sizeof(mizu_wk_slot) +
+    (size_t) h.max_submitters * sizeof(mizu_sub_slot) + MIZU_TIER_SIZE +
+    (size_t) h.max_submitters *
+      (MIZU_INJ_META_SIZE + (size_t) h.inj_cap * h.slot) +
+    (size_t) h.max_workers * ((size_t) h.deque_cap * h.slot);
+  size_t ctrl_off = rs_off + (size_t) h.result_slots * h.slot;
+  *parked = (_Atomic uint64_t *) (base + ctrl_off + MIZU_CTRL_PARKED_OFF);
+  *w0 = (mizu_wk_slot *) (base + 128);
+  if (results != NULL) *results = base + rs_off;
+  if (slot != NULL) *slot = h.slot;
+  return shm;
+}
+
+#define PROBE_STREAK 16   /* pool.c's MIZU_PROBE_STREAK */
+
+#if !defined(_WIN32)
+static void *worker_run_main(void *arg) {
+  mizu_worker_exit *ex = arg;
+  *ex = mizu_pool_worker_run(wk2);
+  if (*ex == MIZU_EXIT_SHUTDOWN && mizu_pool_leave(wk2) != MIZU_OK)
+    *ex = MIZU_EXIT_ERROR;
+  return NULL;
+}
+#endif
+
+/* A worker that dies while parked (its announce bit set, park_state
+   PARKED) must not absorb the wakes that follow: the reap clears both,
+   so a submit's unpark reaches the live worker. Before the fix the
+   corpse's PARKED -> WAKING CAS "delivered" every wake its rotation
+   reached, and the task sat unclaimed for the live worker's nominal
+   park. The reap runs off wk2's thief backstop, the orphaned nested
+   entry its trigger. */
+static void test_parked_death(void) {
+  pool_pair(2, 2, 8, 64, 64, 64, 512);
+  mizu_bytes q = { (void *) "q", 1 };
+  mizu_task tq;
+  assert(mizu_pool_submit(wk, &q, &tq, 0) == MIZU_OK);   /* wk's own deque */
+  _Atomic uint64_t *parked;
+  mizu_wk_slot *w0;
+  mizu_shm *shm = ctrl_words(&parked, &w0, NULL, NULL);
+  /* the queued entry is corrupted so wk2's steals fail into the streak
+     probe (test_probe_streak's trigger) */
+  mizu_entry_hdr *eh =
+    (mizu_entry_hdr *) ((unsigned char *) mizu_shm_addr(shm) +
+                        w0->deque_buf_off);
+  eh->rs_index = UINT32_MAX;
+  atomic_store(&w0->park_state, MIZU_WPK_PARKED);
+  atomic_fetch_or(parked, 1ull);
+  mizu_pool_destroy(wk);   /* no leave: a crash while parked */
+  wk = NULL;
+  for (int i = 0; i < PROBE_STREAK + 1; i++)
+    assert(mizu_pool_step(wk2, 0) == MIZU_STEP_IDLE);   /* the probe fires */
+  mizu_pool_info ps;
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[0] == MIZU_WK_REAPING ||
+         ps.worker_state[0] == MIZU_WK_FREE);
+  assert((atomic_load(parked) & 1ull) == 0);
+  assert(atomic_load(&w0->park_state) == MIZU_WPK_RUNNING);
+  /* drain the corpse's deque (the corrupt entry is unstealable, and a
+     visible orphan keeps wk2 from parking), then let the observation
+     free the slot */
+  atomic_store(&w0->deque_top, atomic_load(&w0->deque_bottom));
+  assert(mizu_pool_step(wk2, 0) == MIZU_STEP_IDLE);
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[0] == MIZU_WK_FREE);
+#if !defined(_WIN32)
+  /* the live worker parks for real; every submit must wake it */
+  pthread_t th;
+  mizu_worker_exit ex = MIZU_EXIT_ERROR;
+  assert(pthread_create(&th, NULL, worker_run_main, &ex) == 0);
+  int parked1 = 0;
+  MIZU_SPIN_WAIT((atomic_load(parked) & 2ull) != 0, mizu_now() + 5,
+                 MIZU_SPIN_CLOCK_EVERY_LIGHT, parked1);
+  assert(parked1);
+  for (int round = 0; round < 4; round++) {
+    mizu_task t = submit_bytes(ctrl, "hi", 2);
+    collect_bytes(ctrl, &t, "hi", 2);   /* 1 s bound: an absorbed wake fails */
+  }
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  assert(pthread_join(th, NULL) == 0);
+  assert(ex == MIZU_EXIT_SHUTDOWN);
+  mizu_pool_destroy(wk2);
+  wk2 = NULL;
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+#else
+  pool_end();
+#endif
+  mizu_shm_close(shm, 0);
+  puts("ok parked_death");
+}
+
+/* A dead loser's announce must not fail a live claimant's task: wk2
+   "announced" entry X (poked in_flight_rs/_seq) and died; wk holds the
+   claim (worker_slot 0, stranded mid-exec). The reap of wk2 skips X —
+   a false DIED would let the collector free the slot under the live
+   executor, whose publish then lands in the next incarnation. */
+static void test_false_died_guard(void) {
+  pool_pair(2, 2, 8, 64, 64, 64, 512);
+  exec_mode = 1;   /* claim, never publish: X stays PENDING, claimed by wk */
+  mizu_task x = submit_bytes(ctrl, "x", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  exec_mode = 0;
+  _Atomic uint64_t *parked;
+  mizu_wk_slot *w0;
+  unsigned char *results;
+  uint32_t slot_bytes;
+  mizu_shm *shm = ctrl_words(&parked, &w0, &results, &slot_bytes);
+  mizu_wk_slot *w1 = w0 + 1;
+  mizu_rs_hdr *rs = (mizu_rs_hdr *)
+    (results + (size_t) mizu_task_rs_index(&x) * slot_bytes);
+  assert(atomic_load(&rs->worker_slot) == 0);
+  atomic_store(&w1->in_flight_rs, (int32_t) mizu_task_rs_index(&x));
+  atomic_store(&w1->in_flight_seq, atomic_load(&rs->sequence));
+  /* wk2 "dies" with the stale announce; wk's thief backstop reaps it off
+     an orphaned nested entry */
+  mizu_bytes q = { (void *) "q", 1 };
+  mizu_task tq;
+  assert(mizu_pool_submit(wk2, &q, &tq, 0) == MIZU_OK);
+  mizu_entry_hdr *eh =
+    (mizu_entry_hdr *) ((unsigned char *) mizu_shm_addr(shm) +
+                        w1->deque_buf_off);
+  eh->rs_index = UINT32_MAX;   /* steals fail into the streak probe */
+  mizu_pool_destroy(wk2);
+  wk2 = NULL;
+  for (int i = 0; i < PROBE_STREAK + 1; i++)
+    assert(mizu_pool_step(wk, 0) == MIZU_STEP_IDLE);
+  mizu_pool_info ps;
+  assert(mizu_pool_info_get(ctrl, &ps) == MIZU_OK);
+  assert(ps.worker_state[1] != MIZU_WK_LIVE);
+  assert(mizu_pool_task_state(ctrl, &x) == MIZU_RS_PENDING);   /* untouched */
+  /* wk's own leave fails its claim as DIED, as before */
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  assert(mizu_pool_task_state(ctrl, &x) == MIZU_RS_DIED);
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &x, &obj, 0) == MIZU_ERR);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  mizu_shm_close(shm, 0);
+  pool_end();
+  puts("ok false_died_guard");
+}
+
+/* MIZU_BINDING_SPLIT_WAITER: the collect family never touches the free
+   list — the task keeper of a spilled payload stays until the producing
+   thread's next submit drains the pending mask (the stage then pops the
+   surrendered region: fl.hits moves). Without the flag the release runs
+   at the collect (test_spill). mizu_pool_task_release hands over the
+   same way on every handle. An unknown flag bit fails create. */
+static void test_split_waiter(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_binding b, wb;
+  make_binding(&b, 0);
+  b.flags = 2u;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "unknown binding flags") != NULL);
+  b.flags = MIZU_BINDING_SPLIT_WAITER;
+  make_binding(&wb, 1);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+  wk2 = NULL;
+  sub = NULL;
+
+  size_t n = 100 * 1024;
+  unsigned char *big = malloc(n);
+  for (size_t i = 0; i < n; i++) big[i] = (unsigned char) (i * 31u);
+  mizu_handle *h = (mizu_handle *) ctrl;
+
+  mizu_task t = submit_bytes(ctrl, big, n);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t, big, n);
+  assert(h->fl.n == 0);              /* deferred: nothing surrendered yet */
+  uint64_t hits = h->fl.hits;
+  mizu_task t2 = submit_bytes(ctrl, big, n);   /* the drain, then the pop */
+  assert(h->fl.hits == hits + 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t2, big, n);
+
+  /* task_release: flagged from any thread, released at the next submit */
+  mizu_task t3 = submit_bytes(ctrl, big, n);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_task_release(ctrl, &t3) == 0);
+  assert(h->fl.n == 0);
+  hits = h->fl.hits;
+  mizu_task t4 = submit_bytes(ctrl, big, n);
+  assert(h->fl.hits == hits + 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  collect_bytes(ctrl, &t4, big, n);
+  /* the collect of a DIED result defers the ledger force the same way:
+     the handle's next submit runs it (the worker-death backstop still
+     holds under the flag — test_infra_failure_and_reap's path) */
+  free(big);
+  pool_end();
+  puts("ok split_waiter");
+}
+
+#if !defined(_WIN32)
+/* The split configuration under load: one thread submits spilled
+   payloads and steps the worker, another collects every task in order.
+   The two halves share the handle with no lock; the sanitizer legs
+   (TSan) prove the free list is never touched from the collector. */
+#define SPLIT_N 200
+static mizu_task split_tasks[SPLIT_N];
+static _Atomic int split_submitted = 0;
+static unsigned char split_big[2048];
+
+static void *split_collect_main(void *arg) {
+  int *ok = arg;
+  for (int i = 0; i < SPLIT_N; i++) {
+    int ready = 0;
+    MIZU_SPIN_WAIT(atomic_load(&split_submitted) > i, mizu_now() + 10,
+                   MIZU_SPIN_CLOCK_EVERY_LIGHT, ready);
+    if (!ready) return NULL;
+    void *obj = NULL;
+    if (mizu_pool_collect(ctrl, &split_tasks[i], &obj, 10000) != MIZU_OK)
+      return NULL;
+    mizu_bytes *b = obj;
+    if (b->len != sizeof split_big ||
+        memcmp(b->data, split_big, sizeof split_big) != 0)
+      return NULL;
+    mizu_bytes_free(b);
+  }
+  *ok = 1;
+  return NULL;
+}
+
+static void test_split_threads(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 2;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_binding b, wb;
+  make_binding(&b, 0);
+  b.flags = MIZU_BINDING_SPLIT_WAITER;
+  make_binding(&wb, 1);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+  wk2 = NULL;
+  sub = NULL;
+  for (size_t i = 0; i < sizeof split_big; i++)
+    split_big[i] = (unsigned char) (i * 7u);
+  atomic_store(&split_submitted, 0);
+  int ok = 0;
+  pthread_t th;
+  assert(pthread_create(&th, NULL, split_collect_main, &ok) == 0);
+  for (int i = 0; i < SPLIT_N; i++) {
+    mizu_bytes tb = { split_big, sizeof split_big };
+    assert(mizu_pool_submit(ctrl, &tb, &split_tasks[i], 10000) == MIZU_OK);
+    atomic_fetch_add(&split_submitted, 1);
+    assert(mizu_pool_step(wk, 1000) == MIZU_STEP_TASK);
+  }
+  assert(pthread_join(th, NULL) == 0);
+  assert(ok == 1);
+  pool_end();
+  puts("ok split_threads");
+}
+#endif
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
@@ -3916,6 +4209,12 @@ int main(void) {
 #endif
   test_unpark_idle();
   test_unpark_waking();
+  test_parked_death();
+  test_false_died_guard();
+  test_split_waiter();
+#if !defined(_WIN32)
+  test_split_threads();
+#endif
   test_round_trip();
   test_spill();
   test_submit_sweep_churn();

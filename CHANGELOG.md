@@ -37,7 +37,11 @@ First public release.
   language object. Bindings register `stage` / `read` / `exec` / `check`
   / `park` / `sweep` / `drop` callbacks per handle; staging is
   transactional, so a mid-stage abort leaves the handle consistent. A
-  built-in bytes binding ships as the reference consumer.
+  binding that runs a submitter's collect family on a second thread
+  declares it with `MIZU_BINDING_SPLIT_WAITER`: the collect side then
+  hands its releases to the producing thread through per-slot masks
+  instead of touching the free list (no lock, no waiting). A built-in
+  bytes binding ships as the reference consumer.
 - A three-tier API: the stable `mizu.h`, the binding-author `mizu_ext.h`
   (dual-form header inlines plus exported symbols, pinned per minor
   release), and private internals.

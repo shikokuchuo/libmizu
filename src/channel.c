@@ -605,6 +605,11 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
     memcpy(&n, payload, sizeof(n));
     if (c->rx.arena == NULL || off > c->rx.arena_size ||
         n > c->rx.arena_size - off) {
+      /* the core's own consume decision: a torn slot has no binding to
+         ask, and left in place it would wedge the ring behind it (the
+         verdicts would keep reporting it as data). The error still
+         reports; the next receive sees the next slot. */
+      *rflags_out = MIZU_READ_CONSUME;
       *err_out = "corrupt payload slot";
       return MIZU_ERR;
     }
@@ -619,6 +624,7 @@ static mizu_status chan_read(mizu_channel *c, const unsigned char *sl,
     const uint32_t len = hdr->len;
     if (c->rx.arena == NULL || off > c->rx.arena_size ||
         len > c->rx.arena_size - off) {
+      *rflags_out = MIZU_READ_CONSUME;   /* as the ARENA branch */
       *err_out = "corrupt payload slot";
       return MIZU_ERR;
     }
@@ -1228,6 +1234,7 @@ mizu_status mizu_channel_recv_batch_fn(mizu_channel *c, size_t cap,
     return chan_forked(c);
   }
   if (cap < 1 || sink == NULL) {
+    *n_out = 0;
     mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
                    "n must be at least 1 and the sink non-NULL");
     return MIZU_ERR;

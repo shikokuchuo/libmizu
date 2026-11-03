@@ -218,7 +218,9 @@ int mizu_shm_os_open(const char *name, int flags, mode_t mode) {
      that window would otherwise inherit it. */
   int fd = shm_open(name, flags, mode);
   if (fd >= 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+    int err = errno;   /* the caller classifies errno: keep it past close */
     close(fd);
+    errno = err;
     return -1;
   }
   return fd;
@@ -648,7 +650,10 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
      allocation if the process dies mid-grind. statvfs is not a
      reservation; the populate below still enforces it. */
   struct statvfs sv;
-  if (fstatvfs(fd, &sv) == 0 &&
+  /* f_blocks == 0 is an unlimited tmpfs (mounted size=0 / nr_blocks=0:
+     shmem_statfs leaves every block count at zero), where the probe has
+     nothing to say — without the guard it would reject every create */
+  if (fstatvfs(fd, &sv) == 0 && sv.f_blocks != 0 &&
       (uint64_t) size > (uint64_t) sv.f_bavail * sv.f_frsize)
     return mizu_create_fail(fd, shm->name, ENOSPC);
 #endif
@@ -684,9 +689,16 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
      congruence gate; a partial tail stays for the populate. */
   if (size >= MIZU_HUGE_EXTENT) {
     const size_t whole = size & ~(MIZU_HUGE_EXTENT - 1);
-    volatile unsigned char *b = (volatile unsigned char *) addr;
-    for (size_t off = 0; off < whole; off += MIZU_HUGE_EXTENT) b[off] = 0;
-    if (madvise(addr, whole, MADV_COLLAPSE) == 0) {
+    /* The per-extent touch is a populate, not a store: a store faults
+       outside any reservation, and a tmpfs that filled since the probe
+       answers it with SIGBUS where the populate answers ENOMEM/EFAULT.
+       One page per extent (the length rounds up to a page). A populate
+       that fails (pre-5.14 EINVAL, a full tmpfs) skips the collapse —
+       the full populate below reports the real cause. */
+    int touched = 1;
+    for (size_t off = 0; touched && off < whole; off += MIZU_HUGE_EXTENT)
+      touched = madvise((char *) addr + off, 1, MADV_POPULATE_WRITE) == 0;
+    if (touched && madvise(addr, whole, MADV_COLLAPSE) == 0) {
       shm->collapsed = 1;
       reserved = whole == size ||
                  madvise((char *) addr + whole, size - whole,

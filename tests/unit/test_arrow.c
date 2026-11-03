@@ -2741,7 +2741,35 @@ static void test_write_ix_kinds(void) {
   mizu_arrow_close(a);
 }
 
+/* The masked convert's NA fill is lane-width aware: a complex64 row
+   (16-byte lanes) nulls both parts of the null lane and leaves the
+   neighbours exact; a uint8 row fills a zero byte. */
+static void test_cvt_fill_widths(void) {
+  const mizu_cvt_row c64 = { MIZU_TYPE_CPLX, MIZU_CVT_C64_CPLX, 8, 16 };
+  const float src[6] = { 1.5f, -2.5f, 9.0f, 9.0f, 3.25f, 4.0f };
+  const uint8_t valid = 0x05;   /* lane 1 null */
+  uint8_t dst[48];
+  memset(dst, 0xEE, sizeof dst);
+  mizu_arrow_warn warn = { 0, 0, 0 };
+  mizu_cvt_convert(dst, (const uint8_t *) src, &valid, 0, 3, &c64, &warn);
+  double got[6];
+  memcpy(got, dst, sizeof got);
+  assert(got[0] == 1.5 && got[1] == -2.5 && got[4] == 3.25 && got[5] == 4.0);
+  uint64_t re, im;
+  memcpy(&re, dst + 16, 8);
+  memcpy(&im, dst + 24, 8);
+  assert(re == MIZU_NA_REAL_BITS && im == MIZU_NA_REAL_BITS);
+
+  const mizu_cvt_row u8 = { MIZU_TYPE_RAW, MIZU_CVT_COPY, 1, 1 };
+  const uint8_t bytes[3] = { 7, 8, 9 };
+  uint8_t out[4] = { 0xEE, 0xEE, 0xEE, 0xEE };
+  mizu_cvt_convert(out, bytes, &valid, 0, 3, &u8, &warn);
+  assert(out[0] == 7 && out[1] == 0 && out[2] == 9 && out[3] == 0xEE);
+  puts("ok cvt_fill_widths");
+}
+
 int main(void) {
+  test_cvt_fill_widths();
   test_frame_a();
   test_cvt_types();
   test_intmin();

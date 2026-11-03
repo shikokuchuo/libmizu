@@ -40,7 +40,14 @@ RngStreams, doxygen-awesome-css).
   machinery (`spill.c`), channel transport (`channel.c`), bytes binding
   (`bytes.c`), pool transport (`pool.c` — full verb surface: vectored
   collects, introspection, map support, armed death watches,
-  `mizu_pool_task_release`, `mizu_pool_submit_batch_fn`), the raw-tier
+  `mizu_pool_task_release`, `mizu_pool_submit_batch_fn`; the deferred-release
+  masks — `rel_pending` per task-table slot and `force_pending` per worker
+  slot, set by any thread with one fetch-or and drained by the producing
+  thread at submit entry and the worker reap points — carry the collect
+  family's releases under `MIZU_BINDING_SPLIT_WAITER`, every
+  `mizu_pool_task_release`, and the controller's off-thread death-callback
+  forces; the reap clears a dead worker's park announce, and the publish CAS
+  and `pool_fail_in_flight` both check the slot's incarnation), the raw-tier
   staging reservation (`stage_raw.c` — `mizu_stage_raw` /
   `mizu_stage_raw_spill`), the map morsel-claim protocol (`morsel.c` —
   `mizu_morsel_*`), the 'I' interchange cursor (`interop.c` — the

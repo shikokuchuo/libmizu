@@ -636,6 +636,11 @@ static inline MIZU_MAYBE_UNUSED int mizu_binding_check(const mizu_binding *b,
                        "language byte", what);
     return -1;
   }
+  if ((b->flags & ~MIZU_BINDING_FLAGS_ALL) != 0) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a %s binding sets unknown binding flags", what);
+    return -1;
+  }
   return 0;
 }
 
