@@ -40,6 +40,7 @@ var mizu__ext_8h =
     [ "MIZU_CAP_ORDERED", "mizu__ext_8h.html#a98482f75d4b846bce9bab808001504fd", null ],
     [ "MIZU_IDENT", "mizu__ext_8h.html#a5b840ab0de642c2462a22c967295f6e2", null ],
     [ "MIZU_READ_CONSUME", "mizu__ext_8h.html#a8b5190cadbc71574f32687e4ab3d94b9", null ],
+    [ "MIZU_BINDING_SPLIT_WAITER", "mizu__ext_8h.html#aff1c67a263cde261afa7dbc198f68829", null ],
     [ "MIZU_MORSEL_CANCEL_OFF", "mizu__ext_8h.html#a66c1c190a71bfc27352ea371621715f8", null ],
     [ "MIZU_MORSEL_GEN_MASK", "mizu__ext_8h.html#a038284545ba1e28175974a2b09ddf316", null ],
     [ "MIZU_MORSEL_T_TARGET", "mizu__ext_8h.html#a6fbbb0dbeaca0a0d9afe5b0690260a0b", null ],

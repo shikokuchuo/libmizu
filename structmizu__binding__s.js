@@ -7,5 +7,6 @@ var structmizu__binding__s =
     [ "sweep", "structmizu__binding__s.html#a3c079ed014b6d770c59b94616f406fbf", null ],
     [ "drop", "structmizu__binding__s.html#a7963cae0c64984f66d1d3f18aa535303", null ],
     [ "ctx", "structmizu__binding__s.html#a8fb5a137cad62ba9ea055dd40553df83", null ],
-    [ "ident", "structmizu__binding__s.html#a36444699f8dcb0243502c60256195f78", null ]
+    [ "ident", "structmizu__binding__s.html#a36444699f8dcb0243502c60256195f78", null ],
+    [ "flags", "structmizu__binding__s.html#ab9db044355a3c3a50485a0cc316613e2", null ]
 ];
