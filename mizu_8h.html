@@ -1472,7 +1472,7 @@ me"; the publisher clears it as it signals, so one signal per idle transition); 
 </div><div class="memdoc">
 
 <p>Error access. </p>
-<p>Handle verbs record the category + message on the handle; both are valid until the next call on that handle. Handle-free entry points (regions, prune) use a thread-local slot instead. </p>
+<p>Handle verbs record the category + message on the handle and shadow them in the calling thread's slot, so a thread reads its own last record on that handle even while another thread's verb on the same handle fails (the split-waiter configuration, <a class="el" href="mizu__ext_8h.html" title="libmizu binding-author API (the unstable tier).">mizu_ext.h</a>); both are valid until this thread's next call on that handle. Handle-free entry points (regions, prune) use the thread-local slot alone. </p>
 
 </div>
 </div>
