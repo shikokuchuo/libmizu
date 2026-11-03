@@ -2733,6 +2733,7 @@ struct race_ctx {
   mizu_status st;
   void *obj;
   int step_rc;
+  char err[256];   /* the thread's own record (per-thread, so read there) */
 };
 
 static void race_start(pthread_t *ta, pthread_t *tb,
@@ -2753,6 +2754,7 @@ static void *gated_collect_main(void *arg) {
   while (atomic_load_explicit(&race_gate, memory_order_acquire) == 0)
     ;
   c->st = mizu_pool_collect(c->p, &c->t, &c->obj, 5000);
+  snprintf(c->err, sizeof c->err, "%s", mizu_pool_error(c->p));
   return NULL;
 }
 
@@ -2808,7 +2810,7 @@ static void test_threaded_races(void) {
       if (tracked_a[k] != win) mizu_bytes_free(tracked_a[k]);
     for (int k = 0; k < tracked_b_n; k++)
       if (tracked_b[k] != win) mizu_bytes_free(tracked_b[k]);
-    assert(strstr(mizu_pool_error(ra.st == MIZU_OK ? sub : ctrl),
+    assert(strstr(ra.st == MIZU_OK ? rb.err : ra.err,
                   "already collected") != NULL);
   }
   free(big);
@@ -2846,7 +2848,7 @@ static void test_threaded_races(void) {
     assert(pthread_join(ta, NULL) == 0);
     assert(pthread_join(tb, NULL) == 0);
     assert(ra.st == MIZU_ERR && rb.st == MIZU_ERR);
-    const char *ea = mizu_pool_error(ctrl), *eb = mizu_pool_error(sub);
+    const char *ea = ra.err, *eb = rb.err;
     int died = (strcmp(ea, "worker died while executing this task") == 0) +
       (strcmp(eb, "worker died while executing this task") == 0);
     assert(died == 1);
@@ -2871,7 +2873,7 @@ static void test_threaded_races(void) {
     assert(pthread_join(ta, NULL) == 0);
     assert(pthread_join(tb, NULL) == 0);
     assert(ra.st == MIZU_ERR && rb.st == MIZU_ERR);
-    const char *ea = mizu_pool_error(ctrl), *eb = mizu_pool_error(sub);
+    const char *ea = ra.err, *eb = rb.err;
     int lost =
       (strstr(ea, "task lost") != NULL) + (strstr(eb, "task lost") != NULL);
     assert(lost == 1);
@@ -4172,6 +4174,63 @@ static void test_split_threads(void) {
 }
 #endif
 
+#if !defined(_WIN32)
+/* The error record is per thread: two threads failing verbs on one
+   handle each read their own message (the shadow), a handle-free record
+   on a thread leaves that thread's shadow alone, and a thread that never
+   recorded on the handle reads the handle slot (the last writer). */
+static _Atomic int shadow_stage = 0;
+static int shadow_b_ok = 0;
+
+static void *shadow_b_main(void *arg) {
+  (void) arg;
+  while (atomic_load(&shadow_stage) < 1) { }
+  mizu_task junk = { 0 };
+  void *v = NULL;
+  assert(mizu_pool_collect_any(ctrl, &junk, 1, NULL, &v, 0) == MIZU_ERR);
+  atomic_store(&shadow_stage, 2);
+  while (atomic_load(&shadow_stage) < 3) { }
+  shadow_b_ok = strcmp(mizu_pool_error(ctrl),
+                       "expected an index out-param") == 0 &&
+    mizu_pool_errcat(ctrl) == MIZU_ERRCAT_OTHER;
+  return NULL;
+}
+
+static void test_error_shadow(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  atomic_store(&shadow_stage, 0);
+  pthread_t th;
+  assert(pthread_create(&th, NULL, shadow_b_main, NULL) == 0);
+  mizu_task bad = mizu_task_make(1, 1u << 20);   /* rs_index out of range */
+  void *v = NULL;
+  assert(mizu_pool_collect(ctrl, &bad, &v, 0) == MIZU_ERR);
+  atomic_store(&shadow_stage, 1);
+  while (atomic_load(&shadow_stage) < 2) { }
+  /* B's record is the handle slot's now; this thread reads its own */
+  assert(strcmp(mizu_pool_error(ctrl), "invalid task handle") == 0);
+  assert(mizu_pool_errcat(ctrl) == MIZU_ERRCAT_OTHER);
+  atomic_store(&shadow_stage, 3);
+  assert(pthread_join(th, NULL) == 0);
+  assert(shadow_b_ok);
+  /* a handle-free record is the other slot: this thread's shadow stands,
+     and the handle-free message is untouched by handle records */
+  mizu_shm *s = NULL;
+  assert(mizu_shm_open(&s, "/mizu_nope") == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "invalid task handle") == 0);
+  const char *free_msg = mizu_last_error_message();
+  assert(mizu_pool_collect(ctrl, &bad, &v, 0) == MIZU_ERR);
+  assert(mizu_last_error_message() == free_msg &&
+         strstr(free_msg, "invalid task handle") == NULL);
+  /* a fresh handle this thread never failed on reads its own slot */
+  mizu_binding sb;
+  make_binding(&sb, 0);
+  assert(mizu_pool_attach(&sub, token, &sb) == MIZU_OK);
+  assert(strcmp(mizu_pool_error(sub), "") == 0);
+  pool_end();
+  puts("ok error_shadow");
+}
+#endif
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
@@ -4214,6 +4273,7 @@ int main(void) {
   test_split_waiter();
 #if !defined(_WIN32)
   test_split_threads();
+  test_error_shadow();
 #endif
   test_round_trip();
   test_spill();

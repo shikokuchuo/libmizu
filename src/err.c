@@ -15,6 +15,14 @@ MIZU_COLD void mizu_err_record(mizu_handle *h, mizu_errcat cat, const char *fmt,
   vsnprintf(h->errmsg, sizeof(h->errmsg), fmt, ap);
   va_end(ap);
   h->errcat = cat;
+  mizu_err_shadow(h, h->id, cat, h->errmsg);   /* this thread's own copy */
+}
+
+/* Handle ids: a process-wide counter, so the error shadow's tag never
+   aliases across a handle's reallocation. */
+uint64_t mizu_handle_next_id(void) {
+  static _Atomic uint64_t next = 0;
+  return atomic_fetch_add_explicit(&next, 1, memory_order_relaxed) + 1;
 }
 
 /* The region-create failure record (the channel/pool creates, the public

@@ -1491,12 +1491,20 @@ mizu_status mizu_channel_info_get(const mizu_channel *c, mizu_channel_info *out)
   return MIZU_OK;
 }
 
+/* The calling thread's own last record on the handle wins (the shadow);
+   the handle slot answers a thread that recorded nothing on it. */
 mizu_errcat mizu_channel_errcat(const mizu_channel *c) {
-  return c != NULL ? c->h.errcat : mizu_last_error_category();
+  if (c == NULL) return mizu_last_error_category();
+  mizu_errcat cat;
+  return mizu_err_shadow_get(&c->h, c->h.id, &cat) != NULL ? cat
+                                                           : c->h.errcat;
 }
 
 const char *mizu_channel_error(const mizu_channel *c) {
-  return c != NULL ? c->h.errmsg : mizu_last_error_message();
+  if (c == NULL) return mizu_last_error_message();
+  mizu_errcat cat;
+  const char *msg = mizu_err_shadow_get(&c->h, c->h.id, &cat);
+  return msg != NULL ? msg : c->h.errmsg;
 }
 
 /* The GC-finalizer target: idempotent, never blocks. On a handle that

@@ -287,8 +287,8 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      drained at its next submit; a worker handle's halves are one thread
      by construction, so the flag is inert there. Without it the two
      halves must share a thread, and every release runs at the collect.
-     The handle's error record stays one slot either way: read it on the
-     thread that received MIZU_ERR, before that thread's next verb. */
+     The error record is per thread either way (mizu.h, Error access):
+     each thread reads its own last record on the handle. */
 
 typedef int (*mizu_stage_fn)(void *obj, mizu_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,

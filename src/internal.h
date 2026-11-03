@@ -145,6 +145,14 @@ void mizu_region_unlink(mizu_shm *shm);
    records, valid until the next call on the same handle / thread. */
 MIZU_COLD void mizu_err_record(mizu_handle *h, mizu_errcat cat, const char *fmt, ...);
 MIZU_COLD void mizu_err_record_tls(mizu_errcat cat, const char *fmt, ...);
+/* The per-thread shadow of a handle record (err_tls.c): mizu_err_record
+   writes it; the handle error getters read it ahead of the handle slot.
+   Tagged with the handle's address and id (mizu_handle_next_id, err.c). */
+MIZU_COLD void mizu_err_shadow(const void *h, uint64_t id, mizu_errcat cat,
+                               const char *msg);
+const char *mizu_err_shadow_get(const void *h, uint64_t id,
+                                mizu_errcat *cat_out);
+uint64_t mizu_handle_next_id(void);
 /* The region-create failure record shared by the channel/pool creates,
    the public region create, and the spill layer (err.c): the category
    describe plus "cannot create <what> (<size> bytes): ..." TLS-side. */
@@ -555,6 +563,10 @@ struct mizu_handle_s {
                                    a predicted indirect branch per call */
   mizu_errcat errcat;            /* verb error slot — valid until the next */
   char errmsg[256];             /*   call on this handle */
+  uint64_t id;                  /* process-unique (mizu_handle_next_id):
+                                   the error shadow's tag, so a handle
+                                   reallocated at a dead one's address
+                                   never inherits a thread's stale record */
   uint8_t htype;                /* MIZU_HTYPE_*; 0 = unset */
   mizu_spill_fl fl;              /* producer free list + lent-region ledger */
   mizu_open_cache oc;            /* consumer SHM_RAW mapping cache */
@@ -569,6 +581,7 @@ struct mizu_handle_s {
 /* Initialize the handle's read-ctx template once the binding is in
    (create/attach/join). */
 static inline MIZU_MAYBE_UNUSED void mizu_read_tmpl_init(mizu_handle *h) {
+  h->id = mizu_handle_next_id();
   memset(&h->read_tmpl, 0, sizeof(h->read_tmpl));
   h->read_tmpl.size = (uint32_t) sizeof(h->read_tmpl);
   h->read_tmpl.died_slot = -1;

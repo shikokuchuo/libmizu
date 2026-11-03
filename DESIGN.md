@@ -21,8 +21,8 @@ Wire type tags (`mizu_type_e`) sit in the same contract: int64 rides tag 32 (out
 Terminal transport states return `mizu_status` values: `MIZU_FULL`, `MIZU_TIMEOUT`, `MIZU_CLOSED`, `MIZU_PEER_GONE`.
 This keeps hot loops branch-cheap.
 `MIZU_ERR` is a real error: a portable `mizu_errcat` plus a formatted message.
-The record lives on the handle and stays valid until the next call on it.
-Handle-free entry points (regions, prune) use a thread-local slot.
+The record lives on the handle and stays valid until the next call on it, and every record is shadowed in the calling thread's slot, tagged with the handle: a thread reads its own last record on a handle, never another thread's, so the two halves of a split waiter cannot overwrite each other's text between a failing verb and its error read.
+Handle-free entry points (regions, prune) use the thread-local slot alone.
 Each binding maps the four terminal states to its own sentinel or condition values, and `MIZU_ERR` to its error hierarchy.
 The mapping is per-verb: a full ring on send is a sentinel value for the binding, and a full injection ring at the submit deadline raises.
 
@@ -730,7 +730,7 @@ No thread waits on another anywhere in the hand-off; the cost when nothing is pe
 The drain releases a flagged slot only while it reads FREE: FREE means freed and not recommitted (a recommit is PENDING again), so the entry is the previous incarnation's or already released, and a stale bit — a lost CAS race, a stale handle — can never release a recommitted slot's keeper.
 The same masks serve every off-thread verdict regardless of the flag: `mizu_pool_task_release` (any thread, a GC finalizer's verb) flags the slot instead of releasing, and the controller's death-callback reap flags the dead worker's force for the handle thread, which no path reached before.
 When the halves share a thread (the flag clear, every worker handle), the collect family drains the masks itself and releases at the collect as before.
-The handle's error record stays one slot under the flag: a binding reads it on the thread that received `MIZU_ERR`, before that thread's next verb.
+The handle's error record is per thread under the flag as everywhere (the shadow in "Statuses, not exceptions"), so the two threads' failures never read each other's text.
 They carry no CAS by design (a mutex on the hot path would void the lock-free proposition), so concurrent verbs within one role race them, and most outcomes are silent: torn ring entries, double keeper surrenders aliasing the free list, duplicated or dropped channel messages.
 The guards that do exist (the terminal-to-FREE collect CAS, the zombie incarnation check, the claimant CASes) catch a violation only after the damage is staged, or not at all.
 Safe from any thread: `mizu_pool_cancel`, `mizu_pool_task_release`, `mizu_pool_task_state`, and the introspection reads, which are the status-word CAS verbs, kept thread-safe for GC finalizers and racy probes.

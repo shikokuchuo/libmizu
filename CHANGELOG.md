@@ -18,8 +18,9 @@ First public release.
 - Lock-free SPSC channels and work-stealing task pools over POSIX shared
   memory (Linux, macOS) and Win32 file mappings, behind a
   language-agnostic, FFI-safe C ABI: opaque handles, `mizu_status`
-  terminal states instead of errors, vectored collects, batch submit,
-  and pool introspection. 64-bit platforms; Linux needs kernel >= 5.3.
+  terminal states instead of errors (a handle's error record is shadowed
+  per calling thread), vectored collects, batch submit, and pool
+  introspection. 64-bit platforms; Linux needs kernel >= 5.3.
 - Crash-atomic wire formats: every cross-process claim is copy-then-CAS,
   and the parker protocol (one epoch word per waiting entity over futex /
   `__ulock` / WaitOnAddress, plus named events) is the sole guarantee

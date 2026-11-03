@@ -34,7 +34,9 @@ RngStreams, doxygen-awesome-css).
 - `src/` — implementation. Every TU is platform-guarded internally, so all
   sources compile on every platform (a foreign platform's file is empty).
   Main pieces: region layer (`shm.c`, `shm_rw.c`, `preamble.c`,
-  `err_tls.c` — the thread-local error slot for handle-free entry points;
+  `err_tls.c` — the thread-local error slot for handle-free entry points
+  and the per-thread shadow of every handle record (the handle error
+  getters read the calling thread's own last record first);
   `shm.c` + `err_tls.c` vendor as a unit and depend only on `mizu.h`),
   parker (`parker.c`), liveness lock (`liveness.c`), spill/ledger/zc
   machinery (`spill.c`), channel transport (`channel.c`), bytes binding

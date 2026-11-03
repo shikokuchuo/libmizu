@@ -4860,10 +4860,18 @@ mizu_status mizu_pool_tasks_get(const mizu_pool *p, mizu_rs_row *out,
 
 // Handle error access ------------------------------------------------------------------
 
+/* The calling thread's own last record on the handle wins (the shadow);
+   the handle slot answers a thread that recorded nothing on it. */
 mizu_errcat mizu_pool_errcat(const mizu_pool *p) {
-  return p != NULL ? p->h.errcat : mizu_last_error_category();
+  if (p == NULL) return mizu_last_error_category();
+  mizu_errcat cat;
+  return mizu_err_shadow_get(&p->h, p->h.id, &cat) != NULL ? cat
+                                                           : p->h.errcat;
 }
 
 const char *mizu_pool_error(const mizu_pool *p) {
-  return p != NULL ? p->h.errmsg : mizu_last_error_message();
+  if (p == NULL) return mizu_last_error_message();
+  mizu_errcat cat;
+  const char *msg = mizu_err_shadow_get(&p->h, p->h.id, &cat);
+  return msg != NULL ? msg : p->h.errmsg;
 }
