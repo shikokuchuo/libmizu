@@ -31,7 +31,7 @@
   <td id="projectalign">
    <div id="projectname">libmizu<span id="projectnumber">&#160;0.1.0</span>
    </div>
-   <div id="projectbrief">Lock-free shared memory IPC at thread speed in C11</div>
+   <div id="projectbrief">Thread-speed, lock-free shared memory IPC in C11</div>
   </td>
  </tr>
  </tbody>
@@ -98,7 +98,7 @@ $(function(){initNavTree('index.html','',''); });
 <div class="textblock"><p><a class="anchor" id="md_README"></a></p>
 <p><a href="https://shikokuchuo.net/libmizu/"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" alt="libmizu logo" align="right" width="240" style="pointer-events: none;" class="inline"/></a></p>
 <p><a href="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml"><img src="https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg" alt="CI" style="pointer-events: none;" class="inline"/></a> <a href="https://codecov.io/gh/shikokuchuo/libmizu"><img src="https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg" alt="Codecov" style="pointer-events: none;" class="inline"/></a> <a href="https://github.com/shikokuchuo/libmizu/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" style="pointer-events: none;" class="inline"/></a> <a href="https://shikokuchuo.net/libmizu/"><img src="https://img.shields.io/badge/docs-api-blue.svg" alt="Docs" style="pointer-events: none;" class="inline"/></a></p>
-<p>Lock-free shared memory IPC at thread speed in C11.</p>
+<p>Thread-speed, lock-free shared memory IPC in C11.</p>
 <p>libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to &lt; 1 µs, so you can divide work as finely as you would with threads (see Performance).</p>
 <p>Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting that stays out of the kernel on the hot path, and OS notification when a peer dies.</p>
 <p>Bindings share one wire format, so processes in different languages can exchange data over the same channel. The first-party bindings are <a href="https://github.com/shikokuchuo/mizu">mizu</a> for R and <a href="https://github.com/shikokuchuo/pymizu">pymizu</a> for Python. Writing a binding covers other languages.</p>
