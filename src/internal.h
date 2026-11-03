@@ -153,6 +153,12 @@ MIZU_COLD void mizu_err_shadow(const void *h, uint64_t id, mizu_errcat cat,
 const char *mizu_err_shadow_get(const void *h, uint64_t id,
                                 mizu_errcat *cat_out);
 uint64_t mizu_handle_next_id(void);
+/* The const-handle record (the snapshot getters take a const handle):
+   the thread slot plus the shadow for h, so mizu_pool_error / errcat
+   answer the calling thread as for any verb; h NULL records the slot
+   alone. */
+MIZU_COLD void mizu_err_record_const(const mizu_handle *h, mizu_errcat cat,
+                                     const char *fmt, ...);
 /* The region-create failure record shared by the channel/pool creates,
    the public region create, and the spill layer (err.c): the category
    describe plus "cannot create <what> (<size> bytes): ..." TLS-side. */

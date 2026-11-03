@@ -143,8 +143,10 @@ typedef enum mizu_errcat_e {
    and shadow them in the calling thread's slot, so a thread reads its own
    last record on that handle even while another thread's verb on the same
    handle fails (the split-waiter configuration, mizu_ext.h); both are
-   valid until this thread's next call on that handle. Handle-free entry
-   points (regions, prune) use the thread-local slot alone. */
+   valid until this thread's next call on that handle. The const snapshot
+   getters (info, dump, tasks) record on the thread slot and the shadow,
+   so the handle getters answer them on the calling thread too. Handle-free
+   entry points (regions, prune) use the thread-local slot alone. */
 MIZU_API mizu_errcat mizu_last_error_category(void);
 MIZU_API const char *mizu_last_error_message(void);
 

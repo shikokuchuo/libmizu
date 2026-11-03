@@ -18,6 +18,17 @@ MIZU_COLD void mizu_err_record(mizu_handle *h, mizu_errcat cat, const char *fmt,
   mizu_err_shadow(h, h->id, cat, h->errmsg);   /* this thread's own copy */
 }
 
+MIZU_COLD void mizu_err_record_const(const mizu_handle *h, mizu_errcat cat,
+                                     const char *fmt, ...) {
+  char msg[256];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+  mizu_err_record_tls(cat, "%s", msg);
+  if (h != NULL) mizu_err_shadow(h, h->id, cat, msg);
+}
+
 /* Handle ids: a process-wide counter, so the error shadow's tag never
    aliases across a handle's reallocation. */
 uint64_t mizu_handle_next_id(void) {

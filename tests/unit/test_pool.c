@@ -4113,8 +4113,13 @@ static void test_split_waiter(void) {
    The two halves share the handle with no lock; the sanitizer legs
    (TSan) prove the free list is never touched from the collector. */
 #define SPLIT_N 200
+#define SPLIT_WINDOW 16   /* outstanding tasks: under the controller's 32
+                             result slots (64 over 2 submitters), so a
+                             starved collector thread never exhausts the
+                             submitter (the macos-latest runner did) */
 static mizu_task split_tasks[SPLIT_N];
 static _Atomic int split_submitted = 0;
+static _Atomic int split_collected = 0;
 static unsigned char split_big[2048];
 
 static void *split_collect_main(void *arg) {
@@ -4132,6 +4137,7 @@ static void *split_collect_main(void *arg) {
         memcmp(b->data, split_big, sizeof split_big) != 0)
       return NULL;
     mizu_bytes_free(b);
+    atomic_fetch_add(&split_collected, 1);
   }
   *ok = 1;
   return NULL;
@@ -4158,10 +4164,16 @@ static void test_split_threads(void) {
   for (size_t i = 0; i < sizeof split_big; i++)
     split_big[i] = (unsigned char) (i * 7u);
   atomic_store(&split_submitted, 0);
+  atomic_store(&split_collected, 0);
   int ok = 0;
   pthread_t th;
   assert(pthread_create(&th, NULL, split_collect_main, &ok) == 0);
   for (int i = 0; i < SPLIT_N; i++) {
+    /* backpressure: stay within the window of the collector */
+    int room = 0;
+    MIZU_SPIN_WAIT(atomic_load(&split_collected) + SPLIT_WINDOW > i,
+                   mizu_now() + 10, MIZU_SPIN_CLOCK_EVERY_LIGHT, room);
+    assert(room);
     mizu_bytes tb = { split_big, sizeof split_big };
     assert(mizu_pool_submit(ctrl, &tb, &split_tasks[i], 10000) == MIZU_OK);
     atomic_fetch_add(&split_submitted, 1);
@@ -4231,6 +4243,33 @@ static void test_error_shadow(void) {
 }
 #endif
 
+/* The const snapshot getters record for the handle through the shadow:
+   after a stop, mizu_pool_error answers "pool handle is closed" on the
+   calling thread, and the thread slot carries it too. */
+static void test_closed_getters(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  mizu_pool_destroy(wk);
+  wk = NULL;
+  assert(mizu_pool_stop(ctrl, 1000) == MIZU_OK);
+  mizu_pool_info info;
+  mizu_pool_dump *d = malloc(sizeof *d);
+  mizu_rs_row row;
+  uint32_t n = 0;
+  assert(mizu_pool_info_get(ctrl, &info) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "pool handle is closed") == 0);
+  assert(mizu_pool_errcat(ctrl) == MIZU_ERRCAT_OTHER);
+  assert(strcmp(mizu_last_error_message(), "pool handle is closed") == 0);
+  assert(mizu_pool_dump_get(ctrl, d) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "pool handle is closed") == 0);
+  assert(mizu_pool_tasks_get(ctrl, &row, 1, &n) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "pool handle is closed") == 0);
+  free(d);
+  mizu_pool_destroy(ctrl);
+  ctrl = NULL;
+  puts("ok closed_getters");
+}
+
 int main(void) {
   mizu_binding_bytes(&bytesb);
 
@@ -4271,6 +4310,7 @@ int main(void) {
   test_parked_death();
   test_false_died_guard();
   test_split_waiter();
+  test_closed_getters();
 #if !defined(_WIN32)
   test_split_threads();
   test_error_shadow();

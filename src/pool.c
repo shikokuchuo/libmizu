@@ -821,7 +821,8 @@ mizu_status mizu_pool_create(mizu_pool **out, const mizu_pool_opts *opts,
    "<pid hex>_<counter hex>". */
 mizu_status mizu_pool_token(const mizu_pool *p, char *buf, size_t cap) {
   if (p == NULL || p->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
+    mizu_err_record_const(p != NULL ? &p->h : NULL, MIZU_ERRCAT_OTHER,
+                          "pool handle is closed");
     return MIZU_ERR;
   }
   return mizu_token_from_name(p->shm.name, buf, cap);
@@ -4742,11 +4743,13 @@ static void pool_info_fill(const mizu_pool *p, mizu_pool_info *out) {
 
 mizu_status mizu_pool_info_get(const mizu_pool *p, mizu_pool_info *out) {
   if (p == NULL || p->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
+    mizu_err_record_const(p != NULL ? &p->h : NULL, MIZU_ERRCAT_OTHER,
+                          "pool handle is closed");
     return MIZU_ERR;
   }
   if (out == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "expected an info out-param");
+    mizu_err_record_const(&p->h, MIZU_ERRCAT_OTHER,
+                          "expected an info out-param");
     return MIZU_ERR;
   }
   pool_info_fill(p, out);
@@ -4755,11 +4758,13 @@ mizu_status mizu_pool_info_get(const mizu_pool *p, mizu_pool_info *out) {
 
 mizu_status mizu_pool_dump_get(const mizu_pool *p, mizu_pool_dump *out) {
   if (p == NULL || p->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
+    mizu_err_record_const(p != NULL ? &p->h : NULL, MIZU_ERRCAT_OTHER,
+                          "pool handle is closed");
     return MIZU_ERR;
   }
   if (out == NULL) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "expected a dump out-param");
+    mizu_err_record_const(&p->h, MIZU_ERRCAT_OTHER,
+                          "expected a dump out-param");
     return MIZU_ERR;
   }
   memset(out, 0, sizeof(*out));
@@ -4827,12 +4832,13 @@ mizu_status mizu_pool_dump_get(const mizu_pool *p, mizu_pool_dump *out) {
 mizu_status mizu_pool_tasks_get(const mizu_pool *p, mizu_rs_row *out,
                               uint32_t cap, uint32_t *n_out) {
   if (p == NULL || p->released) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "pool handle is closed");
+    mizu_err_record_const(p != NULL ? &p->h : NULL, MIZU_ERRCAT_OTHER,
+                          "pool handle is closed");
     return MIZU_ERR;
   }
   if (n_out == NULL || (cap > 0 && out == NULL)) {
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                       "expected a row buffer and a count out-param");
+    mizu_err_record_const(&p->h, MIZU_ERRCAT_OTHER,
+                          "expected a row buffer and a count out-param");
     return MIZU_ERR;
   }
   uint32_t total = 0, m = 0;
