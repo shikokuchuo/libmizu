@@ -30,7 +30,8 @@
 static mizu_binding bytesb;
 static int exec_mode = 0;  /* 0 echo, 1 strand (no publish), 2 infra fail,
                               3 abandon (eval_mark + longjmp), 4 ERR inline,
-                              5 ERR tiered, 6 cancel self mid-exec */
+                              5 ERR tiered, 6 cancel self mid-exec,
+                              10 ERR empty envelope */
 static int err_read = 0;   /* read_fn returns the ERR envelope's bytes */
 static int fail_read = 0;  /* read_fn fails the "rf" payload (no CONSUME) */
 static int stage_fail = 0; /* the modal stage wrapper fails every stage */
@@ -154,6 +155,12 @@ static int test_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
     mizu_bytes b = { (void *) "boom", 4 };
     assert(mizu_result_publish_err(sink, &b, 0) == -1);
     return 1;
+  }
+  case 10: {
+    /* an empty envelope: no message bytes cross */
+    mizu_bytes b = { (void *) "x", 0 };
+    assert(mizu_result_publish_err(sink, &b, 0) == 1);
+    return 0;
   }
   default:
     break;
@@ -591,6 +598,15 @@ static void test_err_publish(void) {
   mizu_pool_info pi;
   assert(mizu_pool_info_get(ctrl, &pi) == MIZU_OK);
   assert(pi.tasks_by_state[MIZU_RS_ERR] == 0);
+  exec_mode = 0;
+
+  /* an empty envelope records the bare failure and still consumes */
+  exec_mode = 10;
+  mizu_task t4 = submit_bytes(ctrl, "x", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_collect(ctrl, &t4, &obj, 1000) == MIZU_ERR);
+  assert(strcmp(mizu_pool_error(ctrl), "task failed") == 0);
+  assert(mizu_pool_task_state(ctrl, &t4) == MIZU_RS_FREE);
   exec_mode = 0;
   pool_end();
   puts("ok err_publish");
@@ -3099,6 +3115,12 @@ static void test_abandon_fork(void) {
     if (mizu_pool_submit(ctrl, &b, &t, 0) != MIZU_ERR ||
         strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
       _exit(1);
+    if (mizu_pool_stop(ctrl, 0) != MIZU_ERR ||
+        strstr(mizu_pool_error(ctrl), "do not survive fork") == NULL)
+      _exit(1);
+    if (mizu_pool_leave(wk) != MIZU_ERR ||
+        strstr(mizu_pool_error(wk), "do not survive fork") == NULL)
+      _exit(1);
     mizu_pool_abandon(wk);
     mizu_pool_abandon(ctrl);
     _exit(0);
@@ -4107,6 +4129,106 @@ static void test_split_waiter(void) {
   puts("ok split_waiter");
 }
 
+/* The split hand-off of a zc task keeper: the deferred release runs at
+   the producing thread's next submit, rekeying the loan to the executing
+   worker, so a worker death force-reclaims only what its own views still
+   pin. */
+static void test_split_waiter_zc(void) {
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 64;
+  opts.slot_size = 512;
+  mizu_binding b, wb;
+  make_zc_binding(&b, 0);
+  b.flags = MIZU_BINDING_SPLIT_WAITER;
+  make_zc_binding(&wb, 1);
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  assert(mizu_pool_worker_join(&wk, token, 0, &wb) == MIZU_OK);
+  wk2 = NULL;
+  sub = NULL;
+
+  static unsigned char big[1000];
+  memset(big, 0x5A, sizeof big);
+  mizu_bytes arg = { big, sizeof big };
+  mizu_task t;
+  assert(mizu_pool_submit(ctrl, &arg, &t, 1000) == MIZU_OK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  mizu_shm *region = zc_last;
+  mizu_zc_ref(region);                    /* the worker's live view wrap */
+  void *obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_OK);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+  uint32_t fl, led;
+  spill_info(ctrl, &fl, &led);
+  assert(fl == 0 && led == 0);            /* deferred: the loan stands */
+  assert(mizu_zc_refcount(region) == 2);
+
+  mizu_task t2;
+  assert(mizu_pool_submit(ctrl, &arg, &t2, 1000) == MIZU_OK);   /* drains */
+  spill_info(ctrl, &fl, &led);
+  assert(led == 1);   /* released: lent against worker 0's held view */
+  assert(mizu_zc_refcount(region) == 1);
+
+  mizu_zc_unref(region);                  /* the view lets go */
+  mizu_task t3;
+  assert(mizu_pool_submit(ctrl, &arg, &t3, 1000) == MIZU_OK);
+  assert(zc_last == region);   /* the sweep reclaimed it for t3's stage */
+
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 3 &&
+         memcmp(((mizu_bytes *) obj)->data, "ack", 3) == 0);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+  obj = NULL;
+  assert(mizu_pool_collect(ctrl, &t3, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 3 &&
+         memcmp(((mizu_bytes *) obj)->data, "ack", 3) == 0);
+  free(((mizu_bytes *) obj)->data);
+  free(obj);
+  pool_end();
+  puts("ok split_waiter_zc");
+}
+
+/* collect_all's wait probes a claimant that died mid-task and forces the
+   drain: the stranded task fails DIED, and a second stranded slot keeps
+   its sequence for the explicit task_release, which frees it and defers
+   the dead worker's force. */
+static void test_dead_claimant_release(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  exec_mode = 1;   /* claim, never publish: strands both tasks */
+  mizu_task t1 = submit_bytes(ctrl, "x", 1);
+  mizu_task t2 = submit_bytes(ctrl, "y", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  exec_mode = 0;
+  mizu_pool_destroy(wk);   /* simulated crash */
+  wk = NULL;
+
+  void *vals[1] = { (void *) 1 };
+  size_t err = 99, consumed = 99;
+  assert(mizu_pool_collect_all(ctrl, &t1, 1, vals, &err, &consumed, 1000) ==
+         MIZU_ERR);
+  assert(err == 0 && consumed == 0 && vals[0] == NULL);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "worker died while executing this task") == 0);
+
+  /* the same verdict failed t2; the release frees the slot */
+  assert(mizu_pool_task_state(ctrl, &t2) == MIZU_RS_DIED);
+  assert(mizu_pool_task_release(ctrl, &t2) == 0);
+  assert(mizu_pool_task_state(ctrl, &t2) == MIZU_RS_FREE);
+  pool_end();
+  puts("ok dead_claimant_release");
+}
+
 #if !defined(_WIN32)
 /* The split configuration under load: one thread submits spilled
    payloads and steps the worker, another collects every task in order.
@@ -4310,6 +4432,8 @@ int main(void) {
   test_parked_death();
   test_false_died_guard();
   test_split_waiter();
+  test_split_waiter_zc();
+  test_dead_claimant_release();
   test_closed_getters();
 #if !defined(_WIN32)
   test_split_threads();
