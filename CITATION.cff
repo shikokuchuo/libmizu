@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: If you use this software, please cite it as below.
-title: "libmizu: Lock-free shared memory IPC at thread speed in C11"
+title: "libmizu: Thread-speed, lock-free shared memory IPC in C11"
 authors:
   - family-names: Gao
     given-names: Charlie
