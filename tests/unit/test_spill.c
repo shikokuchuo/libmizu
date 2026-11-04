@@ -143,7 +143,7 @@ int main(void) {
   mizu_keeper_release(&h, tab, 1);
   assert(h.fl.led_n == 2);
   uint32_t before = h.fl.n;
-  mizu_ledger_force(&h.fl, -1, -1);
+  mizu_ledger_force(&h.fl, -1, -1, 0);
   assert(h.fl.led_n == 0);
   assert(h.fl.n == before + 1);        /* z3 rejoined; z4 leaked + unlinked
                                           (destroyed — not observable) */
@@ -155,14 +155,52 @@ int main(void) {
   mizu_keeper_commit(&h, tab, 2);
   mizu_zc_ref(z5);
   tab[2].key = MIZU_LED_KEY(MIZU_LED_WK, 7);   /* the pool's keying */
+  tab[2].pid = 100;
   mizu_keeper_release(&h, tab, 2);
   assert(h.fl.led_n == 1);
-  mizu_ledger_force(&h.fl, MIZU_LED_WK, 3);    /* a different worker */
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 3, 0);    /* a different worker */
   assert(h.fl.led_n == 1);
-  mizu_ledger_force(&h.fl, MIZU_LED_SUB, 7);   /* submitter namespace */
+  mizu_ledger_force(&h.fl, MIZU_LED_SUB, 7, 0);   /* submitter namespace */
   assert(h.fl.led_n == 1);
-  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7);
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7, 200);  /* another occupant */
+  assert(h.fl.led_n == 1);
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7, 100);
   assert(h.fl.led_n == 0);
+
+  /* the occupant key: a verdict on one occupant of a slot leaves the
+     entries of its other occupants (a respawn, a clean departure whose
+     process still holds views); 0 matches any occupant */
+  mizu_shm *o1 = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, o1);
+  mizu_keeper_commit(&h, tab, 4);
+  mizu_zc_ref(o1);
+  tab[4].key = MIZU_LED_KEY(MIZU_LED_WK, 7);
+  tab[4].pid = 100;
+  mizu_keeper_release(&h, tab, 4);
+  mizu_shm *o2 = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, o2);
+  mizu_keeper_commit(&h, tab, 5);
+  mizu_zc_ref(o2);
+  tab[5].key = MIZU_LED_KEY(MIZU_LED_WK, 7);
+  tab[5].pid = 200;
+  mizu_keeper_release(&h, tab, 5);
+  assert(h.fl.led_n == 2);
+  uint32_t occ_n = h.fl.n;
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7, 100);
+  assert(h.fl.led_n == 1 && h.fl.led_pid[0] == 200 && h.fl.n == occ_n + 1);
+  mizu_ledger_force(&h.fl, MIZU_LED_WK, 7, 0);
+  assert(h.fl.led_n == 0 && h.fl.n == occ_n + 2);
+
+  /* an over-released region (a consumer's count already at 0 when the
+     producer loan drops) never recycles: leaked + unlinked, so no view
+     that still maps it is overwritten */
+  mizu_shm *o3 = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, o3);
+  mizu_keeper_commit(&h, tab, 4);
+  atomic_store(mizu_zc_rc(o3->addr), 0);   /* the stray unref */
+  occ_n = h.fl.n;
+  mizu_keeper_release(&h, tab, 4);
+  assert(h.fl.n == occ_n && h.fl.led_n == 0);
 
   /* a REFHELD force clears churn like any reclaim: every drop path runs
      the budget check */
@@ -174,7 +212,7 @@ int main(void) {
   mizu_keeper_release(&h, tab, 3);
   assert(h.fl.led_n == 1);
   h.fl.churn = 1;
-  mizu_ledger_force(&h.fl, -1, -1);
+  mizu_ledger_force(&h.fl, -1, -1, 0);
   assert(h.fl.led_n == 0 && h.fl.churn == 0);
 
   /* the quota sweep rotates its window across calls: long-held regions

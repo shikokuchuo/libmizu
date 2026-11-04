@@ -75,7 +75,8 @@ static int wrap_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
   return rc;
 }
 
-/* A frame the bytes reader must refuse (a view tier). */
+/* A view-tier frame naming no region: the bytes reader cannot resolve
+   it (a resolvable flat vector it copies out). */
 static int stage_shm_vec(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
                          uint32_t inline_max, mizu_handle *h, void *ctx) {
   (void) obj; (void) h; (void) ctx;
@@ -546,7 +547,11 @@ int main(int argc, char **argv) {
     assert(obj == NULL);
   }
 
-  /* the bytes reader refuses a view-tier frame, without consuming it */
+  /* a view-tier frame whose region cannot be resolved reads as a
+     vanished region: retried while the producer lives (the transport's
+     policy — a live producer's region may still appear), consumed once
+     it is closed or dead; a resolvable frame the bytes reader cannot
+     hold is declined and consumed (test_stage_raw) */
   {
     mizu_binding vb = bytesb;
     vb.stage = stage_shm_vec;
@@ -563,7 +568,7 @@ int main(int argc, char **argv) {
     void *obj = NULL;
     assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);
     assert(mizu_channel_errcat(vpeer) == MIZU_ERRCAT_OTHER);
-    assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);  /* wedged */
+    assert(mizu_channel_recv(vpeer, &obj, 1000) == MIZU_ERR);  /* retried */
     mizu_channel_destroy(vpeer);
     mizu_channel_destroy(vhost);
 
@@ -585,7 +590,7 @@ int main(int argc, char **argv) {
     assert(mizu_channel_recv_batch_fn(vpeer, 4, &bn, array_sink, bgot,
                                      1000) == MIZU_ERR);
     assert(bn == 0);
-    assert(strcmp(mizu_channel_error(vpeer), "payload read failed") == 0);
+    assert(strcmp(mizu_channel_error(vpeer), "payload region vanished") == 0);
     mizu_channel_destroy(vpeer);
     mizu_channel_destroy(vhost);
 

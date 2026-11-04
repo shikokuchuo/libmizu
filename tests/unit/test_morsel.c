@@ -351,6 +351,16 @@ static void lost_tests(void) {
   spans[0].hi = 200;
   g = mizu_morsel_lost(spans, 1, 50, out);
   assert(g == 1 && out[0].lo == 0 && out[0].hi == 50);
+
+  /* a span ending past the bound (a history no claim could produce) is
+     clamped: the gap ahead of it still reports, the cursor never leaves
+     the issued range */
+  spans[0].lo = 0;
+  spans[0].hi = 10;
+  spans[1].lo = 40;
+  spans[1].hi = 10000;
+  g = mizu_morsel_lost(spans, 2, 50, out);
+  assert(g == 1 && out[0].lo == 10 && out[0].hi == 40);
 }
 
 static void span_tests(void) {

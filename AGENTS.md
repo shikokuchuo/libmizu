@@ -136,7 +136,8 @@ RngStreams, doxygen-awesome-css).
 - `.clang-tidy` / `.clang-format` / `.editorconfig` — diagnostics and style
   configs. clang-format matches the existing style but the tree isn't fully
   conformant; use it for new code, no whole-tree reformat, no CI gate.
-- `tools/amalgamate.sh` — generates the three-file distribution `mizu.c` + `mizu.h` + `mizu_ext.h`.
+- `tools/amalgamate.sh` — generates the four-file distribution `mizu.c` +
+  `mizu.h` + `mizu_ext.h` + `mizu_ext.c` (the exported ext surface).
 - `tools/check-exports.sh` — diffs the shared library's exported `mizu_*`
   symbols against `tools/exports.txt` (no leaks, no missing = ABI break);
   `--write` regenerates after an intended change. Run in CI.
@@ -170,7 +171,7 @@ make tidy             # clang-tidy over src/ (report-only; TIDY overrides the
 make compile_commands.json  # clangd compilation database (gitignored;
                             # regenerates when the Makefile changes)
 make install          # honors PREFIX (/usr/local) and DESTDIR
-tools/amalgamate.sh   # writes mizu.c + mizu.h
+tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h + mizu_ext.c
 make docs             # doxygen API reference into docs/html (gitignored)
 ```
 

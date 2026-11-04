@@ -175,8 +175,11 @@ static int test_exec(const mizu_slot_hdr *hdr, const uint8_t *payload,
   return 0;
 }
 
+static int64_t died_pid_seen;   /* the DIED record's pid, last read */
+
 static void *test_read(const mizu_slot_hdr *hdr, const uint8_t *payload,
                        size_t limit, mizu_read_ctx *ctx) {
+  if (ctx->outcome == MIZU_RS_DIED) died_pid_seen = ctx->died_pid;
   if (fail_read && hdr->kind == MIZU_KIND_INLINE && hdr->len == 2 &&
       memcmp(payload, "rf", 2) == 0)
     return NULL;   /* a retryable read failure (no MIZU_READ_CONSUME) */
@@ -647,9 +650,12 @@ static void test_leave_fails_in_flight(void) {
   assert(mizu_pool_leave(wk) == MIZU_OK);
 
   void *obj = NULL;
+  died_pid_seen = -1;
   assert(mizu_pool_collect(ctrl, &t, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
+  /* the record names the claimant off the slot's own pid word */
+  assert(died_pid_seen == (int64_t) mizu_self_pid());
   mizu_pool_info st = { .size = sizeof(mizu_pool_info) };
   assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   uint32_t live = 0;
@@ -675,13 +681,17 @@ static void test_leave_fails_executing(void) {
   assert(mizu_pool_leave(wk) == MIZU_OK);
 
   void *obj = NULL;
+  died_pid_seen = -1;
   assert(mizu_pool_collect(ctrl, &t1, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
+  assert(died_pid_seen == (int64_t) mizu_self_pid());
   obj = NULL;
+  died_pid_seen = -1;
   assert(mizu_pool_collect(ctrl, &t2, &obj, 1000) == MIZU_ERR);
   assert(strcmp(mizu_pool_error(ctrl),
                 "worker died while executing this task") == 0);
+  assert(died_pid_seen == (int64_t) mizu_self_pid());
   pool_end();
   puts("ok leave_fails_executing");
 }
@@ -4429,6 +4439,8 @@ static void test_claim_incarnation(void) {
   mizu_shm *shm = ctrl_words(&parked, &w0, &results, &slot_bytes);
   mizu_pool_info unstamped = { .size = 0 };   /* the caller's stamp */
   assert(mizu_pool_info_get(ctrl, &unstamped) == MIZU_ERR);
+  mizu_pool_dump unstamped_dump = { .size = 0 };
+  assert(mizu_pool_dump_get(ctrl, &unstamped_dump) == MIZU_ERR);
 
   /* a false DIED on the queued entry's incarnation (a dead loser's stale
      announce): the claim CAS reads DIED, takes the slot back, and the
@@ -4444,6 +4456,8 @@ static void test_claim_incarnation(void) {
   assert(mizu_pool_task_state(ctrl, &t) == MIZU_RS_OK);
   w = atomic_load(&rs->state);
   assert(mizu_rs_wk(w) == 0);   /* the publisher's claim rides the word */
+  /* and its pid the header word beside it (an in-process worker) */
+  assert(atomic_load(&rs->claimant_pid) == (int64_t) mizu_self_pid());
   collect_bytes(ctrl, &t, "a", 1);
   w = atomic_load(&rs->state);
   assert(mizu_rs_st(w) == MIZU_RS_FREE && mizu_rs_wk(w) == 0);

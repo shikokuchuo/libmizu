@@ -24,6 +24,7 @@ static uint32_t g_kind, g_len, g_im;
 static uint64_t g_aux;
 static uint8_t  g_payload[64];
 static int      g_fallback;   /* helper returned NULL: NIL is the marker */
+static int      g_flip_ref;   /* re-stamp a staged SHM_VEC as REF */
 
 static int rec_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
                      uint32_t inline_max, mizu_handle *h, void *ctx) {
@@ -41,6 +42,8 @@ static int rec_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
   } else {
     g_fallback = 0;
     memcpy(dst, o->data, (size_t) o->n);
+    if (g_flip_ref && hdr->kind == MIZU_KIND_SHM_VEC)
+      hdr->kind = MIZU_KIND_REF;   /* same payload: the region name */
   }
   g_kind = hdr->kind;
   g_len = hdr->len;
@@ -132,6 +135,65 @@ static void chan_row(uint32_t slot_size, uint64_t arena, int churn,
     assert((g_aux >> 8) == (uint64_t) MIZU_HEADER_SIZE + o->n);
     check_region((const char *) g_payload, g_len, o, 1);
   }
+  /* the reference bytes binding reads every staged kind back: the copy
+     tiers as their bytes, a flat SHM_VEC copied out under the producer's
+     loan, a fallback NIL as empty */
+  void *obj = NULL;
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  mizu_bytes *got = obj;
+  if (kind == MIZU_KIND_NIL) {
+    assert(got->len == 0);
+  } else {
+    assert(got->len == o->n);
+    assert(memcmp(got->data, o->data, (size_t) o->n) == 0);
+  }
+  mizu_bytes_free(got);
+  mizu_channel_destroy(host);
+  mizu_channel_destroy(peer);
+}
+
+/* The bytes binding's declines consume: a SHM_VEC whose layout is not a
+   flat vector, and a REF, fail the read with the slot consumed, so the
+   next message reads — the ring never wedges behind a frame this
+   binding cannot hold. */
+static void bytes_declines(const uint8_t *data) {
+  mizu_binding b;
+  make_binding(&b);
+  mizu_channel *peer = NULL;
+  mizu_channel *host = chan_pair(&b, 256, 0, &peer);
+  raw_obj mid = { data, 32768, MIZU_TYPE_REAL };
+  raw_obj small = { data, 8, MIZU_TYPE_REAL };
+
+  /* a torn layout: the magic overwritten behind the stage */
+  assert(mizu_channel_send(host, &mid) == MIZU_OK);
+  assert(g_kind == MIZU_KIND_SHM_VEC);
+  char name[MIZU_NAME_MAX];
+  memcpy(name, g_payload, g_len);
+  name[g_len] = '\0';
+  mizu_shm *rw = NULL;
+  assert(mizu_shm_open_rw(&rw, name, 0) == MIZU_OK);
+  memset(rw->addr, 0, 4);
+  mizu_shm_close(rw, 0);
+  assert(mizu_channel_send(host, &small) == MIZU_OK);
+  void *obj = NULL;
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+  assert(strstr(mizu_channel_error(peer), "not a flat vector") != NULL);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 8);
+  mizu_bytes_free(obj);
+
+  /* a REF: a view identifier, nothing a plain buffer can hold */
+  g_flip_ref = 1;
+  assert(mizu_channel_send(host, &mid) == MIZU_OK);
+  g_flip_ref = 0;
+  assert(g_kind == MIZU_KIND_REF);
+  assert(mizu_channel_send(host, &small) == MIZU_OK);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_ERR);
+  assert(strstr(mizu_channel_error(peer), "cannot hold") != NULL);
+  assert(mizu_channel_recv(peer, &obj, 1000) == MIZU_OK);
+  assert(((mizu_bytes *) obj)->len == 8);
+  mizu_bytes_free(obj);
+
   mizu_channel_destroy(host);
   mizu_channel_destroy(peer);
 }
@@ -191,6 +253,8 @@ int main(void) {
      instead of dividing by zero in the flat SHM_VEC reserve. */
   raw_obj strv = { data, 262152, MIZU_TYPE_STR };
   chan_row(256, 4u << 20, 0, &strv, MIZU_KIND_NIL, 0);
+
+  bytes_declines(data);
 
   /* A larger slot: inline budget 4080 moves the RAWVEC edge. */
   raw_obj w1 = { data, 4080, MIZU_TYPE_REAL };

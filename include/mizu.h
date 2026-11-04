@@ -526,7 +526,13 @@ MIZU_STATIC_ASSERT(sizeof(mizu_sub_slot) == 128, "mizu_sub_slot is the wire form
    them), so a reaper, a collector's death record and the next
    allocation's ledger key all read the owner off the same word. The
    submitter's recommit is the one plain store: FREE to PENDING, the
-   sequence bumped and the claimant cleared in the same word. */
+   sequence bumped and the claimant cleared in the same word. claimant_pid
+   names the occupant behind the claimant bits: the claimant stores its
+   own pid right after the claim CAS, and a reaper stores the dead
+   worker's ahead of its DIED stamp, so a collector reads the exact dead
+   process off the slot (the worker slot's pid word may already belong to
+   a respawn) — the death record, and the occupant key of the lent-region
+   ledger, both come from here. Reserved-zero before this word existed. */
 #define MIZU_RS_STATE_MASK UINT64_C(0xF)
 #define MIZU_RS_WK_SHIFT   4
 #define MIZU_RS_WK_MASK    UINT64_C(0x7F)
@@ -538,7 +544,8 @@ typedef struct mizu_rs_hdr_s {
   MIZU_ATOMIC(int32_t)  waiter_slot;   /**< submitter slot parked on this (-1;
       MIZU_WS_NOTIFY OR'd when the wake is a notify signal) */
   uint32_t         pad0;
-  uint64_t         pad1;
+  MIZU_ATOMIC(int64_t)  claimant_pid;  /**< the claimant's pid; a reaper
+      stores the dead worker's ahead of DIED (0 = never claimed) */
   mizu_slot_hdr     ph;
 } mizu_rs_hdr;
 
@@ -611,10 +618,14 @@ MIZU_STATIC_ASSERT(MIZU_INJ_HEAD_OFF % 128 == 0 &&
    maps read-only; open_rw maps writable (populate pre-faults); open_view is the
    zc consumer open: page 0 RW (the refcount word), the rest read-only. It
    performs the zc counted add itself, so a binding cannot hold a view mapping
-   without the count. open_view_flags is the flags form: MIZU_OPEN_VIEW_NOCOUNT
-   skips the counted add, and the caller then owns the mizu_zc_ref timing and
-   must complete it before its consumer-done signal (a binding whose wrap can
-   fail between map and count opens first and counts at wrap). close unmaps and
+   without the count — and it refuses a region that carries no layout magic
+   (MIZH / MIZS / MIZL), so a control region named by a torn identifier never
+   takes the add on its own bytes. open_view_flags is the flags form:
+   MIZU_OPEN_VIEW_NOCOUNT skips the counted add and that gate (the caller
+   validates the layout itself), and the caller then owns the mizu_zc_ref
+   timing and must complete it before its consumer-done signal (a binding
+   whose wrap can fail between map and count opens first and counts at wrap).
+   Either form refuses a region smaller than the header band. close unmaps and
    frees the handle; unlink != 0 also removes the name. On failure these return
    MIZU_ERR with the category in the thread-local error slot. addr/size/name are
    borrowed reads, valid until close. */
@@ -817,7 +828,7 @@ typedef struct mizu_pool_opts_s {
   uint32_t max_submitters;  /**< <= 64 */
   uint32_t injection_cap;   /**< entries per submitter ring, power of two */
   uint32_t per_worker_cap;  /**< deque entries per worker, power of two */
-  uint32_t result_slots;    /**< multiple of max_submitters */
+  uint32_t result_slots;    /**< rounded up to a multiple of max_submitters */
   uint32_t slot_size;       /**< bytes per entry / result slot, pow2, 128..2^20 */
 } mizu_pool_opts;
 

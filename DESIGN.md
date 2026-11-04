@@ -674,7 +674,7 @@ Payload lifetime is explicit, not GC-inherited.
 Each handle owns a retain table of `{ region, pin, key, kind }` entries.
 The transport commits an entry at publish.
 It releases the entry at a consumer-done point: collect, slot reuse, the worker keeper sweep, or the channel head-advance reap.
-A collect on a second thread (the split-waiter seam of the threading contract) flags the slot instead, and the producing thread releases it at its next submit.
+A collect on a second thread (the split-waiter seam of the threading contract) flags the slot instead, and the producing thread releases it at its next submit or reap point.
 The region half is core-owned.
 The pin is an opaque binding token, and the core calls the binding's `drop` hook with it at release.
 One uncommitted checkout (region plus pin) rides `fl->staging*`.
@@ -692,6 +692,8 @@ Sweeps and force-reclaims clear the flag once reclaims bring lent bytes back und
 If the consumer dies, its counts leak.
 The death verdict on the producer then force-reclaims its lent regions.
 Ledger keys carry the consumer's kind (worker or submitter slot) in the high half, so a pool verdict reclaims exactly one namespace, since a worker handle lends result regions to submitters and task-arg regions to workers under colliding slot numbers.
+Each entry also records the pid occupying that slot at the release (the result slot's `claimant_pid` for a task-arg region, the submitter slot's pid for a result region), and a verdict reclaims only the entries recorded under the dead occupant: a slot's next occupant, or a cleanly departed earlier one whose process still holds its views, keeps its own.
+A deferred verdict (the controller's death callback, a split waiter's collect) carries that pid to the producing thread's drain beside the slot bit.
 REFHELD-flagged regions (their identifiers escaped by reference) leak and unlink instead.
 On a ledger overflow, the entry closes the mapping but keeps the name, so a REF in flight can still resolve.
 The unlink lands at handle teardown.
@@ -704,7 +706,7 @@ The consumer wraps the mapped pages as a view instead of copying.
 The cross-process refcount lives in bytes [24-31] of the region header.
 The offset macros are wire format (`MIZU_ZC_REFCOUNT_OFF` / `MIZU_ZC_FLAGS_OFF` in `mizu.h`); the `mizu_zc_rc` / `mizu_zc_flags_` accessors are core-owned binding surface (`mizu_ext.h`, dual-form).
 The producer stores 1 at stage.
-`mizu_shm_open_view` adds 1 at the wrap of the consumer: open implies counted, so add-before-consumer-done is structural.
+`mizu_shm_open_view` adds 1 at the open, after checking that the mapped region carries a layout magic (MIZH, MIZS or MIZL — a control region named by a torn REF would otherwise take the add on its own word at that offset): open implies counted, so add-before-consumer-done is structural.
 The `MIZU_OPEN_VIEW_NOCOUNT` form splits the two for a binding whose wrap can fail between map and count (an R ALTREP wrap can longjmp): open first, then `mizu_zc_ref` at wrap, still before the consumer-done signal.
 The release of the view subtracts 1.
 The consumer maps page 0 read-write (the refcount word) and the rest read-only.
@@ -714,11 +716,13 @@ The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge a queue.
 A result slot's state, claimant and incarnation live in one 64-bit word (`mizu_rs_hdr.state`: the sequence in the high bits, the claimant worker in bits 4-10, the `MIZU_RS_*` state in the low four), and every transition is one CAS whose expected word carries the sequence — so a claim, publish, cancel, reap or collect bound to one incarnation can never land on the next, however the collector's consume and the submitter's recommit interleave with it.
 The claim is the CAS from the incarnation's unclaimed PENDING to RUNNING stamped with the worker; once a worker holds RUNNING, only its own publish, a cancel it consumes, or a reap of that worker moves the slot on, so no second claimant and no recommit can reach the slot while a result is being staged into it.
+The claimant's pid rides the slot header beside the word (`claimant_pid`): the claimant stores its own behind its claim CAS, and a reaper stores the dead worker's ahead of its DIED stamp through a CAS that yields to a rival's claim, so a death record and the lent-ledger's occupant key name the exact dead process rather than whatever the worker slot's pid word says after a respawn.
 A worker announces its claim (`in_flight_rs`) before the entry CAS.
 The announce carries the entry's own incarnation, so a reaper, serialized by the liveness lock, acts only while that incarnation is current: a RUNNING slot it fails only when the word names the dead worker as claimant (a rival's claim is the rival's), and a PENDING one it fails outright — either the dead worker won the entry and died before its RUNNING CAS, or the announce is a dead loser's and a live rival is about to claim; the rival's claim CAS then reads DIED and takes the slot back itself (DIED to RUNNING), while a take-back that fails means a collector consumed the verdict first, so the claim drops as dead work.
+The collector runs the same race from its side: its DIED-to-FREE CAS precedes the task keeper's release, so a take-back that wins finds the argument region still retained and the collector re-waits on RUNNING.
 The publish CAS expects RUNNING, this worker, this incarnation, so a result lands only in the slot it was claimed from; a cancel that landed on the claim is consumed at the publish tail, and a payload byte is never staged into a slot the claim no longer owns.
 A worker's park announce dies with the worker: the reap clears its bit in the parked mask, resets its park state, and replays one wake unconditionally, since a corpse found PARKED absorbed every directed wake until then (a pusher CASes it WAKING and reports the wake delivered).
-An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
+An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping the claimant bits.
 On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper, because the flock re-acquire on one OFD is not a mutual exclusion.
 On Linux a region create fails fast when a statvfs probe shows the region cannot fit in tmpfs; the reservation itself (a one-fault-per-extent touch + `MADV_COLLAPSE` huge-folio create on kernels >= 6.1, `MADV_POPULATE_WRITE`, `posix_fallocate` on kernels < 5.14) remains the enforcement point, so no later write fault can SIGBUS.
 

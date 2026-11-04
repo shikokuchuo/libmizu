@@ -215,9 +215,12 @@ static void *mizu_dl_main(void *arg) {
       }
       if (*(int *) evs[i].data.ptr == MIZU_DL_NOTIFY) {
         struct mizu_notify_watch_s *nw = evs[i].data.ptr;
+        /* drained in every state: a stopped watch's fd stays registered
+           until the stopper's wait releases the reap, and a datagram
+           left on it (level-triggered) would spin this loop meanwhile */
+        char buf[256];
+        while (recv(nw->fd, buf, sizeof(buf), 0) > 0) { }
         if (nw->state == MIZU_NW_ACTIVE) {
-          char buf[256];
-          while (recv(nw->fd, buf, sizeof(buf), 0) > 0) { }
           if (nw->cb != NULL) {
             atomic_store_explicit(&nw->in_flight, 1, memory_order_relaxed);
             cbs[nc] = nw->cb;

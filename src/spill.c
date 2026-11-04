@@ -260,9 +260,9 @@ static void spill_staging_clear(mizu_spill_fl *fl) {
 /* Surrender a released region per its kind: ZC through the refcount
    protocol, SPILL to the free list. */
 static void spill_surrender(mizu_spill_fl *fl, mizu_shm *shm, uint8_t kind,
-                           int32_t key) {
+                           int32_t key, int64_t pid) {
   if (shm == NULL) return;
-  if (kind == MIZU_KEEP_ZC) mizu_zc_release(fl, shm, key);
+  if (kind == MIZU_KEEP_ZC) mizu_zc_release(fl, shm, key, pid);
   else mizu_spill_fl_insert(fl, shm);
 }
 
@@ -287,6 +287,7 @@ void mizu_keeper_commit(mizu_handle *h, mizu_keeper *tab, uint32_t at) {
   tab[at].region = fl->staging;
   tab[at].pin = fl->staging_pin;
   tab[at].key = -1;
+  tab[at].pid = 0;
   tab[at].kind = fl->staging_kind;
   spill_staging_clear(fl);
 }
@@ -300,13 +301,15 @@ void mizu_keeper_release(mizu_handle *h, mizu_keeper *tab, uint32_t at) {
   if (kind == MIZU_KEEP_FREE) return;
   mizu_shm *shm = k->region;
   int32_t key = k->key;
+  int64_t pid = k->pid;
   void *pin = k->pin;
   k->kind = MIZU_KEEP_FREE;
   k->region = NULL;
   k->key = -1;
+  k->pid = 0;
   k->pin = NULL;
   spill_pin_drop(h, pin);
-  spill_surrender(&h->fl, shm, kind, key);
+  spill_surrender(&h->fl, shm, kind, key, pid);
 }
 
 /* The never-published discard (a cancelled pool publish): surrender the
@@ -318,7 +321,7 @@ void mizu_keeper_discard(mizu_handle *h) {
   void *pin = fl->staging_pin;
   spill_staging_clear(fl);
   spill_pin_drop(h, pin);
-  spill_surrender(fl, shm, kind, -1);
+  spill_surrender(fl, shm, kind, -1, 0);
 }
 
 /* Handle teardown: close + unlink every retained region, drop every pin.
@@ -332,6 +335,7 @@ void mizu_keepers_teardown(mizu_handle *h, mizu_keeper *tab, uint32_t n) {
     tab[i].kind = MIZU_KEEP_FREE;
     tab[i].region = NULL;
     tab[i].key = -1;
+    tab[i].pid = 0;
     tab[i].pin = NULL;
   }
 }
@@ -477,11 +481,20 @@ static void mizu_overflow_drop(mizu_spill_fl *fl, mizu_shm *shm) {
 
 /* The producer-loan drop at a consumer-done release point: refcount sub,
    then the free list on 0 (no live views) or the lent-region ledger
-   otherwise. A full ledger drops the region to mizu_overflow_drop. */
-void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key) {
+   otherwise. A full ledger drops the region to mizu_overflow_drop. A
+   count already at 0 means a consumer over-released (a stale or buggy
+   binding): its holder set is unknowable, so the region leaks + unlinks
+   as a REFHELD one does — never back to the free list under a view that
+   may still map it. */
+void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key,
+                     int64_t pid) {
   uint32_t prev =
     atomic_fetch_sub_explicit(mizu_zc_rc(shm->addr), 1, memory_order_acq_rel);
-  if (prev <= 1) {
+  if (prev == 0) {
+    mizu_region_destroy(shm);
+    return;
+  }
+  if (prev == 1) {
     mizu_spill_fl_insert(fl, shm);
     return;
   }
@@ -492,6 +505,7 @@ void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key) {
   fl->lent_bytes += shm->size;
   fl->led_regions[fl->led_n] = shm;
   fl->led_key[fl->led_n] = key;
+  fl->led_pid[fl->led_n] = pid;
   fl->led_n++;
 }
 
@@ -508,6 +522,7 @@ static void mizu_ledger_drop(mizu_spill_fl *fl, uint32_t i) {
   fl->led_regions[i] = fl->led_regions[fl->led_n];
   fl->led_regions[fl->led_n] = NULL;
   fl->led_key[i] = fl->led_key[fl->led_n];
+  fl->led_pid[i] = fl->led_pid[fl->led_n];
 }
 
 void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
@@ -541,14 +556,19 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
 /* The death backstop, after the liveness verdict: a dead consumer's
    finalizers never ran, so its counts leaked. Unflagged entries rejoin
    the free list (the stage-time store of 1 re-initializes) — sound only
-   while the dead peer is the sole possible view-holder. REFHELD entries
-   have a wider holder set: leak the count and kill the name (live views
-   keep their own mappings), never force-reclaim. */
-void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot) {
+   while the dead peer is the sole possible view-holder, which is why the
+   match is the occupant (pid), not the slot: a slot's next occupant, or
+   a cleanly departed earlier one whose process still holds its views,
+   has entries under its own pid and keeps them. REFHELD entries have a
+   wider holder set: leak the count and kill the name (live views keep
+   their own mappings), never force-reclaim. */
+void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot,
+                       int64_t pid) {
   int32_t key = kind < 0 ? -1 : MIZU_LED_KEY(kind, slot);
   uint32_t i = 0;
   while (i < fl->led_n) {
-    if (key >= 0 && fl->led_key[i] != key) {
+    if ((key >= 0 && fl->led_key[i] != key) ||
+        (pid != 0 && fl->led_pid[i] != pid)) {
       i++;
       continue;
     }

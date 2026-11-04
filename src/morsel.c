@@ -352,7 +352,10 @@ size_t mizu_morsel_lost(mizu_morsel_span *spans, size_t n, uint64_t bound,
       out[g].hi = next;
       g++;
     }
-    if (spans[i].hi > pos) pos = spans[i].hi;
+    /* a span past the issued bound is a history no claim could have
+       produced: clamp it, so the scan's cursor never leaves [0, bound] */
+    uint64_t hi = spans[i].hi > bound ? bound : spans[i].hi;
+    if (hi > pos) pos = hi;
   }
   if (pos < bound) {
     out[g].lo = pos;

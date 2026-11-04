@@ -22,12 +22,15 @@
    consumers see the full tier.
 
    Dual-form fast paths (the CPython Py_INCREF pattern):
-   mizu_parker_snapshot, mizu_zc_rc, mizu_zc_flags_, the wire helpers
-   (mizu_timeout_ms, mizu_store_na_real, mizu_aux_rawspill_pool,
-   mizu_aux_shm_vec, mizu_mizh_write, mizu_mizh_check,
-   mizu_mizh_validity_set, mizu_mizs_geometry, mizu_mizs_check,
-   mizu_mizl_check, mizu_mizl_elem, mizu_na_build, mizu_na_apply), and the
-   interchange emit helpers (mizu_ix_put_*) ship as
+   mizu_parker_snapshot, mizu_zc_rc, mizu_zc_flags_, mizu_stage_raw, the
+   wire helpers (mizu_timeout_ms, mizu_store_na_real,
+   mizu_aux_rawspill_pool, mizu_aux_shm_vec, mizu_aux_type, mizu_aux_hi,
+   mizu_mizh_write, mizu_mizh_check, mizu_mizh_validity_set,
+   mizu_mizs_geometry, mizu_mizs_check, mizu_mizl_check, mizu_mizl_elem,
+   mizu_na_build, mizu_na_apply), the interchange byte-shape helpers
+   (mizu_ix_utf8_valid, mizu_ix_tag_of, mizu_ix_attr_reserved,
+   mizu_ix_write_err) and emit helpers (mizu_ix_put_*), and the Arrow
+   accessors (mizu_arrow_valid, mizu_arrow_str_at) ship as
    `static inline` here AND as same-named exported functions (src/ext.c).
    A C TU inlines its own copy at zero cost, while an FFI binds the
    exported symbol. This is legal C: internal and external linkage of the

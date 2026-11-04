@@ -228,12 +228,19 @@ static mizu_notify_ep *chan_notify_ep(mizu_channel *c) {
    arm, never one per publish). The tx opens BEFORE the clear: an open
    failure leaves the announce in place and the next armed sighting
    retries — claiming first could consume the edge without sending.
-   Single-producer: the flush callsite serializes the lazy open. */
+   Single-producer: the flush callsite serializes the lazy open. The
+   close paths are a side's last sighting: an open that fails there (fd
+   exhaustion at close) is recorded on the handle, and the armed consumer
+   learns of the close from the chained death watch at process exit. */
 static void chan_notify_signal(mizu_channel *c) {
   if (c->ntfy_tx == NULL) {
     c->ntfy_tx = mizu_notify_tx_open(c->livedir, c->shm.name,
                                     c->side == MIZU_ENTITY_HOST ? "peer" : "host");
-    if (c->ntfy_tx == NULL) return;
+    if (c->ntfy_tx == NULL) {
+      mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
+                     "cannot open the peer's notify endpoint");
+      return;
+    }
   }
   if ((atomic_fetch_and_explicit(c->peer_parked, ~MIZU_WAIT_NOTIFY,
                                  memory_order_acq_rel) & MIZU_WAIT_NOTIFY) == 0)
@@ -280,7 +287,7 @@ static int chan_probe_dead(mizu_channel *c) {
   chan_survivor_unlink(c);
   /* the dead peer's view finalizers never ran: force-reclaim the lent
      regions (REFHELD ones leak + unlink — the holder set is wider) */
-  mizu_ledger_force(&c->h.fl, -1, -1);
+  mizu_ledger_force(&c->h.fl, -1, -1, 0);
   return 1;
 }
 
@@ -1236,7 +1243,7 @@ mizu_status mizu_channel_recv(mizu_channel *c, void **obj_out,
   const char *err = NULL;
   st = chan_consume1(c, obj_out, 1, &err);
   if (err != NULL)
-    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, err);
+    mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "%s", err);
   return st;
 }
 
@@ -1286,7 +1293,7 @@ mizu_status mizu_channel_recv_batch_fn(mizu_channel *c, size_t cap,
     st = chan_consume1(c, &obj, i == 0, &err);
     if (st != MIZU_OK) {
       if (i == 0 && err != NULL)
-        mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, err);
+        mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "%s", err);
       break;
     }
     sink(ctx, i, obj);

@@ -83,9 +83,11 @@ static void child_binding(mizu_binding *b, int worker) {
 }
 
 /* A worker that keeps a view on every spilled task argument it sees
-   (mizu_shm_open_view's counted add, never released), so the controller's
-   lent-region ledger holds the region after the collect — the state a
-   held zero-copy view leaves on a worker death. */
+   (the uncounted open plus its own mizu_zc_ref — the region is a bare
+   SHM_RAW spill, not a layout, so the counted open's gate refuses it —
+   never released), so the controller's lent-region ledger holds the
+   region after the collect — the state a held zero-copy view leaves on a
+   worker death. */
 static int child_exec_hold(const mizu_slot_hdr *hdr, const uint8_t *payload,
                            size_t limit, mizu_result_sink *sink,
                            int catching, mizu_read_ctx *ctx) {
@@ -95,7 +97,9 @@ static int child_exec_hold(const mizu_slot_hdr *hdr, const uint8_t *payload,
     memcpy(name, payload, hdr->len);
     name[hdr->len] = '\0';
     mizu_shm *view = NULL;
-    assert(mizu_shm_open_view(&view, name) == MIZU_OK);   /* held for life */
+    assert(mizu_shm_open_view_flags(&view, name,
+                                   MIZU_OPEN_VIEW_NOCOUNT) == MIZU_OK);
+    mizu_zc_ref(view);   /* held for life */
     mizu_bytes b = { (void *) "ack", 3 };
     return mizu_result_publish(sink, &b) >= 0 ? 0 : 1;
   }

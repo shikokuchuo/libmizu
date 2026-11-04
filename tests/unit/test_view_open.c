@@ -25,8 +25,15 @@ int main(void) {
   mizu_zc_ref(v1);
   assert(mizu_zc_refcount(shm) == 1);
 
-  /* the default form keeps the fused counted add */
+  /* the default form keeps the fused counted add — behind a layout
+     gate: a region without a layout magic (a control region named by a
+     torn REF would be one) takes no add on its offset 24 */
   mizu_shm *v2 = NULL;
+  assert(mizu_shm_open_view(&v2, mizu_shm_name(shm)) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "not a layout region") != NULL);
+  assert(mizu_zc_refcount(shm) == 1);
+  mizu_mizh_write(mizu_shm_addr(shm), MIZU_TYPE_RAW, 0);
+  atomic_store(mizu_zc_rc(mizu_shm_addr(shm)), 1);   /* the write zeroed it */
   assert(mizu_shm_open_view(&v2, mizu_shm_name(shm)) == MIZU_OK);
   assert(mizu_zc_refcount(shm) == 2);
 

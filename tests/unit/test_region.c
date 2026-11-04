@@ -261,6 +261,7 @@ int main(void) {
     mizu_shm_close(d, 0);
 
     mizu_shm *v = NULL;
+    mizu_mizh_write(mizu_shm_addr(a), MIZU_TYPE_RAW, 0);   /* the view gate */
     assert(mizu_shm_open_view(&v, mizu_shm_name(a)) == MIZU_OK);
     assert((uintptr_t) mizu_shm_addr(v) % MIZU_HUGE_EXTENT == 0);
     mizu_zc_unref(v);          /* balance the open's counted add */

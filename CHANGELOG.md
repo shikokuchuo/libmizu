@@ -23,7 +23,9 @@ First public release.
   introspection. 64-bit platforms; Linux needs kernel >= 5.3.
 - Crash-atomic wire formats: every cross-process claim is copy-then-CAS,
   a result slot's state, claimant and incarnation are one tagged word so
-  every transition is a single CAS bound to its incarnation, and the
+  every transition is a single CAS bound to its incarnation (the
+  claimant's pid rides the slot header beside it, so a death record and
+  the lent-region ledger name the exact dead process), and the
   parker protocol (one epoch word per waiting entity over futex /
   `__ulock` / WaitOnAddress, plus named events) is the sole guarantee
   against lost wakeups. Wakes are single-waiter by default (the
@@ -79,6 +81,7 @@ First public release.
   synchronous drain.
 - L'Ecuyer-CMRG (MRG32k3a) stream jumping for deterministic per-element
   map seeds.
-- Distribution as a three-file amalgamation (`mizu.c` + `mizu.h` +
-  `mizu_ext.h`), `make install` with pkg-config, and a doxygen API
+- Distribution as a four-file amalgamation (`mizu.c` + `mizu.h` +
+  `mizu_ext.h` + `mizu_ext.c`, the exported ext surface for FFI
+  consumers), `make install` with pkg-config, and a doxygen API
   reference.

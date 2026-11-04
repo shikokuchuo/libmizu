@@ -260,6 +260,29 @@ mizu_status mizu_shm_open_view_flags(mizu_shm **out, const char *name,
     return MIZU_ERR;
   }
   size_t size = shm->size;
+  /* the counted add writes offset 24: a region too small for the header
+     band is refused in both forms, and the default form also refuses a
+     region that is not a layout region at all — a control region (the
+     pool header, a channel preamble) named by a torn or hostile REF
+     would otherwise take the add on its own word at that offset. NOCOUNT
+     callers validate the layout before their own add. */
+  if (size < MIZU_HEADER_SIZE) {
+    mizu_shm_close(shm, 0);
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "region '%s' too small for a view",
+                        name);
+    return MIZU_ERR;
+  }
+  if (!(flags & MIZU_OPEN_VIEW_NOCOUNT)) {
+    uint32_t magic;
+    memcpy(&magic, shm->addr, sizeof magic);
+    if (magic != MIZU_MAGIC_VEC && magic != MIZU_MAGIC_STR &&
+        magic != MIZU_MAGIC_LIST) {
+      mizu_shm_close(shm, 0);
+      mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                          "region '%s' is not a layout region", name);
+      return MIZU_ERR;
+    }
+  }
 #ifdef _WIN32
   /* MapViewOfFile offsets must be 64 KiB allocation-granularity aligned,
      so a second view starting at page 1 fails: one RW view, then protect

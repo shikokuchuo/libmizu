@@ -34,6 +34,7 @@ static int mizu_bytes_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
     hdr->aux = MIZU_AUX_F_KEEPERLESS;   /* bare bytes pin nothing */
     return 0;
   }
+  if (n > SIZE_MAX - 64) return 1;   /* MIZU_ALIGN64 would wrap */
   uint64_t off;
   unsigned char *chunk = mizu_stage_arena_alloc(h, MIZU_ALIGN64(n), &off);
   if (chunk != NULL) {
@@ -59,16 +60,35 @@ static int mizu_bytes_stage(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
 
 // Read ----------------------------------------------------------------------------
 
+/* A frame this binding cannot or must not read: consumed (the slot
+   must not wedge the ring or result slot behind it — DESIGN.md's seam
+   rule), the reason on the handle's record. */
+static int bytes_decline(mizu_read_ctx *ctx, const char *what) {
+  ctx->flags |= MIZU_READ_CONSUME;
+  mizu_err_record(ctx->handle, MIZU_ERRCAT_OTHER, "%s", what);
+  return -1;
+}
+
 /* Resolve a frame to its byte range: the copy tiers of a foreign peer
-   (RAWVEC/RAWSPILL/STR1) read as their bare bytes; the view tiers
-   (SHM_VEC/REF) are binding-owned by design and fail the read. */
-static int bytes_resolve(const mizu_slot_hdr *hdr, const uint8_t *payload,
+   (RAWVEC/RAWSPILL/STR1) read as their bare bytes, and a flat MIZH
+   SHM_VEC (an attribute-free atomic vector past the zero-copy floor)
+   copies out under the producer's loan — the region stands until this
+   consumer-done, so no counted add of its own. The string and list
+   layouts and a REF name a view a plain buffer cannot carry: declined
+   and consumed. A vanished region reports through ctx->gone (the
+   transport consumes); a torn header (a length past its bound) is
+   declined and consumed likewise, never retried against the same
+   bytes. */
+static int bytes_resolve(const mizu_slot_hdr *hdr_in, const uint8_t *payload,
                          size_t limit, mizu_read_ctx *ctx,
                          const unsigned char **src_out, size_t *n_out) {
+  /* one read of the header: the slot is peer-writable, so a bound and
+     the length it bounds must come from the same snapshot */
+  const mizu_slot_hdr hdr = *hdr_in;
   const unsigned char *src = payload;
   size_t n = 0;
 
-  switch (hdr->kind) {
+  switch (hdr.kind) {
   case MIZU_KIND_NIL:
     break;
   case MIZU_KIND_INLINE:
@@ -76,8 +96,8 @@ static int bytes_resolve(const mizu_slot_hdr *hdr, const uint8_t *payload,
   case MIZU_KIND_STR1:
     /* resolved or slot-resident bytes; len bounds-checked against the
        validated capacity (STR1's NA marker reads as empty) */
-    if (hdr->len > limit) return -1;
-    n = hdr->len;
+    if (hdr.len > limit) return bytes_decline(ctx, "torn payload header");
+    n = hdr.len;
     break;
   case MIZU_KIND_ARENA:
     /* resolved stream bytes; limit is the arena-validated length */
@@ -88,33 +108,43 @@ static int bytes_resolve(const mizu_slot_hdr *hdr, const uint8_t *payload,
       /* pool framing: the region name in the payload, its length and the
          wire type packed in aux (the channel's arena framing of this
          kind is resolved by the transport before the call) */
-      uint32_t name_len = (uint32_t) (hdr->aux >> 8);
+      uint32_t name_len = (uint32_t) (hdr.aux >> 8);
       mizu_shm *shm = mizu_read_region(ctx, payload, name_len);
       if (shm == NULL) return -1;
-      if (hdr->len > shm->size) return -1;
+      if (hdr.len > shm->size) return bytes_decline(ctx, "torn payload header");
       src = (const unsigned char *) shm->addr;
-      n = hdr->len;
+      n = hdr.len;
       break;
     }
-    if (hdr->len > limit) return -1;
-    n = hdr->len;
+    if (hdr.len > limit) return bytes_decline(ctx, "torn payload header");
+    n = hdr.len;
     break;
   case MIZU_KIND_SHM_RAW: {
-    mizu_shm *shm = mizu_read_region(ctx, payload, hdr->len);
+    mizu_shm *shm = mizu_read_region(ctx, payload, hdr.len);
     if (shm == NULL) return -1;
     /* aux is the exact stream length: a recycled region is larger than
        the stream it carries, and the slack bytes are a previous
        payload's. A length past the region is a torn header, failed like
        the RAWSPILL branch's — never a silent fallback to the slack. */
-    if (hdr->aux > (uint64_t) shm->size) return -1;
-    n = (size_t) hdr->aux;
+    if (hdr.aux > (uint64_t) shm->size)
+      return bytes_decline(ctx, "torn payload header");
+    n = (size_t) hdr.aux;
     src = (const unsigned char *) shm->addr;
     break;
   }
+  case MIZU_KIND_SHM_VEC: {
+    mizu_shm *shm = mizu_read_region(ctx, payload, hdr.len);
+    if (shm == NULL) return -1;
+    int type = 0;
+    int64_t n_elems = 0, valid[2];
+    if (mizu_mizh_check(shm->addr, shm->size, &type, &n_elems, valid) != 0)
+      return bytes_decline(ctx, "layout payload is not a flat vector");
+    n = (size_t) n_elems * mizu_type_elt_size(type);
+    src = (const unsigned char *) shm->addr + MIZU_HEADER_SIZE;
+    break;
+  }
   default:
-    /* SHM_VEC / REF: view tiers — the mapping would need the zc counted
-       add and a release hook, which a plain buffer cannot carry */
-    return -1;
+    return bytes_decline(ctx, "payload names a view this binding cannot hold");
   }
   *src_out = src;
   *n_out = n;

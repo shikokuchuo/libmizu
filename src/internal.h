@@ -449,6 +449,7 @@ typedef struct mizu_spill_fl_s {
   uint64_t hits;                      /* process-local, dump-only */
   mizu_shm *led_regions[MIZU_LEDGER_MAX];  /* lent: views outstanding */
   int32_t  led_key[MIZU_LEDGER_MAX];      /* consumer identity; -1 channel */
+  int64_t  led_pid[MIZU_LEDGER_MAX];      /* the consumer occupant's pid; 0 unknown */
   uint32_t led_n;
   uint32_t sweep_next;                  /* quota-sweep rotation start */
   size_t   lent_bytes;    /* sizes of lent (ledger) + overflow-dropped
@@ -492,6 +493,7 @@ typedef struct mizu_keeper_s {
   mizu_shm *region;  /* SPILL/ZC: the staged region, owned until release */
   void    *pin;     /* opaque binding token, dropped via binding.drop */
   int32_t  key;     /* ZC: the consumer's identity for the lent ledger */
+  int64_t  pid;     /* ZC: the pid occupying that identity at the release */
   uint8_t  kind;
 } mizu_keeper;
 
@@ -521,7 +523,8 @@ mizu_shm *mizu_spill_region_get(mizu_spill_fl *fl, size_t n);
 void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm);
 /* The producer-loan release for a ZC retain entry: refcount sub, then
    free list on 0 or the lent-region ledger otherwise. */
-void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key);
+void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key,
+                     int64_t pid);
 /* Move zero-count ledger entries to the free list, up to quota
    (MIZU_LEDGER_MAX = full sweep). */
 void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota);
@@ -535,9 +538,13 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota);
   ((int32_t) (((kind) << 16) | ((slot) & 0xffff)))
 /* Force-reclaim ledger entries after a confirmed consumer death:
    (kind, slot) encodes the one consumer to match, kind < 0 all entries
-   (the channel's single peer). REFHELD entries leak + unlink; the rest
-   rejoin the free list. */
-void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot);
+   (the channel's single peer); pid narrows the match to the entries
+   recorded under that occupant of the slot (0 matches any), so a verdict
+   on one occupant never reclaims what a later occupant of the same slot,
+   or a cleanly departed earlier one, still views. REFHELD entries leak +
+   unlink; the rest rejoin the free list. */
+void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot,
+                       int64_t pid);
 
 /* Consumer-side SHM_RAW mapping cache: a name -> mapping table that
    skips the open/fstat/mmap per payload once producers repeat region
