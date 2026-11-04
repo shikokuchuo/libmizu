@@ -1,11 +1,9 @@
 var searchData=
 [
-  ['ident_0',['ident',['../structmizu__binding__s.html#a36444699f8dcb0243502c60256195f78',1,'mizu_binding_s']]],
-  ['identity_20word_1',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
-  ['inj_5fcap_2',['inj_cap',['../structmizu__pool__hdr__s.html#ae6b20a752a051b35f207d378e77b4114',1,'mizu_pool_hdr_s']]],
-  ['inj_5fqueued_3',['inj_queued',['../structmizu__pool__info__s.html#acddb97d4a0f528424ea0efd50b6679d7',1,'mizu_pool_info_s']]],
-  ['injection_5fcap_4',['injection_cap',['../structmizu__pool__opts__s.html#a4d913e8cbc2c6cd6110184347a8194f3',1,'mizu_pool_opts_s']]],
-  ['inline_5fmax_5',['inline_max',['../structmizu__result__sink__s.html#ab1fddb5ac28cf4678fb44f05dfc9dcb1',1,'mizu_result_sink_s']]],
-  ['interchange_20codec_6',['Interchange codec',['../md_DESIGN.html#autotoc_md17',1,'']]],
-  ['is_20the_20death_20verdict_7',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]]
+  ['fl_5fhits_0',['fl_hits',['../structmizu__channel__info__s.html#ab834a92f48d6e011690c3c08c4ae2992',1,'mizu_channel_info_s::fl_hits'],['../structmizu__pool__dump__s.html#a90ef57b72d55af3ab636a0f8b3c8a8c5',1,'mizu_pool_dump_s::fl_hits']]],
+  ['flags_1',['flags',['../structmizu__channel__opts__s.html#ab04e9611b08fc0ded95b9646f86fa142',1,'mizu_channel_opts_s::flags'],['../structmizu__read__ctx__s.html#a179c8cf5296dbffdcaf4519d3a8841c7',1,'mizu_read_ctx_s::flags'],['../structmizu__binding__s.html#ab9db044355a3c3a50485a0cc316613e2',1,'mizu_binding_s::flags'],['../structmizu__morsel__hdr__s.html#af80340b2da622955eb405f3db1ae2ed2',1,'mizu_morsel_hdr_s::flags']]],
+  ['format_2',['format',['../md_DESIGN.html#autotoc_md19',1,'The format'],['../md_DESIGN.html#autotoc_md9',1,'Wire format']]],
+  ['frame_20writer_3',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
+  ['framing_20tiers_4',['Payload framing tiers',['../md_DESIGN.html#autotoc_md14',1,'']]],
+  ['full_5fwaiter_5',['full_waiter',['../structmizu__sub__stat__s.html#a5f43d981076258e94bef24f3be2acea2',1,'mizu_sub_stat_s']]]
 ];

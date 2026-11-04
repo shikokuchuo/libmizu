@@ -1,12 +1,19 @@
 var searchData=
 [
-  ['w_5fin_0',['w_in',['../structmizu__cvt__row__s.html#ab16734c3a1e7fb57cc26c4e96d71b00f',1,'mizu_cvt_row_s']]],
-  ['waiter_5fslot_1',['waiter_slot',['../structmizu__rs__hdr__s.html#a724c59bca2c09f54cc7234c802180825',1,'mizu_rs_hdr_s']]],
-  ['wire_2',['wire',['../structmizu__cvt__row__s.html#a876a5a08a9f8dfdb3cc0446929b239b6',1,'mizu_cvt_row_s']]],
-  ['wire_20format_3',['Wire format',['../md_DESIGN.html#autotoc_md9',1,'']]],
-  ['word_4',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
-  ['worker_5fident_5',['worker_ident',['../structmizu__pool__hdr__s.html#afb5a6b3f1e4eb7c5fc4ceed3dd7dc826',1,'mizu_pool_hdr_s']]],
-  ['worker_5fstate_6',['worker_state',['../structmizu__pool__info__s.html#a7ac908b151d105a7bcd71546362d43a2',1,'mizu_pool_info_s']]],
-  ['writer_7',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
-  ['writing_20a_20binding_8',['Writing a binding',['../index.html#autotoc_md3',1,'']]]
+  ['t_5flast_0',['t_last',['../structmizu__morsel__sizer__s.html#ae99bafc3dcc3351e04e6bff875ca8d7c',1,'mizu_morsel_sizer_s']]],
+  ['table_1',['Retain table',['../md_DESIGN.html#autotoc_md26',1,'']]],
+  ['target_2',['target',['../structmizu__ix__item__s.html#a86187534b2b02f52d23e71c4df98d6b7',1,'mizu_ix_item_s']]],
+  ['task_5fid_3',['task_id',['../structmizu__entry__hdr__s.html#a39a545ebebecffcef0c80ff38481f284',1,'mizu_entry_hdr_s']]],
+  ['task_5fkind_4',['task_kind',['../structmizu__ix__item__s.html#a3aa06f06365e74974e635bd88ae50b4a',1,'mizu_ix_item_s']]],
+  ['tasks_5fby_5fstate_5',['tasks_by_state',['../structmizu__pool__info__s.html#ac681b67b364325dbb3219c65dfe7c843',1,'mizu_pool_info_s']]],
+  ['the_20arrow_20frame_20writer_6',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
+  ['the_20binding_20seam_7',['The binding seam',['../md_DESIGN.html#autotoc_md23',1,'']]],
+  ['the_20byte_20shape_20helper_20registry_8',['The byte-shape helper registry',['../md_DESIGN.html#autotoc_md20',1,'']]],
+  ['the_20death_20verdict_9',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
+  ['the_20format_10',['The format',['../md_DESIGN.html#autotoc_md19',1,'']]],
+  ['the_20identity_20word_11',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
+  ['the_20keeperless_20claim_12',['The keeperless claim',['../md_DESIGN.html#autotoc_md16',1,'']]],
+  ['threading_20contract_13',['Threading contract',['../md_DESIGN.html#autotoc_md29',1,'']]],
+  ['tiers_14',['tiers',['../index.html#autotoc_md4',1,'API tiers'],['../md_DESIGN.html#autotoc_md14',1,'Payload framing tiers']]],
+  ['type_15',['type',['../structmizu__ix__item__s.html#a8c74298a41bb1a0051ed8f0b809a11de',1,'mizu_ix_item_s']]]
 ];

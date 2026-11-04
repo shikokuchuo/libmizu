@@ -1,5 +1,6 @@
 var searchData=
 [
-  ['registry_0',['registry',['../md_DESIGN.html#autotoc_md15',1,'Codec registry'],['../md_DESIGN.html#autotoc_md20',1,'The byte-shape helper registry']]],
-  ['retain_20table_1',['Retain table',['../md_DESIGN.html#autotoc_md26',1,'']]]
+  ['not_20exceptions_0',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]],
+  ['notes_1',['libmizu design notes',['../md_DESIGN.html',1,'']]],
+  ['notify_20endpoints_2',['Notify endpoints',['../md_DESIGN.html#autotoc_md13',1,'']]]
 ];

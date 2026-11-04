@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['map_20morsel_20protocol_0',['Map morsel protocol',['../md_DESIGN.html#autotoc_md25',1,'']]],
-  ['mechanics_1',['Pool mechanics',['../md_DESIGN.html#autotoc_md30',1,'']]],
-  ['morsel_20protocol_2',['Map morsel protocol',['../md_DESIGN.html#autotoc_md25',1,'']]]
+  ['identity_20word_0',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
+  ['interchange_20codec_1',['Interchange codec',['../md_DESIGN.html#autotoc_md17',1,'']]],
+  ['is_20the_20death_20verdict_2',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]]
 ];

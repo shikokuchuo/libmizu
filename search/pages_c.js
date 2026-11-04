@@ -1,9 +1,9 @@
 var searchData=
 [
-  ['parker_20protocol_0',['Parker protocol',['../md_DESIGN.html#autotoc_md12',1,'']]],
-  ['payload_20framing_20tiers_1',['Payload framing tiers',['../md_DESIGN.html#autotoc_md14',1,'']]],
-  ['performance_2',['Performance',['../index.html#autotoc_md1',1,'']]],
-  ['policy_3',['Staging policy',['../md_DESIGN.html#autotoc_md24',1,'']]],
-  ['pool_20mechanics_4',['Pool mechanics',['../md_DESIGN.html#autotoc_md30',1,'']]],
-  ['protocol_5',['protocol',['../md_DESIGN.html#autotoc_md25',1,'Map morsel protocol'],['../md_DESIGN.html#autotoc_md12',1,'Parker protocol']]]
+  ['languages_20capabilities_20and_20the_20identity_20word_0',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
+  ['libmizu_1',['libmizu',['../index.html',1,'']]],
+  ['libmizu_20design_20notes_2',['libmizu design notes',['../md_DESIGN.html',1,'']]],
+  ['license_3',['License',['../index.html#autotoc_md7',1,'']]],
+  ['liveness_20lock_20is_20the_20death_20verdict_4',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
+  ['lock_20is_20the_20death_20verdict_5',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]]
 ];

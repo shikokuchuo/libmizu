@@ -61,8 +61,9 @@ var NAVTREE =
       [ "ABI discipline", "md_DESIGN.html#autotoc_md31", null ]
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
-      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", [
-        [ "Added", "md_CHANGELOG.html#autotoc_md34", null ]
+      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", null ],
+      [ "[0.1.0] - 2026-11-04", "md_CHANGELOG.html#autotoc_md34", [
+        [ "Added", "md_CHANGELOG.html#autotoc_md35", null ]
       ] ]
     ] ],
     [ "Data Structures", "annotated.html", [
@@ -90,7 +91,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806"
+"mizu__ext_8h.html#aad8d5822cd30234e761c62abea32206b"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

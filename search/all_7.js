@@ -1,6 +1,10 @@
 var searchData=
 [
-  ['handle_0',['handle',['../structmizu__read__ctx__s.html#a93d95e46201d29b92177f7e779786c63',1,'mizu_read_ctx_s']]],
-  ['helper_20registry_1',['The byte-shape helper registry',['../md_DESIGN.html#autotoc_md20',1,'']]],
-  ['host_5fpid_2',['host_pid',['../structmizu__preamble__s.html#ac87ba7113ff3492553f86ab2ad33a33a',1,'mizu_preamble_s']]]
+  ['endpoints_0',['Notify endpoints',['../md_DESIGN.html#autotoc_md13',1,'']]],
+  ['epoch_1',['epoch',['../structmizu__parker__s.html#a2d94e3acdb1ddff1ecb72cb1fff82c2e',1,'mizu_parker_s']]],
+  ['err_2',['err',['../structmizu__ix__s.html#ab52036bce2ef3ec59219654110e7276f',1,'mizu_ix_s']]],
+  ['err_5fflags_3',['err_flags',['../structmizu__ix__item__s.html#a50208e17664b92336631b8a2cc3e3356',1,'mizu_ix_item_s']]],
+  ['err_5findex_4',['err_index',['../structmizu__ix__item__s.html#a5709760ab82ace302e27d189c5a5dfc3',1,'mizu_ix_item_s']]],
+  ['exceptions_5',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]],
+  ['exec_6',['exec',['../structmizu__binding__s.html#a1a6c148ae832bc3449805edbe6eb2e62',1,'mizu_binding_s']]]
 ];

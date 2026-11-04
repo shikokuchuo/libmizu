@@ -1,16 +1,16 @@
 var searchData=
 [
-  ['data_0',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
-  ['data_5foffset_1',['data_offset',['../structmizu__mizl__entry__s.html#a75f987e212e13254f6076f5e365ea6f7',1,'mizu_mizl_entry_s']]],
-  ['death_20verdict_2',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
-  ['deque_5fcap_3',['deque_cap',['../structmizu__pool__hdr__s.html#a759cd998f08f31533303ee975838b9cc',1,'mizu_pool_hdr_s']]],
-  ['deque_5fdepth_4',['deque_depth',['../structmizu__pool__info__s.html#addf3e96b352e1aa3bc00493afd3a39a6',1,'mizu_pool_info_s']]],
-  ['design_20notes_5',['libmizu design notes',['../md_DESIGN.html',1,'']]],
-  ['died_5fpid_6',['died_pid',['../structmizu__read__ctx__s.html#a4f8fb3f448de665d6f446a0b61f1722a',1,'mizu_read_ctx_s']]],
-  ['died_5fslot_7',['died_slot',['../structmizu__read__ctx__s.html#a495be19250d2c5400b9b6357d8961f83',1,'mizu_read_ctx_s']]],
-  ['discipline_8',['ABI discipline',['../md_DESIGN.html#autotoc_md31',1,'']]],
-  ['done_9',['done',['../structmizu__ix__s.html#a8c94770757595a0c73777237b3c6ab66',1,'mizu_ix_s']]],
-  ['drop_10',['drop',['../structmizu__channel__opts__s.html#a08f4e2d5cf9ea35a48a7191a765e60ec',1,'mizu_channel_opts_s::drop'],['../structmizu__binding__s.html#a7963cae0c64984f66d1d3f18aa535303',1,'mizu_binding_s::drop']]],
-  ['drop_5foffset_11',['drop_offset',['../structmizu__preamble__s.html#adf2db93cae8923f93a9c75224cb0feb6',1,'mizu_preamble_s']]],
-  ['drop_5fsize_12',['drop_size',['../structmizu__preamble__s.html#a1abdb3d6779af0e25bd14fbad1d4bce7',1,'mizu_preamble_s::drop_size'],['../structmizu__channel__opts__s.html#a99d6193c334e63fa99142cb924ed3dac',1,'mizu_channel_opts_s::drop_size']]]
+  ['a_20binding_0',['Writing a binding',['../index.html#autotoc_md3',1,'']]],
+  ['abi_20discipline_1',['ABI discipline',['../md_DESIGN.html#autotoc_md31',1,'']]],
+  ['added_2',['Added',['../md_CHANGELOG.html#autotoc_md35',1,'']]],
+  ['and_20the_20identity_20word_3',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
+  ['api_20tiers_4',['API tiers',['../index.html#autotoc_md4',1,'']]],
+  ['arena_5fsize_5',['arena_size',['../structmizu__preamble__s.html#a2d1748db2aeacf0ff828c06bc94f738f',1,'mizu_preamble_s::arena_size'],['../structmizu__channel__opts__s.html#aa71e1e0110860c9bf9789ad2c54300fb',1,'mizu_channel_opts_s::arena_size']]],
+  ['arrow_20frame_20writer_6',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
+  ['arrow_5fc_5fdata_5finterface_7',['ARROW_C_DATA_INTERFACE',['../mizu__ext_8h.html#a62dff1b60bc389d2afc1f9845c8643c8',1,'mizu_ext.h']]],
+  ['arrowarray_8',['ArrowArray',['../structArrowArray.html',1,'']]],
+  ['arrowarraystream_9',['ArrowArrayStream',['../structArrowArrayStream.html',1,'']]],
+  ['arrowschema_10',['ArrowSchema',['../structArrowSchema.html',1,'']]],
+  ['as_20data_11',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
+  ['atomicity_12',['Crash atomicity',['../md_DESIGN.html#autotoc_md28',1,'']]]
 ];

@@ -1,6 +1,7 @@
 var searchData=
 [
-  ['validity_20as_20data_0',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
-  ['verdict_1',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
-  ['views_2',['Zero-copy views',['../md_DESIGN.html#autotoc_md27',1,'']]]
+  ['seam_0',['The binding seam',['../md_DESIGN.html#autotoc_md23',1,'']]],
+  ['shape_20helper_20registry_1',['The byte-shape helper registry',['../md_DESIGN.html#autotoc_md20',1,'']]],
+  ['staging_20policy_2',['Staging policy',['../md_DESIGN.html#autotoc_md24',1,'']]],
+  ['statuses_20not_20exceptions_3',['Statuses, not exceptions',['../md_DESIGN.html#autotoc_md10',1,'']]]
 ];

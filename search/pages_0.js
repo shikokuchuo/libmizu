@@ -1,11 +1,6 @@
 var searchData=
 [
-  ['a_20binding_0',['Writing a binding',['../index.html#autotoc_md3',1,'']]],
-  ['abi_20discipline_1',['ABI discipline',['../md_DESIGN.html#autotoc_md31',1,'']]],
-  ['added_2',['Added',['../md_CHANGELOG.html#autotoc_md34',1,'']]],
-  ['and_20the_20identity_20word_3',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
-  ['api_20tiers_4',['API tiers',['../index.html#autotoc_md4',1,'']]],
-  ['arrow_20frame_20writer_5',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
-  ['as_20data_6',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
-  ['atomicity_7',['Crash atomicity',['../md_DESIGN.html#autotoc_md28',1,'']]]
+  ['0_201_200_202026_2011_2004_0',['[0.1.0] - 2026-11-04',['../md_CHANGELOG.html#autotoc_md34',1,'']]],
+  ['0_202026_2011_2004_1',['[0.1.0] - 2026-11-04',['../md_CHANGELOG.html#autotoc_md34',1,'']]],
+  ['04_2',['[0.1.0] - 2026-11-04',['../md_CHANGELOG.html#autotoc_md34',1,'']]]
 ];

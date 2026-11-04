@@ -1,5 +1,8 @@
 var searchData=
 [
-  ['zc_5fopen_5fmisses_0',['zc_open_misses',['../structmizu__channel__info__s.html#a1c861e5570632573cac4544a6c797c9b',1,'mizu_channel_info_s']]],
-  ['zero_20copy_20views_1',['Zero-copy views',['../md_DESIGN.html#autotoc_md27',1,'']]]
+  ['valid_0',['valid',['../structmizu__mizl__entry__s.html#ad7d09adbe623e2d398a3d3ce10211090',1,'mizu_mizl_entry_s']]],
+  ['validity_20as_20data_1',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
+  ['verdict_2',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
+  ['version_3',['version',['../structmizu__preamble__s.html#a50c350392048d362a7307c1ab83a66a2',1,'mizu_preamble_s::version'],['../structmizu__morsel__hdr__s.html#a218c554216870ad9c06b9f80d2e0122d',1,'mizu_morsel_hdr_s::version']]],
+  ['views_4',['Zero-copy views',['../md_DESIGN.html#autotoc_md27',1,'']]]
 ];
