@@ -10,9 +10,9 @@ DESTDIR ?=
 
 # The version is single-sourced in include/mizu.h (release.yml's tag gate
 # keys on it); derive it so the soname, pkg-config and docs banner agree.
-VERSION_MAJOR := $(shell awk '/^\#define MIZU_VERSION_MAJOR/ { print $$3 }' include/mizu.h)
-VERSION_MINOR := $(shell awk '/^\#define MIZU_VERSION_MINOR/ { print $$3 }' include/mizu.h)
-VERSION_PATCH := $(shell awk '/^\#define MIZU_VERSION_PATCH/ { print $$3 }' include/mizu.h)
+VERSION_MAJOR := $(shell awk '/define MIZU_VERSION_MAJOR / { print $$3 }' include/mizu.h)
+VERSION_MINOR := $(shell awk '/define MIZU_VERSION_MINOR / { print $$3 }' include/mizu.h)
+VERSION_PATCH := $(shell awk '/define MIZU_VERSION_PATCH / { print $$3 }' include/mizu.h)
 VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 
 CPPFLAGS += -Iinclude -Isrc
@@ -22,6 +22,16 @@ CFLAGS   ?= -O2
 # without the dialect, warning and visibility flags the library ships with.
 override CFLAGS += -std=c11 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
 LDFLAGS  ?=
+
+# GCC's -Wtsan flags every atomic_thread_fence as unsupported under
+# -fsanitize=thread (its TSan does not instrument fences). The fences
+# pair with seq_cst RMWs TSan does model, and the leg has always run
+# clean with the warning non-fatal; -Werror would now fail the build, so
+# the warning is silenced where the compiler knows the option (clang
+# rejects it, so it is probed rather than assumed).
+ifneq (,$(findstring -fsanitize=thread,$(CFLAGS)))
+  override CFLAGS += $(shell echo | $(CC) -Wno-tsan -Werror -x c -c - -o /dev/null 2>/dev/null && echo -Wno-tsan)
+endif
 
 UNAME := $(shell uname -s)
 
