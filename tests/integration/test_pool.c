@@ -135,7 +135,9 @@ static void run_worker(uint32_t slot, mizu_worker_exit expect, int linger) {
   if (mizu_pool_worker_join(&p, child_token, slot, &b) != MIZU_OK) _exit(3);
   if (joined_wr >= 0) {
     char c = 'j';
-    (void) write(joined_wr, &c, 1);
+    ssize_t wr = write(joined_wr, &c, 1);   /* glibc's warn_unused_result:
+       a (void) cast does not silence it under -O2 */
+    (void) wr;
   }
   mizu_worker_exit ex = mizu_pool_worker_run(p);
   if (ex != expect) _exit(4);

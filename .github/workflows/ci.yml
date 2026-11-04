@@ -47,12 +47,23 @@ jobs:
           cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu_ext.h)
           cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu_ext.c)
           # The FFI form: mizu.c + mizu_ext.c as one shared library must
-          # export exactly the surface the Makefile's build does.
-          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. -shared -fPIC \
-            -fvisibility=hidden -DMIZU_SHARED mizu.c mizu_ext.c \
-            -o libmizu_amalg.so -pthread -lrt
-          nm -D --defined-only libmizu_amalg.so | awk '{print $NF}' | \
-            grep '^mizu_' | sort -u > amalg_exports.txt
+          # export exactly the surface the Makefile's build does (the
+          # link and the symbol listing are per platform, as in
+          # tools/check-exports.sh).
+          case "$(uname -s)" in
+            Linux)
+              cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. -shared -fPIC \
+                -fvisibility=hidden -DMIZU_SHARED mizu.c mizu_ext.c \
+                -o libmizu_amalg.so -pthread -lrt
+              nm -D --defined-only libmizu_amalg.so | awk '{print $NF}' | \
+                grep '^mizu_' | sort -u > amalg_exports.txt ;;
+            Darwin)
+              cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. -dynamiclib \
+                -fPIC -fvisibility=hidden -DMIZU_SHARED mizu.c mizu_ext.c \
+                -o libmizu_amalg.dylib
+              nm -gU libmizu_amalg.dylib | awk '{print $NF}' | \
+                sed -n 's/^_\(mizu_.*\)/\1/p' | sort -u > amalg_exports.txt ;;
+          esac
           diff -u tools/exports.txt amalg_exports.txt
 
   # The shared library must export exactly the mizu.h + mizu_ext.h
