@@ -367,6 +367,7 @@ static int pool_probe_dead(const char *path, uint64_t dev, uint64_t ino,
 
 // Forward declarations for the cross-section call graph ------------------------------
 
+static void pool_unpark_sub(mizu_pool *p, uint32_t j);
 static void pool_unpark_result_waiter(mizu_pool *p, mizu_rs_hdr *rs);
 static void pool_unpark_keeper_drop(mizu_pool *p, int32_t w);
 static void pool_unpark_one_worker(mizu_pool *p);
@@ -555,7 +556,7 @@ static void pool_shutdown_broadcast(mizu_pool *p) {
   for (uint32_t j = 0; j < p->hdr.max_submitters; j++)
     if (atomic_load_explicit(p->full_waiters, memory_order_acquire) &
         (1ull << j))
-      mizu_unpark(pool_sub_pk(p, j));
+      pool_unpark_sub(p, j);
   for (uint32_t r = 0; r < p->hdr.result_slots; r++) {
     mizu_rs_hdr *rs = pool_rs(p, r);
     uint64_t cur = rs_load(rs);
@@ -1693,6 +1694,17 @@ static void pool_notify_send(mizu_pool *p, uint32_t j) {
   atomic_fetch_add_explicit(&p->stat_notify_sends, 1, memory_order_relaxed);
 }
 
+/* The submitter parker's one-waiter regime holds unless the binding split
+   its halves across threads: wake-all is for that case alone, wake-one's
+   directed handoff being the cheaper wake where the platform
+   distinguishes them. */
+static void pool_unpark_sub(mizu_pool *p, uint32_t j) {
+  if (pool_split_waiter(p))
+    mizu_unpark_all(pool_sub_pk(p, j));
+  else
+    mizu_unpark(pool_sub_pk(p, j));
+}
+
 static void pool_unpark_result_waiter(mizu_pool *p, mizu_rs_hdr *rs) {
   /* seq_cst, not acquire: the collector's announce is store; seq_cst
      fence; status load, and the publisher's half is the seq_cst status
@@ -1708,7 +1720,7 @@ static void pool_unpark_result_waiter(mizu_pool *p, mizu_rs_hdr *rs) {
      the un-announced case is the load and the not-taken branch exactly
      as without the feature */
   if ((ws & MIZU_WS_NOTIFY) == 0) {
-    mizu_unpark(pool_sub_pk(p, j));
+    pool_unpark_sub(p, j);
   } else if ((atomic_load_explicit(&p->sub[j].notify, memory_order_acquire) &
               MIZU_WAIT_NOTIFY) != 0) {
     /* load-first: a burst's first publish clears the announce, so the
@@ -2409,7 +2421,7 @@ static int pool_claim_rings(mizu_pool *p, int use_mask) {
             bit) {
           uint64_t w = atomic_fetch_and_explicit(p->full_waiters, ~bit,
                                                  memory_order_seq_cst);
-          if (w & bit) mizu_unpark(pool_sub_pk(p, s));
+          if (w & bit) pool_unpark_sub(p, s);
         }
         return 1;
       }

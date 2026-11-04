@@ -54,6 +54,12 @@ void mizu_unpark(mizu_parker *pk) {
   SetEvent((HANDLE) pk->event);
 }
 
+/* The auto-reset event wakes one either way: a wake meant for the other
+   split half costs that half at most its bounded park (mizu_ext.h). */
+void mizu_unpark_all(mizu_parker *pk) {
+  mizu_unpark(pk);
+}
+
 // Death listener -----------------------------------------------------------------
 
 struct mizu_death_watch_s {

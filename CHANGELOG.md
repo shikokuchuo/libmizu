@@ -26,7 +26,9 @@ First public release.
   every transition is a single CAS bound to its incarnation, and the
   parker protocol (one epoch word per waiting entity over futex /
   `__ulock` / WaitOnAddress, plus named events) is the sole guarantee
-  against lost wakeups.
+  against lost wakeups. Wakes are single-waiter by default (the
+  directed-handoff `mizu_unpark`); `mizu_unpark_all` is reserved for the
+  one word a split-waiter submitter's two threads can share.
 - Process-liveness verdicts from a kernel-released exclusive lock per
   entity; per-platform death listeners (pidfd + epoll, dispatch sources,
   thread-pool waits) act as wake triggers only, and an orphan reaper

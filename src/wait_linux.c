@@ -67,10 +67,15 @@ int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms) {
 
 void mizu_unpark(mizu_parker *pk) {
   atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
-  /* wake-all: a submitter's two halves may sleep on its one epoch word
-     (MIZU_BINDING_SPLIT_WAITER), and a wake-one could land on the half
-     whose predicate is still false, leaving the other to sleep out its
-     bound; with one sleeper the cost is identical */
+  syscall(SYS_futex, (uint32_t *) pk->epoch, FUTEX_WAKE, 1, NULL, NULL, 0);
+}
+
+void mizu_unpark_all(mizu_parker *pk) {
+  atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
+  /* the split-waiter submitter case (mizu_unpark_all's contract —
+     wait_macos.c's comment has the full form): a futex wake-all costs the
+     same as wake-one with one sleeper, but the forms stay uniform across
+     platforms */
   syscall(SYS_futex, (uint32_t *) pk->epoch, FUTEX_WAKE, INT_MAX, NULL, NULL,
           0);
 }

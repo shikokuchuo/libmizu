@@ -287,12 +287,14 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      drained at its next submit; a worker handle's halves are one thread
      by construction, so the flag is inert there. Without it the two
      halves must share a thread, and every release runs at the collect.
-     The two halves sleep on the submitter's one parker: on POSIX a wake
-     reaches both (wake-all), on Windows the auto-reset event wakes one,
-     so a wake meant for the other half costs that half at most its
-     bounded park (the interrupt-check bound) before it re-checks. The error
-     record is per thread either way (mizu.h, Error access): each thread
-     reads its own last record on the handle. */
+     The two halves sleep on the submitter's one parker, and the pool's
+     wakes of that parker reach both (mizu_unpark_all); every other
+     parker keeps the single-waiter wake-one. Death-watch fires and
+     Windows's auto-reset event wake one, so a wake meant for the other
+     half costs that half at most its bounded park (the interrupt-check
+     bound) before it re-checks. The error record is per thread either
+     way (mizu.h, Error access): each thread reads its own last record on
+     the handle. */
 
 typedef int (*mizu_stage_fn)(void *obj, mizu_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,
@@ -558,6 +560,13 @@ MIZU_API void mizu_parker_detach(mizu_parker *pk);
    rely on directed unparks). Returns MIZU_PARK_*. */
 MIZU_API int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms);
 MIZU_API void mizu_unpark(mizu_parker *pk);
+/** The split-waiter form: wakes every sleeper on the epoch word. Only the
+   submitter parker of a MIZU_BINDING_SPLIT_WAITER pool binding can have
+   two (its submit and collect halves); every other parker has one waiter
+   by contract and takes mizu_unpark, whose directed handoff is the
+   cheaper wake where the platform distinguishes them (XNU). On Windows
+   the auto-reset event wakes one in both forms. */
+MIZU_API void mizu_unpark_all(mizu_parker *pk);
 
 #ifdef MIZU_EXT_NO_INLINES
 MIZU_API uint32_t mizu_parker_snapshot(const mizu_parker *pk);

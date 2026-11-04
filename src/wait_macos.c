@@ -63,10 +63,20 @@ int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms) {
 
 void mizu_unpark(mizu_parker *pk) {
   atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
-  /* -ENOENT (no waiter) is the common no-op case. Wake-all: a submitter's
-     two halves may sleep on its one epoch word (MIZU_BINDING_SPLIT_WAITER),
-     and a wake-one could land on the half whose predicate is still false,
-     leaving the other to sleep out its bound. */
+  /* -ENOENT (no waiter) is the common no-op case */
+  __ulock_wake(UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO,
+               (void *) pk->epoch, 0);
+}
+
+void mizu_unpark_all(mizu_parker *pk) {
+  atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
+  /* Wake-all is for the one word that can have two sleepers: a
+     split-waiter submitter's parker (MIZU_BINDING_SPLIT_WAITER), where a
+     wake-one could land on the half whose predicate is still false,
+     leaving the other to sleep out its bound. The directed handoff is
+     XNU's wake-one path only, so the single-waiter regime keeps
+     mizu_unpark: a broadcast here costs the woken process a cross-core
+     schedule (~10-25 us) on every wake. */
   __ulock_wake(UL_COMPARE_AND_WAIT_SHARED | ULF_WAKE_ALL | ULF_NO_ERRNO,
                (void *) pk->epoch, 0);
 }

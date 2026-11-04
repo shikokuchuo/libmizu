@@ -191,6 +191,7 @@ mizu_timeout_ms
 mizu_tune
 mizu_type_elt_size
 mizu_unpark
+mizu_unpark_all
 mizu_version
 mizu_zc_flag_refheld
 mizu_zc_flags
