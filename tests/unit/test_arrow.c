@@ -1062,6 +1062,20 @@ static void test_dict_declines(void) {
   mk_schema(&lv, "i", NULL, NULL, 0, NULL, 0);
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "non-string") != NULL);
+  /* the dictionary array's own offset and null count are range-checked
+     like a column's: a negative offset would index ahead of its offsets
+     buffer */
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  {
+    ArrowArray *dict = batches[0]->children[0]->dictionary;
+    int64_t off = dict->offset, nulls = dict->null_count;
+    dict->offset = -1;
+    assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+    dict->offset = off;
+    dict->null_count = dict->length + 1;
+    assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+    dict->null_count = nulls;
+  }
 }
 
 static void test_dict_batch_shape(void) {

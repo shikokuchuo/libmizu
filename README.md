@@ -152,8 +152,15 @@ The Makefile and `build-win.bat` set these defines for you.
 To generate the amalgamation, run:
 
 ```sh
-tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
+tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h + mizu_ext.c
 ```
+
+If you compile the amalgamation into your own C program, you only need `mizu.c`.
+The helpers in `mizu_ext.h` are inline functions, so your code gets them from the header.
+
+If you want a shared library that other languages can call through an FFI, compile `mizu.c` and `mizu_ext.c` together with `-DMIZU_SHARED -fvisibility=hidden`.
+`mizu_ext.c` holds the exported copies of those helpers, which can't live in the same file as the inline versions.
+The result exports the same symbols as a library built with `make`.
 
 On Linux, link the amalgamation (or the static library) with `-pthread`, and with `-lrt` too on glibc releases before 2.34, where `shm_open` lives in librt. `make install` records both in the pkg-config file. Pass the same `PREFIX` to `make` and to `make install` (or let the stamp relink): on macOS the shared library's install name embeds it.
 

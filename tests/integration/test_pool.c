@@ -451,7 +451,7 @@ static void test_submitter_death(void) {
   /* the claim consumes the CANCEL and reaps the dead submitter */
   int freed = 0;
   for (int i = 0; i < 2000 && !freed; i++) {
-    mizu_pool_info st;
+    mizu_pool_info st = { .size = sizeof(mizu_pool_info) };
     assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
     freed = st.sub_state[1] == MIZU_SUB_FREE;
     if (!freed) sleep_ms(5);
@@ -653,7 +653,7 @@ static void test_parked_death(void) {
     assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
     mizu_bytes_free(obj);
   }
-  mizu_pool_info info;
+  mizu_pool_info info = { .size = sizeof(mizu_pool_info) };
   int both = 0;
   for (int i = 0; i < 500 && !both; i++) {
     assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
@@ -719,13 +719,13 @@ static void test_idle_death_force(void) {
   void *obj = NULL;
   assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
   mizu_bytes_free(obj);
-  static mizu_pool_dump d;
+  static mizu_pool_dump d = { .size = sizeof(mizu_pool_dump) };
   assert(mizu_pool_dump_get(ctrl, &d) == MIZU_OK);
   assert(d.ledger_entries == 1 && d.fl_entries == 0);   /* lent: the view */
 
   kill(w, SIGKILL);
   assert(wait_signalled(w) == SIGKILL);
-  mizu_pool_info info;
+  mizu_pool_info info = { .size = sizeof(mizu_pool_info) };
   int reaped = 0;
   for (int i = 0; i < 500 && !reaped; i++) {
     assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);

@@ -22,7 +22,9 @@ First public release.
   per calling thread), vectored collects, batch submit, and pool
   introspection. 64-bit platforms; Linux needs kernel >= 5.3.
 - Crash-atomic wire formats: every cross-process claim is copy-then-CAS,
-  and the parker protocol (one epoch word per waiting entity over futex /
+  a result slot's state, claimant and incarnation are one tagged word so
+  every transition is a single CAS bound to its incarnation, and the
+  parker protocol (one epoch word per waiting entity over futex /
   `__ulock` / WaitOnAddress, plus named events) is the sole guarantee
   against lost wakeups.
 - Process-liveness verdicts from a kernel-released exclusive lock per
@@ -45,7 +47,9 @@ First public release.
   bytes binding ships as the reference consumer.
 - A three-tier API: the stable `mizu.h`, the binding-author `mizu_ext.h`
   (dual-form header inlines plus exported symbols, pinned per minor
-  release), and private internals.
+  release), and private internals. Extensible structs are size-stamped
+  by the caller, and create, attach, join and the snapshot getters refuse
+  a mismatched stamp.
 - The cross-language wire contract (normative in DESIGN.md, pinned by a
   byte-exact golden corpus): per-handle identity words (language plus
   append-only reader-capability bits), the 'I' interchange stream with a

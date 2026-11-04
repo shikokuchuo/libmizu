@@ -48,11 +48,13 @@ RngStreams, doxygen-awesome-css).
   thread at submit entry and the worker reap points — carry the collect
   family's releases under `MIZU_BINDING_SPLIT_WAITER`, every
   `mizu_pool_task_release`, and the controller's off-thread death-callback
-  forces; the reap clears a dead worker's park announce, and the publish CAS
-  and `pool_fail_in_flight` both check the slot's incarnation; the
-  claimant's stamp-then-re-read and the reaper's CAS-then-re-read are the
-  seq_cst Dekker pair closing the stale-announce false DIED, the reap
-  replays one wake unconditionally, the sink verbs re-read the sequence
+  forces; the reap clears a dead worker's park announce; the result slot's
+  state, claimant and incarnation are one tagged 64-bit word
+  (`mizu_rs_hdr.state`) and every transition — the claim's PENDING →
+  RUNNING, the publish, cancel, reap and collect — is one CAS carrying
+  the sequence, so no stale claimant can touch a recommitted slot and a
+  reaper's false DIED on a live claim is taken back by the claim CAS
+  itself; the reap replays one wake unconditionally, the sink verbs re-read the sequence
   before staging, submitter-slot geometry is written ahead of LIVE, and
   `mizu_pool_leave` is idempotent with the claim verbs refusing a handle
   that has left — `live_self == 0`), the raw-tier

@@ -514,14 +514,31 @@ MIZU_STATIC_ASSERT(sizeof(mizu_sub_slot) == 128, "mizu_sub_slot is the wire form
 #define MIZU_WS_NOTIFY  (INT32_C(1) << 30)
 
 /** Result slot header; the payload framing header sits at offset 24 and
-   payload bytes at 40. */
+   payload bytes at 40. The state word packs the slot's whole protocol
+   identity: bits 0-3 the MIZU_RS_* state, bits 4-10 the claimant worker
+   (0 = none, else slot + 1), bits 11-63 the incarnation sequence
+   (incremented at each recommit; the task handle carries its low 40
+   bits). Every transition is one CAS on the full word with the expected
+   word carrying the sequence, so a claim, publish, cancel, reap or
+   collect bound to one incarnation can never land on the next — the
+   crash-atomicity argument needs no second word. The claimant bits ride
+   every state from RUNNING on (a terminal, and the FREE it leaves, keep
+   them), so a reaper, a collector's death record and the next
+   allocation's ledger key all read the owner off the same word. The
+   submitter's recommit is the one plain store: FREE to PENDING, the
+   sequence bumped and the claimant cleared in the same word. */
+#define MIZU_RS_STATE_MASK UINT64_C(0xF)
+#define MIZU_RS_WK_SHIFT   4
+#define MIZU_RS_WK_MASK    UINT64_C(0x7F)
+#define MIZU_RS_SEQ_SHIFT  11
+
 typedef struct mizu_rs_hdr_s {
-  MIZU_ATOMIC(int32_t)  status;        /**< MIZU_RS_* */
+  MIZU_ATOMIC(uint64_t) state;         /**< sequence << 11 | (claimant + 1) << 4
+      | MIZU_RS_* */
   MIZU_ATOMIC(int32_t)  waiter_slot;   /**< submitter slot parked on this (-1;
       MIZU_WS_NOTIFY OR'd when the wake is a notify signal) */
-  MIZU_ATOMIC(uint64_t) sequence;      /**< increments on reuse: stale-handle check */
-  MIZU_ATOMIC(int32_t)  worker_slot;   /**< executing worker (-1 until claimed) */
-  uint32_t         pad;
+  uint32_t         pad0;
+  uint64_t         pad1;
   mizu_slot_hdr     ph;
 } mizu_rs_hdr;
 
@@ -550,13 +567,18 @@ typedef enum mizu_wk_status_e { MIZU_WK_FREE = 0, MIZU_WK_CLAIMING, MIZU_WK_LIVE
                                MIZU_WK_LEAVING, MIZU_WK_REAPING } mizu_wk_status;
 typedef enum mizu_sub_status_e { MIZU_SUB_FREE = 0, MIZU_SUB_LIVE,
                                 MIZU_SUB_REAPING } mizu_sub_status;
-/** DIED is the reaper's terminal: status-word only, no payload, since a reap
+/** PENDING is a submitted, unclaimed task; RUNNING is the claimant's
+   ownership — the claim CAS from PENDING stamps the worker into the state
+   word, and only that worker's publish (or a reap of that worker) moves the
+   slot on, so no second claimant and no recommit can reach it mid-execution.
+   DIED is the reaper's terminal: status-word only, no payload, since a reap
    cannot write payload bytes without racing a live worker's concurrent publish.
    The "worker died" error object is built collect-side, keyed off the status.
    LOST is the same shape without a death verdict: the task's out-of-line
    payload vanished before it could run, so the claim performs no force-reclaim
    of the claimant's lent regions and the collect builds no claimant record. */
-typedef enum mizu_rs_status_e { MIZU_RS_FREE = 0, MIZU_RS_PENDING, MIZU_RS_OK,
+typedef enum mizu_rs_status_e { MIZU_RS_FREE = 0, MIZU_RS_PENDING,
+                               MIZU_RS_RUNNING, MIZU_RS_OK,
                                MIZU_RS_ERR, MIZU_RS_CANCEL,
                                MIZU_RS_DIED, MIZU_RS_LOST } mizu_rs_status;
 typedef enum mizu_park_state_e { MIZU_WPK_RUNNING = 0, MIZU_WPK_IDLE,
@@ -612,7 +634,11 @@ MIZU_API const char *mizu_shm_name(const mizu_shm *);
 /** Reap /mizu_ orphans of dead creators. Returns a malloc'd array of malloc'd
    names (free each, then the array), *n the count; NULL when none, including on
    platforms that cannot enumerate the shm namespace (Windows, where a mapping
-   cannot outlive its creator). */
+   cannot outlive its creator). The creator-liveness probe is a same-PID-
+   namespace signal probe: a shm namespace shared across PID namespaces (a
+   container's --ipc=host, a shared /dev/shm mount) reads another namespace's
+   live creators as dead, so reap only from the namespace that created the
+   regions. */
 MIZU_API char **mizu_shm_reap(int *n);
 
 /** The consumer side of the zc refcount protocol (header bytes [24-31] of
@@ -628,12 +654,14 @@ MIZU_API void mizu_zc_flag_refheld(mizu_shm *);
 
 // Channel verbs --------------------------------------------------------------------
 
-/** size-stamped options; mizu_channel_opts_init zeroes + stamps. drop is
-   the peer bootstrap payload, copied into the region at create (opaque
-   bytes; its first byte is a MIZU_DROP_* tag by binding convention; the
-   peer's binding reads them after attach). create validates every field
-   and returns MIZU_ERR on a value out of range, an unknown flag bit, or a
-   drop past MIZU_DROP_MAX. */
+/** size-stamped options; mizu_channel_opts_init zeroes + stamps, and
+   create refuses a struct whose stamp is not this header's sizeof (the
+   stamp is what lets a later release accept an older, shorter struct).
+   drop is the peer bootstrap payload, copied into the region at create
+   (opaque bytes; its first byte is a MIZU_DROP_* tag by binding
+   convention; the peer's binding reads them after attach). create
+   validates every field and returns MIZU_ERR on a value out of range, an
+   unknown flag bit, or a drop past MIZU_DROP_MAX. */
 typedef struct mizu_channel_opts_s {
   uint32_t size;
   uint32_t capacity;      /**< ring slots, power of two, 2..2^24 */
@@ -749,8 +777,10 @@ MIZU_API void mizu_channel_destroy(mizu_channel *);
    (destroy is the verb). */
 MIZU_API void mizu_channel_abandon(mizu_channel *);
 
-/** Handle-local + wire-state snapshot. name is borrowed. Counters are
-   process-local where noted. */
+/** Handle-local + wire-state snapshot. The caller stamps size =
+   sizeof(mizu_channel_info) before the call (info_get refuses a mismatch
+   with MIZU_ERR: the stamp versions the struct, as the options' does).
+   name is borrowed. Counters are process-local where noted. */
 typedef struct mizu_channel_info_s {
   uint32_t size;
   const char *name;
@@ -779,6 +809,8 @@ MIZU_API const char *mizu_channel_error(const mizu_channel *);
 
 // Pool verbs ---------------------------------------------------------------------
 
+/** size-stamped options, as the channel's: mizu_pool_opts_init zeroes +
+   stamps, and create refuses a mismatched stamp. */
 typedef struct mizu_pool_opts_s {
   uint32_t size;
   uint32_t max_workers;     /**< <= MIZU_MAX_WORKERS */
@@ -973,17 +1005,17 @@ typedef void (*mizu_trace_fn)(mizu_trace_event event, uint64_t task_id,
                              void *ctx);
 MIZU_API mizu_status mizu_pool_set_trace(mizu_pool *, mizu_trace_fn, void *ctx);
 
-/** Advisory and discard-only, never preemptive: a still-queued task is skipped;
-   an executing one runs to completion and its result is dropped. Returns 1 when
-   this call cancelled the task, 0 when too late (completed, already cancelled,
-   pool gone); every edge folds into 0, and there is no error path. A completed
-   slot is left collectible; releasing a handle that will never be collected is
-   mizu_pool_task_release. A cancelled slot is instead consumed asynchronously
-   by the worker: its publish or claim skip moves the slot CANCEL to FREE
-   without resequencing, so a later collect of the cancelled handle may report
-   the task already collected. A drain after cancel must tolerate that:
-   mizu_pool_task_state distinguishes a drained sibling from a terminal outcome
-   ahead of the collect. */
+/** Advisory and discard-only, never preemptive: a still-queued (PENDING)
+   task is skipped; an executing (RUNNING) one runs to completion and its result
+   is dropped. Returns 1 when this call cancelled the task, 0 when too late
+   (completed, already cancelled, pool gone); every edge folds into 0, and
+   there is no error path. A completed slot is left collectible; releasing a
+   handle that will never be collected is mizu_pool_task_release. A cancelled
+   slot is instead consumed asynchronously by the worker: its publish or claim
+   skip moves the slot CANCEL to FREE without resequencing, so a later collect
+   of the cancelled handle may report the task already collected. A drain after
+   cancel must tolerate that: mizu_pool_task_state distinguishes a drained
+   sibling from a terminal outcome ahead of the collect. */
 MIZU_API int mizu_pool_cancel(mizu_pool *, const mizu_task *);
 /** The finalizer release for a task handle that was never collected: a
    still-pending task is cancelled (as mizu_pool_cancel); a completed
@@ -992,7 +1024,9 @@ MIZU_API int mizu_pool_cancel(mizu_pool *, const mizu_task *);
    cancelled a pending task. Total, no error path: a stale handle, a
    released pool, or a forked child answers 0. */
 MIZU_API int mizu_pool_task_release(mizu_pool *, const mizu_task *);
-/** MIZU_RS_* of a task (informational, racy against slot reuse). */
+/** MIZU_RS_* of a task (informational, racy against slot reuse): PENDING
+   or RUNNING while outstanding, a terminal once published, FREE once
+   collected or invalidated. */
 MIZU_API int mizu_pool_task_state(mizu_pool *, const mizu_task *);
 /** Orderly shutdown, controller only: broadcasts shutdown, wakes every
    parked participant, and cancels all pending tasks (blocked collectors
@@ -1005,8 +1039,10 @@ MIZU_API mizu_status mizu_pool_stop(mizu_pool *, double timeout_ms);
 
 /** Snapshots. info reads shm-resident wire state; dump adds handle-local
    counters (free list, open caches, collect parks), the cold-path introspection
-   API behind a binding's dump output. Per-slot arrays are indexed by slot; only
-   the first n_workers / n_submitters entries are valid. The per-slot worker
+   API behind a binding's dump output. The caller stamps size = sizeof of the
+   struct it passes (info_get / dump_get refuse a mismatch with MIZU_ERR: the
+   stamp versions the struct). Per-slot arrays are indexed by slot; only the
+   first n_workers / n_submitters entries are valid. The per-slot worker
    states are what a resize scans for free slots. All borrowed; valid until the
    next call. */
 typedef struct mizu_pool_info_s {
@@ -1020,7 +1056,7 @@ typedef struct mizu_pool_info_s {
   uint8_t sub_state[64];                   /**< MIZU_SUB_* */
   int64_t deque_depth[MIZU_MAX_WORKERS];    /**< bottom - top */
   uint64_t parked_mask;                    /**< one bit per worker slot */
-  uint32_t tasks_by_state[7];              /**< occupancy indexed by MIZU_RS_* */
+  uint32_t tasks_by_state[8];              /**< occupancy indexed by MIZU_RS_* */
   uint32_t inj_queued[64];                 /**< unclaimed injection entries */
   int32_t shutdown;
 } mizu_pool_info;

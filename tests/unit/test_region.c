@@ -829,6 +829,19 @@ int main(void) {
   }
 #endif
 
+  /* a region name past the buffer is refused, never truncated: a
+     truncated copy would open the right region and unlink another */
+  {
+    char longname[64];
+    memset(longname, 'a', sizeof(longname) - 1);
+    memcpy(longname, MIZU_PREFIX_LITERAL, strlen(MIZU_PREFIX_LITERAL));
+    longname[sizeof(longname) - 1] = '\0';
+    mizu_shm *bad = NULL;
+    assert(mizu_shm_open(&bad, longname) == MIZU_ERR && bad == NULL);
+    assert(mizu_shm_open_rw(&bad, longname, 0) == MIZU_ERR && bad == NULL);
+    assert(mizu_shm_open_view(&bad, longname) == MIZU_ERR && bad == NULL);
+  }
+
   puts("test_region: ok");
   return 0;
 }

@@ -26,6 +26,7 @@ extern int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 
 #define UL_COMPARE_AND_WAIT_SHARED 3
 #define ULF_NO_ERRNO 0x01000000
+#define ULF_WAKE_ALL 0x00000100
 
 // Parker -----------------------------------------------------------------------
 
@@ -62,8 +63,11 @@ int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms) {
 
 void mizu_unpark(mizu_parker *pk) {
   atomic_fetch_add_explicit(pk->epoch, 1, memory_order_release);
-  /* -ENOENT (no waiter) is the common no-op case */
-  __ulock_wake(UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO,
+  /* -ENOENT (no waiter) is the common no-op case. Wake-all: a submitter's
+     two halves may sleep on its one epoch word (MIZU_BINDING_SPLIT_WAITER),
+     and a wake-one could land on the half whose predicate is still false,
+     leaving the other to sleep out its bound. */
+  __ulock_wake(UL_COMPARE_AND_WAIT_SHARED | ULF_WAKE_ALL | ULF_NO_ERRNO,
                (void *) pk->epoch, 0);
 }
 

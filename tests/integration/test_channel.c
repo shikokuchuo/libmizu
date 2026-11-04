@@ -61,7 +61,7 @@ static void run_misuser(void) {
   if (mizu_channel_close(host, 0) != MIZU_ERR) _exit(10);
   if (mizu_channel_alive(host) != 0) _exit(11);
   if (mizu_channel_peer_ident(host) != 0) _exit(12);
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   memset(&info, 0, sizeof info);
   if (mizu_channel_info_get(host, &info) != MIZU_ERR) _exit(13);
   if (strcmp(mizu_channel_error(host),

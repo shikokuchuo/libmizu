@@ -110,7 +110,7 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
   shm->size = 0;
   shm->collapsed = 0;
   shm->handle = NULL;
-  mizu_shm_set_name(shm, name);
+  if (mizu_shm_set_name(shm, name) != 0) return -1;
   shm->pid = 0;                      /* consumer: never the creator */
 
   HANDLE h = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
@@ -753,7 +753,7 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
   shm->addr = NULL;
   shm->size = 0;
   shm->collapsed = 0;
-  mizu_shm_set_name(shm, name);
+  if (mizu_shm_set_name(shm, name) != 0) return -1;
   shm->pid = 0;                      /* consumer: never the creator */
 
   int fd = mizu_shm_os_open(name, O_RDONLY, 0);

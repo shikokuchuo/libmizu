@@ -161,7 +161,7 @@ static void wait_child(pid_t pid) {
 }
 
 static void await_slot_free(mizu_pool *ctrl) {
-  mizu_pool_info ps;
+  mizu_pool_info ps = { .size = sizeof(mizu_pool_info) };
   int freed = 0;
   MIZU_SPIN_WAIT((mizu_pool_info_get(ctrl, &ps) == MIZU_OK &&
                   ps.worker_state[0] == MIZU_WK_FREE),

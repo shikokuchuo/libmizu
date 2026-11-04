@@ -110,7 +110,7 @@ static void channel_tests(void) {
   /* the consumed slot's keeper releases once the head publication
      reaches the producer (a quiet verb runs the reap) */
   assert(mizu_channel_recv(host, &obj, 0) == MIZU_TIMEOUT);
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 1);
 
@@ -291,7 +291,7 @@ static void pool_tests(void) {
   read_fails = 1;
   read_consume = 1;
   assert(mizu_pool_collect(ctrl, &h2, &v, 1000) == MIZU_ERR);
-  mizu_pool_info st;
+  mizu_pool_info st = { .size = sizeof(mizu_pool_info) };
   assert(mizu_pool_info_get(ctrl, &st) == MIZU_OK);
   uint32_t live = 0;
   for (int i = 1; i < 6; i++) live += st.tasks_by_state[i];

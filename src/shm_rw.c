@@ -29,7 +29,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   shm->addr = NULL;
   shm->size = 0;
   shm->handle = NULL;
-  mizu_shm_set_name(shm, name);
+  if (mizu_shm_set_name(shm, name) != 0) return -1;
 
   HANDLE h = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name);
   if (h == NULL) return -1;
@@ -80,7 +80,7 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   shm->addr = NULL;
   shm->size = 0;
   shm->collapsed = 0;
-  mizu_shm_set_name(shm, name);
+  if (mizu_shm_set_name(shm, name) != 0) return -1;
   shm->pid = 0;                      /* consumer: never the creator */
 
   int fd = mizu_shm_os_open(name, O_RDWR, 0);
@@ -145,7 +145,10 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   shm->addr = NULL;
   shm->size = 0;
   shm->collapsed = 0;
-  mizu_shm_set_name(shm, name);
+  if (mizu_shm_set_name(shm, name) != 0) {
+    free(shm);
+    return NULL;
+  }
   shm->pid = 0;                      /* consumer: never the creator */
 
   int fd = mizu_shm_os_open(name, O_RDONLY, 0);

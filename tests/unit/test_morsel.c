@@ -76,6 +76,20 @@ static void check_tests(void) {
   mizu_morsel_hdr v;
   assert(mizu_morsel_hdr_check(shm->addr, shm->size, &v) == NULL);
   assert(v.n == 1000 && v.out_m == 2 && v.state_off == h.state_off);
+  /* an ordinal past claim_n (a torn runner stream) has no lane: refused
+     on every verb, no word touched */
+  assert(mizu_morsel_claim(shm->addr, &v, v.claim_n) ==
+         MIZU_MORSEL_ABANDONED);
+  assert(mizu_morsel_abandon(shm->addr, &v, v.claim_n, 0) ==
+         MIZU_MORSEL_IDLE);
+  {
+    mizu_morsel_sizer sz;
+    mizu_morsel_sizer_init(&sz);
+    uint64_t m = 0, k = 0;
+    int help = 0;
+    assert(mizu_morsel_next(shm->addr, &v, &sz, v.claim_n, 0, NULL, 0,
+                            mizu_now(), &m, &k, &help) == 0);
+  }
 
   /* too small */
   assert(mizu_morsel_hdr_check(shm->addr, 127, NULL) != NULL);

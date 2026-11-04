@@ -93,15 +93,20 @@ void mizu_shm_close_stack(mizu_shm *shm, int unlink);
    failure: alignment is an optimization, never a failure mode. */
 void *mizu_mmap_aligned(int fd, size_t size, int prot, int flags);
 
-/* The open forms' name copy: fixed-buffer truncate, always
-   NUL-terminated, length stamped. */
-static inline MIZU_MAYBE_UNUSED void mizu_shm_set_name(mizu_shm *shm,
-                                                      const char *name) {
+/* The open forms' name copy: NUL-terminated, length stamped. A name past
+   the buffer is refused (-1) rather than truncated — a truncated copy
+   would open the caller's region but name another at close-with-unlink.
+   The public open wrappers record their own message on the refusal, so
+   no errno is set. Wire-carried names are bounded by their validators;
+   this guards the public region verbs. */
+static inline MIZU_MAYBE_UNUSED int mizu_shm_set_name(mizu_shm *shm,
+                                                     const char *name) {
   size_t nl = strlen(name);
-  if (nl >= sizeof(shm->name)) nl = sizeof(shm->name) - 1;
+  if (nl >= sizeof(shm->name)) return -1;
   memcpy(shm->name, name, nl);
   shm->name[nl] = '\0';
   shm->name_len = (uint8_t) nl;
+  return 0;
 }
 
 /* macOS registry-log exit/unload hook (shm.c; defined under __APPLE__
@@ -642,11 +647,48 @@ static inline MIZU_MAYBE_UNUSED void mizu_park_bracket(const mizu_binding *b, in
 /* The create/attach/join binding gate: stage/read callbacks and a
    language-tagged identity word are mandatory. `what` names the handle
    kind for the error record ("channel" / "pool"). */
+/* The result-slot state word (mizu.h's mizu_rs_hdr): state, claimant and
+   incarnation in one CAS-able word. wk is the worker slot, -1 for none. */
+static inline MIZU_MAYBE_UNUSED int32_t mizu_rs_st(uint64_t w) {
+  return (int32_t) (w & MIZU_RS_STATE_MASK);
+}
+static inline MIZU_MAYBE_UNUSED int32_t mizu_rs_wk(uint64_t w) {
+  return (int32_t) ((w >> MIZU_RS_WK_SHIFT) & MIZU_RS_WK_MASK) - 1;
+}
+static inline MIZU_MAYBE_UNUSED uint64_t mizu_rs_seq(uint64_t w) {
+  return w >> MIZU_RS_SEQ_SHIFT;
+}
+static inline MIZU_MAYBE_UNUSED uint64_t mizu_rs_pack(uint64_t seq, int32_t wk,
+                                                      int32_t st) {
+  return (seq << MIZU_RS_SEQ_SHIFT) |
+    (((uint64_t) (uint32_t) (wk + 1) & MIZU_RS_WK_MASK) << MIZU_RS_WK_SHIFT) |
+    ((uint64_t) (uint32_t) st & MIZU_RS_STATE_MASK);
+}
+/* The same incarnation and claimant in a new state. */
+static inline MIZU_MAYBE_UNUSED uint64_t mizu_rs_with(uint64_t w, int32_t st) {
+  return (w & ~MIZU_RS_STATE_MASK) | ((uint64_t) (uint32_t) st & MIZU_RS_STATE_MASK);
+}
+/* Outstanding: not yet terminal. */
+static inline MIZU_MAYBE_UNUSED int mizu_rs_live(int32_t st) {
+  return st == MIZU_RS_PENDING || st == MIZU_RS_RUNNING;
+}
+/* A published verdict a collector consumes (CANCEL is the worker's). */
+static inline MIZU_MAYBE_UNUSED int mizu_rs_collectible(int32_t st) {
+  return st == MIZU_RS_OK || st == MIZU_RS_ERR || st == MIZU_RS_DIED ||
+    st == MIZU_RS_LOST;
+}
+
 static inline MIZU_MAYBE_UNUSED int mizu_binding_check(const mizu_binding *b,
                                                       const char *what) {
   if (b == NULL || b->stage == NULL || b->read == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "a %s binding needs stage and read callbacks", what);
+    return -1;
+  }
+  if (b->size != sizeof(*b)) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "a %s binding must be initialized with "
+                       "mizu_binding_init (size stamp mismatch)", what);
     return -1;
   }
   if ((uint8_t) b->ident == MIZU_LANG_NONE) {

@@ -287,8 +287,12 @@ MIZU_API void mizu_handle_spill_info(const mizu_handle *,
      drained at its next submit; a worker handle's halves are one thread
      by construction, so the flag is inert there. Without it the two
      halves must share a thread, and every release runs at the collect.
-     The error record is per thread either way (mizu.h, Error access):
-     each thread reads its own last record on the handle. */
+     The two halves sleep on the submitter's one parker: on POSIX a wake
+     reaches both (wake-all), on Windows the auto-reset event wakes one,
+     so a wake meant for the other half costs that half at most its
+     bounded park (the interrupt-check bound) before it re-checks. The error
+     record is per thread either way (mizu.h, Error access): each thread
+     reads its own last record on the handle. */
 
 typedef int (*mizu_stage_fn)(void *obj, mizu_slot_hdr *hdr,
                             uint8_t *payload, uint32_t inline_max,
@@ -328,7 +332,8 @@ typedef void (*mizu_sweep_fn)(void *ctx);
 typedef void (*mizu_drop_fn)(void *ctx, void *pin);
 
 typedef struct mizu_binding_s {
-  uint32_t     size;    /**< sizeof(mizu_binding); set with mizu_binding_init */
+  uint32_t     size;    /**< sizeof(mizu_binding); set with mizu_binding_init
+      and checked at create/attach/join */
   mizu_stage_fn stage;
   mizu_read_fn  read;
   mizu_exec_fn  exec;    /**< pool workers only; NULL on submitter handles */
@@ -846,7 +851,9 @@ MIZU_API void mizu_morsel_sizer_init(mizu_morsel_sizer *);
    is stopping, the owner died, or the cursor is exhausted. sig (may be
    NULL) is the worker-local pool-signal trio; pin_k != 0 fixes k (a test
    entry, bypassing the sizing policy); now is the caller's mizu_now() read.
-   Atomics only, no park: safe to call under a global lock. */
+   An ordinal r past the header's claim_n (a torn runner stream) refuses
+   as 0, as abandon answers IDLE and claim ABANDONED for it. Atomics only,
+   no park: safe to call under a global lock. */
 MIZU_API int mizu_morsel_next(void *base, const mizu_morsel_hdr *h,
                             mizu_morsel_sizer *sz, uint32_t r, uint32_t gen,
                             const mizu_pool_sig *sig, uint64_t pin_k,
@@ -913,7 +920,8 @@ struct mizu_result_sink_s {
   uint32_t      rs_index;
   uint32_t      inline_max; /**< the slot's payload capacity */
   uint16_t      sub_slot;   /**< the task's submitter (zc keying, probes) */
-  uint64_t      seq;        /**< rs->sequence at claim */
+  uint64_t      seq;        /**< the claimed incarnation (the state word's
+      sequence; the publish CAS expects RUNNING, this worker, this seq) */
   uint64_t      task_id;
 };
 

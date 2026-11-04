@@ -43,7 +43,10 @@ int mizu_park(mizu_parker *pk, uint32_t snapshot, long timeout_ms) {
 
   DWORD ms = timeout_ms < 0 ? INFINITE : (DWORD) timeout_ms;
   DWORD r = WaitForSingleObject((HANDLE) pk->event, ms);
-  return r == WAIT_TIMEOUT ? MIZU_PARK_TIMEOUT : MIZU_PARK_WOKEN;
+  /* WAIT_FAILED (a broken event handle) reads as a timeout: the caller
+     re-checks its predicate and bounds the next sleep, where WOKEN would
+     spin on the failing wait */
+  return r == WAIT_OBJECT_0 ? MIZU_PARK_WOKEN : MIZU_PARK_TIMEOUT;
 }
 
 void mizu_unpark(mizu_parker *pk) {

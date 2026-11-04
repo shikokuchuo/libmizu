@@ -12,6 +12,9 @@ PROJECT_LOGO           = docs/assets/logo-icon.svg
 PROJECT_ICON           = docs/assets/logo-icon.svg
 OUTPUT_DIRECTORY       = docs
 
+# README.md carries a <picture> element (GitHub's light/dark logo switch)
+# doxygen does not know; the filter hands doxygen the plain <img> inside it.
+FILTER_PATTERNS        = *.md=tools/doxygen/mdfilter.sh
 INPUT                  = README.md \
                          DESIGN.md \
                          CHANGELOG.md \

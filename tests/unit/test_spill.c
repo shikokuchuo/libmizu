@@ -164,6 +164,19 @@ int main(void) {
   mizu_ledger_force(&h.fl, MIZU_LED_WK, 7);
   assert(h.fl.led_n == 0);
 
+  /* a REFHELD force clears churn like any reclaim: every drop path runs
+     the budget check */
+  mizu_shm *z6 = mizu_spill_region_get(&h.fl, 100);
+  mizu_stage_retain_zc(&h, z6);
+  mizu_keeper_commit(&h, tab, 3);
+  mizu_zc_ref(z6);
+  mizu_zc_flag_refheld(z6);
+  mizu_keeper_release(&h, tab, 3);
+  assert(h.fl.led_n == 1);
+  h.fl.churn = 1;
+  mizu_ledger_force(&h.fl, -1, -1);
+  assert(h.fl.led_n == 0 && h.fl.churn == 0);
+
   /* the quota sweep rotates its window across calls: long-held regions
      at the ledger front must not starve the entries behind them */
   mizu_shm *r[4];

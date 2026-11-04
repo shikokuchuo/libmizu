@@ -499,6 +499,11 @@ void mizu_zc_release(mizu_spill_fl *fl, mizu_shm *shm, int32_t key) {
    (the free-list caps), so the uncount reads ->size here. */
 static void mizu_ledger_drop(mizu_spill_fl *fl, uint32_t i) {
   fl->lent_bytes -= fl->led_regions[i]->size;
+  /* every reclaim path runs through here (the zero-count sweep hit, the
+     death force of either flavor): once the lent volume is back under
+     the budget, zero-copy reuse is viable again. Clear-only — never set
+     here (the trigger is the miss, and the signal stays Linux-only). */
+  if (fl->lent_bytes <= MIZU_ZC_LENT_BUDGET) fl->churn = 0;
   fl->led_n--;
   fl->led_regions[i] = fl->led_regions[fl->led_n];
   fl->led_regions[fl->led_n] = NULL;
@@ -526,10 +531,6 @@ void mizu_ledger_sweep(mizu_spill_fl *fl, uint32_t quota) {
     if (count == 0) {
       mizu_ledger_drop(fl, i);
       mizu_spill_fl_insert(fl, shm);
-      /* releases are landing and the volume is back under the budget:
-         zero-copy reuse is viable. Clear-only — never set here (the
-         trigger is the miss, and the signal stays Linux-only). */
-      if (fl->lent_bytes <= MIZU_ZC_LENT_BUDGET) fl->churn = 0;
     } else {
       i++;
     }
@@ -559,7 +560,6 @@ void mizu_ledger_force(mizu_spill_fl *fl, int32_t kind, int32_t slot) {
       mizu_region_destroy(shm);
     } else {
       mizu_spill_fl_insert(fl, shm);
-      if (fl->lent_bytes <= MIZU_ZC_LENT_BUDGET) fl->churn = 0;
     }
   }
 }

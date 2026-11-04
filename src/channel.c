@@ -446,6 +446,14 @@ static mizu_status chan_send1(mizu_channel *c, void *obj) {
   if (atomic_load_explicit(c->closedw, memory_order_acquire) != 0)
     return MIZU_CLOSED;
   if (c->verdict_dead) return MIZU_PEER_GONE;
+  /* the listener's flag is the wake trigger, the lock probe the verdict
+     (chan_rx_verdict's discipline): one acquire load on the hot path, so
+     a sender learns of the death at its next send instead of staging a
+     ring's worth of payloads — each spilled one a region — against a
+     peer that will never drain them */
+  if (atomic_load_explicit(&c->peer_dead, memory_order_acquire) &&
+      chan_probe_dead(c))
+    return MIZU_PEER_GONE;
 
   if (r->ltail - r->cached_head >= (int64_t) r->cap) {
     chan_reap(c, 1);
@@ -820,6 +828,12 @@ mizu_status mizu_channel_create(mizu_channel **out,
                               const mizu_binding *b) {
   *out = NULL;
   if (mizu_binding_check(b, "channel") != 0) return MIZU_ERR;
+  if (opts == NULL || opts->size != sizeof(*opts)) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "channel options must be initialized with "
+                       "mizu_channel_opts_init (size stamp mismatch)");
+    return MIZU_ERR;
+  }
   uint64_t cap = opts->capacity;
   uint64_t slot = opts->slot_size;
   uint64_t arena = opts->arena_size;
@@ -1475,6 +1489,12 @@ int mizu_channel_alive(const mizu_channel *c) {
 
 mizu_status mizu_channel_info_get(const mizu_channel *c, mizu_channel_info *out) {
   if (chan_get(c) == NULL) return MIZU_ERR;
+  if (out == NULL || out->size != sizeof(*out)) {
+    mizu_err_record_const(&c->h, MIZU_ERRCAT_OTHER,
+                          "info struct must be size-stamped by the caller "
+                          "(size = sizeof(mizu_channel_info))");
+    return MIZU_ERR;
+  }
   memset(out, 0, sizeof(*out));
   out->size = (uint32_t) sizeof(*out);
   out->name = c->shm.name;

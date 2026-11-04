@@ -235,8 +235,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     nb = 2;
   }
 
+  /* the peer's capability word off the input: the gated forms (ordered
+     dictionaries, verbatim ns and u64 lanes, remote leaves) are exercised
+     only for a peer that sets their bits */
+  const uint32_t caps =
+    ((uint32_t) pick[1022] | ((uint32_t) pick[1023] << 8)) & 0x1FFu;
   mizu_arrow *a = NULL;
-  if (mizu_arrow_open(&a, &root, batches, (size_t) nb, 0) != MIZU_OK)
+  if (mizu_arrow_open(&a, &root, batches, (size_t) nb, caps) != MIZU_OK)
     return 0;
   size_t total = mizu_arrow_size(a);
   if (total < (size_t) 1 << 20) {
@@ -252,6 +257,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
           (void) mizu_mizl_elem(buf, total, i, &e);
       }
       free(buf);
+    }
+  }
+  /* the inline small-table form: size pass, write pass, then the
+     validating cursor over the stream (the same size/write parity) */
+  size_t ixn = mizu_arrow_write_ix(a, NULL, NULL);
+  if (ixn > 0 && ixn < (size_t) 1 << 20) {
+    uint8_t *ix = malloc(ixn);
+    if (ix != NULL) {
+      mizu_arrow_warn warn;
+      memset(&warn, 0, sizeof warn);
+      size_t wrote = mizu_arrow_write_ix(a, ix, &warn);
+      if (wrote == ixn) {
+        mizu_ix cur;
+        mizu_ix_item item;
+        if (mizu_ix_open(&cur, ix, ixn) == MIZU_OK) {
+          while (mizu_ix_next(&cur, &item) == MIZU_OK) { }
+          (void) mizu_ix_end(&cur);
+        }
+      }
+      free(ix);
     }
   }
   mizu_arrow_close(a);

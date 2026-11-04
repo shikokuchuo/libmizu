@@ -86,7 +86,7 @@ static void chan_end(mizu_channel *host, mizu_channel *peer) {
 }
 
 static uint64_t chan_sends(mizu_channel *c) {
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   assert(mizu_channel_info_get(c, &info) == MIZU_OK);
   return info.notify_sends;
 }
@@ -382,7 +382,7 @@ static void test_pool_burst(void) {
   assert(wait_fires(1, 5000));
   settle(50);
   assert(fires == 1);
-  mizu_pool_dump dump;
+  mizu_pool_dump dump = { .size = sizeof(mizu_pool_dump) };
   assert(mizu_pool_dump_get(wk, &dump) == MIZU_OK);
   assert(dump.notify_sends == 1);
 
@@ -419,7 +419,7 @@ static void test_pool_rearm_keeps_signal(void) {
   assert(mizu_pool_task_notify(ctrl, &t, 1, 1) == MIZU_OK);
   assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
   assert(mizu_pool_step(wk, 1000) == MIZU_STEP_TASK);
-  mizu_pool_dump dump;
+  mizu_pool_dump dump = { .size = sizeof(mizu_pool_dump) };
   assert(mizu_pool_dump_get(wk, &dump) == MIZU_OK);
   assert(dump.notify_sends == 1);
   /* the second enrollment's re-arm: the datagram stays queued */
@@ -465,7 +465,7 @@ static void test_pool_withdraw(void) {
     assert(mizu_pool_step(wk, 1000) == MIZU_STEP_TASK);
   settle(150);
   assert(fires == 0);
-  mizu_pool_dump dump;
+  mizu_pool_dump dump = { .size = sizeof(mizu_pool_dump) };
   assert(mizu_pool_dump_get(wk, &dump) == MIZU_OK);
   assert(dump.notify_sends == 0);
 

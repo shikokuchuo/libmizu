@@ -798,6 +798,12 @@ static int arrow_classify(mizu_arrow *a, int col, const ArrowSchema *sc) {
    spans there. */
 static int arrow_dict_shape_ok(const ArrowArray *dict, int str_form) {
   if (dict == NULL || dict->buffers == NULL) return 0;
+  /* the dictionary array's own offset and null count, range-checked as
+     every column's are (arrow_check_batch): a negative offset would index
+     ahead of the offsets buffer */
+  if (dict->length < 0 || dict->offset < 0 || dict->null_count < -1 ||
+      dict->null_count > dict->length)
+    return 0;
   const int64_t need = str_form == 3 ? 2 : 3;
   if (dict->n_buffers < need) return 0;
   if (dict->length <= 0) return 1;

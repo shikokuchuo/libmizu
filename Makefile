@@ -127,14 +127,15 @@ src/%.o: src/%.c include/mizu.h include/mizu_ext.h src/internal.h
 
 # Test tiers: unit (in-process, per-PR), integration (real fork/spawn
 # children), soak (minutes-long contention runs; nightly). Integration
-# tests compile against the installed headers (mizu.h + mizu_ext.h) only —
-# the API's compile-time contract check; unit tests may include
-# internal.h.
+# tests compile against the installed headers (mizu.h + mizu_ext.h) only
+# (-Isrc filtered out) — the API's compile-time contract check; unit
+# tests may include internal.h. Every tier carries CFLAGS/LDFLAGS, so the
+# sanitizer and coverage builds link the instrumented static lib.
 tests/unit/%: tests/unit/%.c $(STATIC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(STATIC) $(LDLIBS)
 
 tests/integration/%: tests/integration/%.c $(STATIC)
-	$(CC) $(CPPFLAGS) -Iinclude -std=c11 -Wall -Wextra -Wpedantic -Werror \
+	$(CC) $(filter-out -Isrc,$(CPPFLAGS)) $(CFLAGS) $(LDFLAGS) \
 	  -o $@ $< $(STATIC) $(LDLIBS)
 
 # The ext-tier contract proof: references every mizu_ext.h symbol with
@@ -294,7 +295,7 @@ tidy:
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
 	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface .prefix
-	rm -rf mizu.c mizu.h mizu_ext.h mizu-*.profraw mizu.profdata \
+	rm -rf mizu.c mizu.h mizu_ext.h mizu_ext.c mizu-*.profraw mizu.profdata \
 	      compile_commands.json docs/html docs/xml coverage.lcov build dist \
 	      $(addsuffix .dSYM,$(TEST_UNIT_BIN) $(TEST_INT_BIN) $(TEST_SOAK_BIN) \
 	                         $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface)

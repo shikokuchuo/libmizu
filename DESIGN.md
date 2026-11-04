@@ -496,11 +496,14 @@ The shape whitelist's wire strings, as macros (compile-time constants need no ex
 #define MIZU_IX_ATTR_NAMES    "names"
 #define MIZU_IX_ATTR_LEVELS   "levels"
 #define MIZU_IX_ATTR_DIM      "dim"
+#define MIZU_IX_ATTR_DIMNAMES "dimnames"
 #define MIZU_IX_ATTR_CLASS    "class"
 #define MIZU_IX_ATTR_UNITS    "units"
 #define MIZU_IX_ATTR_ROWNAMES "row.names"
 #define MIZU_IX_ATTR_TZONE    "tzone"
 #define MIZU_IX_ATTR_TSCALE   "tscale"
+#define MIZU_IX_ATTR_U64      "u64"
+#define MIZU_IX_ATTR_TSP      "tsp"
 
 #define MIZU_IX_CLASS_FACTOR    "factor"
 #define MIZU_IX_CLASS_ORDERED   "ordered"
@@ -509,6 +512,7 @@ The shape whitelist's wire strings, as macros (compile-time constants need no ex
 #define MIZU_IX_CLASS_POSIXT    "POSIXt"
 #define MIZU_IX_CLASS_DIFFTIME  "difftime"
 #define MIZU_IX_CLASS_DATAFRAME "data.frame"
+#define MIZU_IX_CLASS_TABLE     "table"
 
 #define MIZU_IX_UNIT_SECS  "secs"
 #define MIZU_IX_UNIT_MINS  "mins"
@@ -708,10 +712,11 @@ The consumer maps page 0 read-write (the refcount word) and the rest read-only.
 ## Crash atomicity
 
 Each cross-process claim is copy-then-CAS, so a death mid-operation cannot wedge a queue.
-A worker announces its claim (`in_flight_rs`) before it CASes.
-The announce carries the entry's own incarnation stamp (the result-slot sequence at submit), so a reaper, serialized by the liveness lock, fails the slot only while the announced incarnation is still current — and only while no other worker has stamped `worker_slot`, the winner's first act past the claim CAS: a loser that died with its announce standing must not fail the task its rival is executing.
-The stamp and the reap are a Dekker pair, all seq_cst: the winner stores its stamp then re-reads the status, the reaper CASes PENDING to DIED then re-reads the stamp, so at least one side sees the other. A reaper that sees the stamp hands the slot back to PENDING; a winner that reads DIED takes it back itself, and a take-back that fails on FREE means a collector consumed the verdict first, so the claim drops as dead work.
-The sink verbs re-read the slot's sequence before staging, and the publish CAS re-reads it again, so a result for an incarnation the collector has already freed and the submitter recommitted drops without writing a payload byte into the new task's slot.
+A result slot's state, claimant and incarnation live in one 64-bit word (`mizu_rs_hdr.state`: the sequence in the high bits, the claimant worker in bits 4-10, the `MIZU_RS_*` state in the low four), and every transition is one CAS whose expected word carries the sequence — so a claim, publish, cancel, reap or collect bound to one incarnation can never land on the next, however the collector's consume and the submitter's recommit interleave with it.
+The claim is the CAS from the incarnation's unclaimed PENDING to RUNNING stamped with the worker; once a worker holds RUNNING, only its own publish, a cancel it consumes, or a reap of that worker moves the slot on, so no second claimant and no recommit can reach the slot while a result is being staged into it.
+A worker announces its claim (`in_flight_rs`) before the entry CAS.
+The announce carries the entry's own incarnation, so a reaper, serialized by the liveness lock, acts only while that incarnation is current: a RUNNING slot it fails only when the word names the dead worker as claimant (a rival's claim is the rival's), and a PENDING one it fails outright — either the dead worker won the entry and died before its RUNNING CAS, or the announce is a dead loser's and a live rival is about to claim; the rival's claim CAS then reads DIED and takes the slot back itself (DIED to RUNNING), while a take-back that fails means a collector consumed the verdict first, so the claim drops as dead work.
+The publish CAS expects RUNNING, this worker, this incarnation, so a result lands only in the slot it was claimed from; a cancel that landed on the claim is consumed at the publish tail, and a payload byte is never staged into a slot the claim no longer owns.
 A worker's park announce dies with the worker: the reap clears its bit in the parked mask, resets its park state, and replays one wake unconditionally, since a corpse found PARKED absorbed every directed wake until then (a pusher CASes it WAKING and reports the wake delivered).
 An entry a dead claimant left queued is a zombie: bound to a terminated incarnation, it drops at execute without running, consuming, or stamping `worker_slot`.
 On the controller, where the kept-fd probe and the death-callback thread share one open file description, a per-slot reap-owner word admits exactly one reaper, because the flock re-acquire on one OFD is not a mutual exclusion.

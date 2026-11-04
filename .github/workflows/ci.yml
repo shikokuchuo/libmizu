@@ -45,6 +45,15 @@ jobs:
           ./ext_surface_amalg
           cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu.h)
           cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu_ext.h)
+          cmp <(grep -m1 'Version:' mizu.c) <(grep -m1 'Version:' mizu_ext.c)
+          # The FFI form: mizu.c + mizu_ext.c as one shared library must
+          # export exactly the surface the Makefile's build does.
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror -I. -shared -fPIC \
+            -fvisibility=hidden -DMIZU_SHARED mizu.c mizu_ext.c \
+            -o libmizu_amalg.so -pthread -lrt
+          nm -D --defined-only libmizu_amalg.so | awk '{print $NF}' | \
+            grep '^mizu_' | sort -u > amalg_exports.txt
+          diff -u tools/exports.txt amalg_exports.txt
 
   # The shared library must export exactly the mizu.h + mizu_ext.h
   # surface: a missing symbol is an ABI break, an extra one is a leak
@@ -95,7 +104,7 @@ jobs:
         run: |
           make clean
           make CFLAGS="-O1 -g -fsanitize=${{ matrix.san }} -fno-omit-frame-pointer" \
-               LDFLAGS="-fsanitize=${{ matrix.san }}" test
+               LDFLAGS="-fsanitize=${{ matrix.san }}" test test-integration
 
   windows:
     runs-on: windows-latest

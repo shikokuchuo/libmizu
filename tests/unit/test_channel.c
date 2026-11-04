@@ -459,7 +459,7 @@ int main(int argc, char **argv) {
   assert(mizu_handle_keep_out((const mizu_handle *) host) == 1);
   recv_bytes(peer, big, 1 << 20);
 
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.fl_entries == 0);      /* pinned by the outstanding keeper */
   send_bytes(host, "x", 1);          /* the reap trigger: head advanced */
@@ -1273,8 +1273,19 @@ int main(int argc, char **argv) {
     assert(mizu_channel_ready_wait(host, 30000) == MIZU_OK);
     int wst;
     assert(waitpid(pid, &wst, 0) == pid);
-    assert(mizu_channel_alive(host) == 0);   /* the lock verdict */
+    /* the send side learns of the death by itself: the listener's flag
+       routes the next send to the lock probe, so neither an alive() call
+       nor a full ring precedes PEER_GONE (the watch fires asynchronously:
+       a bounded spin, each OK send staging one more slot) */
     mizu_bytes b = { "x", 1 };
+    mizu_status sst = MIZU_OK;
+    for (int i = 0; i < 10000 && sst == MIZU_OK; i++) {
+      sst = mizu_channel_send(host, &b);
+      struct timespec ts = {0, 1000000L};
+      if (sst == MIZU_OK) nanosleep(&ts, NULL);
+    }
+    assert(sst == MIZU_PEER_GONE);
+    assert(mizu_channel_alive(host) == 0);   /* the lock verdict */
     assert(mizu_channel_send(host, &b) == MIZU_PEER_GONE);
     void *obj = NULL;
     assert(mizu_channel_recv(host, &obj, 0) == MIZU_PEER_GONE);

@@ -172,6 +172,7 @@ int mizu_morsel_next(void *base, const mizu_morsel_hdr *h,
                     const mizu_pool_sig *sig, uint64_t pin_k, double now,
                     uint64_t *m_out, uint64_t *k_out, int *help_out) {
   gen &= MIZU_MORSEL_GEN_MASK;
+  if (r >= h->claim_n) return 0;   /* a torn runner stream's ordinal: no lane */
 
   /* first transition: CAS (gen << 2)|IDLE -> RUNNING — the one atomic that
      both claims the lane and fences the generation. It fails alike against
@@ -274,6 +275,7 @@ uint32_t mizu_morsel_reset(void *base, const mizu_morsel_hdr *h) {
 int mizu_morsel_abandon(void *base, const mizu_morsel_hdr *h, uint32_t r,
                        uint32_t gen) {
   gen &= MIZU_MORSEL_GEN_MASK;
+  if (r >= h->claim_n) return MIZU_MORSEL_IDLE;   /* no such lane */
   MIZU_ATOMIC(uint32_t) *cw = morsel_claim_word(base, h, r);
   /* a no-op ("idle" refusal) unless the cursor is exhausted or the cancel
      word is set; a won IDLE -> ABANDONED CAS at the current generation
@@ -316,6 +318,7 @@ uint64_t mizu_morsel_cursor(const void *base, const mizu_morsel_hdr *h) {
 
 uint32_t mizu_morsel_claim(const void *base, const mizu_morsel_hdr *h,
                           uint32_t r) {
+  if (r >= h->claim_n) return MIZU_MORSEL_ABANDONED;   /* no such lane */
   return atomic_load_explicit(morsel_claim_word((void *) base, h, r),
                               memory_order_acquire);
 }

@@ -144,7 +144,7 @@ static void test_cross_process_burst(void) {
   assert(accepted == N);
 
   assert(wait_exit(p) == 0);
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
   assert(info.notify_sends == 1);
   mizu_channel_destroy(host);
@@ -376,7 +376,7 @@ static void test_peer_endpoint_unlink(void) {
   mizu_channel *host;
   assert(mizu_channel_create(&host, &opts, &b) == MIZU_OK);
   assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
-  mizu_channel_info info;
+  mizu_channel_info info = { .size = sizeof(mizu_channel_info) };
   assert(mizu_channel_info_get(host, &info) == MIZU_OK);
 
   fflush(stdout);
@@ -430,7 +430,7 @@ static void test_pool_endpoint_unlink(void) {
   mizu_pool *ctrl;
   assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
   assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
-  mizu_pool_info info;
+  mizu_pool_info info = { .size = sizeof(mizu_pool_info) };
   memset(&info, 0, sizeof(info));
   info.size = sizeof(info);
   assert(mizu_pool_info_get(ctrl, &info) == MIZU_OK);
