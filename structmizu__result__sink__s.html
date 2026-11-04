@@ -111,7 +111,7 @@ Data Fields</h2></td></tr>
 <tr class="memitem:a0362ce61f1af8dc54866cba9e2554908" id="r_a0362ce61f1af8dc54866cba9e2554908"><td class="memItemLeft" align="right" valign="top"><a id="a0362ce61f1af8dc54866cba9e2554908" name="a0362ce61f1af8dc54866cba9e2554908"></a>
 mizu_pool *&#160;</td><td class="memItemRight" valign="bottom"><b>p</b></td></tr>
 <tr class="memitem:a39a938e54674b1bc5d678d2be81859eb" id="r_a39a938e54674b1bc5d678d2be81859eb"><td class="memItemLeft" align="right" valign="top"><a id="a39a938e54674b1bc5d678d2be81859eb" name="a39a938e54674b1bc5d678d2be81859eb"></a>
-<a class="el" href="mizu_8h.html#a76245db92247bfec58b8dd3f52355683">mizu_rs_hdr</a> *&#160;</td><td class="memItemRight" valign="bottom"><b>rs</b></td></tr>
+mizu_rs_hdr *&#160;</td><td class="memItemRight" valign="bottom"><b>rs</b></td></tr>
 <tr class="memitem:a24b3101ca7b197f0e42275b8d2cd0384" id="r_a24b3101ca7b197f0e42275b8d2cd0384"><td class="memItemLeft" align="right" valign="top"><a id="a24b3101ca7b197f0e42275b8d2cd0384" name="a24b3101ca7b197f0e42275b8d2cd0384"></a>
 unsigned char *&#160;</td><td class="memItemRight" valign="bottom"><b>payload</b></td></tr>
 <tr class="memdesc:a24b3101ca7b197f0e42275b8d2cd0384"><td class="mdescLeft">&#160;</td><td class="mdescRight">rs + sizeof(mizu_rs_hdr): the frame buffer <br /></td></tr>
@@ -125,7 +125,7 @@ uint16_t&#160;</td><td class="memItemRight" valign="bottom"><b>sub_slot</b></td>
 <tr class="memdesc:afeb064bfe0cda5a15eb92e7d5fa79b7d"><td class="mdescLeft">&#160;</td><td class="mdescRight">the task's submitter (zc keying, probes) <br /></td></tr>
 <tr class="memitem:a3527ef2307099b854b00acf7b2b8b6ed" id="r_a3527ef2307099b854b00acf7b2b8b6ed"><td class="memItemLeft" align="right" valign="top"><a id="a3527ef2307099b854b00acf7b2b8b6ed" name="a3527ef2307099b854b00acf7b2b8b6ed"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>seq</b></td></tr>
-<tr class="memdesc:a3527ef2307099b854b00acf7b2b8b6ed"><td class="mdescLeft">&#160;</td><td class="mdescRight">rs-&gt;sequence at claim <br /></td></tr>
+<tr class="memdesc:a3527ef2307099b854b00acf7b2b8b6ed"><td class="mdescLeft">&#160;</td><td class="mdescRight">the claimed incarnation (the state word's sequence; the publish CAS expects RUNNING, this worker, this seq) <br /></td></tr>
 <tr class="memitem:ac7f00590fe7657e0406bd96a27b55593" id="r_ac7f00590fe7657e0406bd96a27b55593"><td class="memItemLeft" align="right" valign="top"><a id="ac7f00590fe7657e0406bd96a27b55593" name="ac7f00590fe7657e0406bd96a27b55593"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>task_id</b></td></tr>
 </table>

@@ -95,11 +95,6 @@ $(function(){initNavTree('structmizu__rs__hdr__s.html','',''); });
   <div class="headertitle"><div class="title">mizu_rs_hdr_s Struct Reference</div></div>
 </div><!--header-->
 <div class="contents">
-
-<p>Result slot header; the payload framing header sits at offset 24 and payload bytes at 40.  
- <a href="#details">More...</a></p>
-
-<p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
 <div class="dynheader">
 Collaboration diagram for mizu_rs_hdr_s:</div>
 <div class="dyncontent">
@@ -108,26 +103,20 @@ Collaboration diagram for mizu_rs_hdr_s:</div>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 id="header-pub-attribs" class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
 Data Fields</h2></td></tr>
-<tr class="memitem:a736c726c8c97525f962102dcabc56388" id="r_a736c726c8c97525f962102dcabc56388"><td class="memItemLeft" align="right" valign="top"><a id="a736c726c8c97525f962102dcabc56388" name="a736c726c8c97525f962102dcabc56388"></a>
-int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>status</b></td></tr>
-<tr class="memdesc:a736c726c8c97525f962102dcabc56388"><td class="mdescLeft">&#160;</td><td class="mdescRight">MIZU_RS_*. <br /></td></tr>
+<tr class="memitem:abea4db3866d2bdcbfece3998e9437e22" id="r_abea4db3866d2bdcbfece3998e9437e22"><td class="memItemLeft" align="right" valign="top"><a id="abea4db3866d2bdcbfece3998e9437e22" name="abea4db3866d2bdcbfece3998e9437e22"></a>
+uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>state</b></td></tr>
+<tr class="memdesc:abea4db3866d2bdcbfece3998e9437e22"><td class="mdescLeft">&#160;</td><td class="mdescRight">sequence &lt;&lt; 11 | (claimant + 1) &lt;&lt; 4 | MIZU_RS_* <br /></td></tr>
 <tr class="memitem:a724c59bca2c09f54cc7234c802180825" id="r_a724c59bca2c09f54cc7234c802180825"><td class="memItemLeft" align="right" valign="top"><a id="a724c59bca2c09f54cc7234c802180825" name="a724c59bca2c09f54cc7234c802180825"></a>
 int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>waiter_slot</b></td></tr>
 <tr class="memdesc:a724c59bca2c09f54cc7234c802180825"><td class="mdescLeft">&#160;</td><td class="mdescRight">submitter slot parked on this (-1; MIZU_WS_NOTIFY OR'd when the wake is a notify signal) <br /></td></tr>
-<tr class="memitem:ac9484e74eabaed638952e2a90a75d8cb" id="r_ac9484e74eabaed638952e2a90a75d8cb"><td class="memItemLeft" align="right" valign="top"><a id="ac9484e74eabaed638952e2a90a75d8cb" name="ac9484e74eabaed638952e2a90a75d8cb"></a>
-uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>sequence</b></td></tr>
-<tr class="memdesc:ac9484e74eabaed638952e2a90a75d8cb"><td class="mdescLeft">&#160;</td><td class="mdescRight">increments on reuse: stale-handle check <br /></td></tr>
-<tr class="memitem:afb97401f97fac7c1acb6bfd8b0bea13d" id="r_afb97401f97fac7c1acb6bfd8b0bea13d"><td class="memItemLeft" align="right" valign="top"><a id="afb97401f97fac7c1acb6bfd8b0bea13d" name="afb97401f97fac7c1acb6bfd8b0bea13d"></a>
-int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>worker_slot</b></td></tr>
-<tr class="memdesc:afb97401f97fac7c1acb6bfd8b0bea13d"><td class="mdescLeft">&#160;</td><td class="mdescRight">executing worker (-1 until claimed) <br /></td></tr>
-<tr class="memitem:a358670d53e30aa6699c8a040a4d9bac1" id="r_a358670d53e30aa6699c8a040a4d9bac1"><td class="memItemLeft" align="right" valign="top"><a id="a358670d53e30aa6699c8a040a4d9bac1" name="a358670d53e30aa6699c8a040a4d9bac1"></a>
-uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad</b></td></tr>
+<tr class="memitem:a2dbb216adbc4148701420c63b431eb35" id="r_a2dbb216adbc4148701420c63b431eb35"><td class="memItemLeft" align="right" valign="top"><a id="a2dbb216adbc4148701420c63b431eb35" name="a2dbb216adbc4148701420c63b431eb35"></a>
+uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad0</b></td></tr>
+<tr class="memitem:a63bcfcc3955f019176d8d676c60e4019" id="r_a63bcfcc3955f019176d8d676c60e4019"><td class="memItemLeft" align="right" valign="top"><a id="a63bcfcc3955f019176d8d676c60e4019" name="a63bcfcc3955f019176d8d676c60e4019"></a>
+uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad1</b></td></tr>
 <tr class="memitem:a4e4cfc815984fd5d2bbd082d19f63886" id="r_a4e4cfc815984fd5d2bbd082d19f63886"><td class="memItemLeft" align="right" valign="top"><a id="a4e4cfc815984fd5d2bbd082d19f63886" name="a4e4cfc815984fd5d2bbd082d19f63886"></a>
 mizu_slot_hdr&#160;</td><td class="memItemRight" valign="bottom"><b>ph</b></td></tr>
 </table>
-<a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Result slot header; the payload framing header sits at offset 24 and payload bytes at 40. </p>
-</div><hr/>The documentation for this struct was generated from the following file:<ul>
+<hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>
 </div><!-- contents -->

@@ -160,7 +160,7 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>notify_sends</b><
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Handle-local + wire-state snapshot. </p>
-<p>name is borrowed. Counters are process-local where noted. </p>
+<p>The caller stamps size = sizeof(mizu_channel_info) before the call (info_get refuses a mismatch with MIZU_ERR: the stamp versions the struct, as the options' does). name is borrowed. Counters are process-local where noted. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>

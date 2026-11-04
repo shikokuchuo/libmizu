@@ -1,5 +1,6 @@
 var NAVTREEINDEX1 =
 {
+"mizu__ext_8h.html#ab0de70a598099a8d98dbf275765d920d":[10,0,0,1,158],
 "mizu__ext_8h.html#ab76ac0a4c96d06f733bc4a41cd65f206":[10,0,0,1,34],
 "mizu__ext_8h.html#ab83e23693b4a75957eed9e2a24510f28":[10,0,0,1,138],
 "mizu__ext_8h.html#ab83e2471a47dcc2cbac3653ecde4787c":[10,0,0,1,90],
@@ -157,8 +158,8 @@ var NAVTREEINDEX1 =
 "structmizu__pool__info__s.html#a0ac8a82ebf229d703dc068e55710cb3f":[9,0,21,0],
 "structmizu__pool__info__s.html#a3522ec4825c931603474a3662a11ebda":[9,0,21,2],
 "structmizu__pool__info__s.html#a7ac908b151d105a7bcd71546362d43a2":[9,0,21,1],
-"structmizu__pool__info__s.html#aaa68002772ccc32a39cdf6eb6f0bf87c":[9,0,21,5],
 "structmizu__pool__info__s.html#ab70509ccc04b2de7b3d3b56507764cf1":[9,0,21,4],
+"structmizu__pool__info__s.html#ac681b67b364325dbb3219c65dfe7c843":[9,0,21,5],
 "structmizu__pool__info__s.html#acddb97d4a0f528424ea0efd50b6679d7":[9,0,21,6],
 "structmizu__pool__info__s.html#addf3e96b352e1aa3bc00493afd3a39a6":[9,0,21,3],
 "structmizu__pool__opts__s.html":[9,0,22],
@@ -195,9 +196,7 @@ var NAVTREEINDEX1 =
 "structmizu__result__sink__s.html#afeb064bfe0cda5a15eb92e7d5fa79b7d":[9,0,26,2],
 "structmizu__rs__hdr__s.html":[9,0,27],
 "structmizu__rs__hdr__s.html#a724c59bca2c09f54cc7234c802180825":[9,0,27,1],
-"structmizu__rs__hdr__s.html#a736c726c8c97525f962102dcabc56388":[9,0,27,0],
-"structmizu__rs__hdr__s.html#ac9484e74eabaed638952e2a90a75d8cb":[9,0,27,2],
-"structmizu__rs__hdr__s.html#afb97401f97fac7c1acb6bfd8b0bea13d":[9,0,27,3],
+"structmizu__rs__hdr__s.html#abea4db3866d2bdcbfece3998e9437e22":[9,0,27,0],
 "structmizu__rs__row__s.html":[9,0,28],
 "structmizu__rs__row__s.html#a66a30acae19b6471cf160b3f93fd3c87":[9,0,28,0],
 "structmizu__shm__s.html":[9,0,29],

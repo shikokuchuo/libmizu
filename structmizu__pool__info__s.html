@@ -136,9 +136,9 @@ int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>deque_depth</b> [<
 <tr class="memitem:ab70509ccc04b2de7b3d3b56507764cf1" id="r_ab70509ccc04b2de7b3d3b56507764cf1"><td class="memItemLeft" align="right" valign="top"><a id="ab70509ccc04b2de7b3d3b56507764cf1" name="ab70509ccc04b2de7b3d3b56507764cf1"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>parked_mask</b></td></tr>
 <tr class="memdesc:ab70509ccc04b2de7b3d3b56507764cf1"><td class="mdescLeft">&#160;</td><td class="mdescRight">one bit per worker slot <br /></td></tr>
-<tr class="memitem:aaa68002772ccc32a39cdf6eb6f0bf87c" id="r_aaa68002772ccc32a39cdf6eb6f0bf87c"><td class="memItemLeft" align="right" valign="top"><a id="aaa68002772ccc32a39cdf6eb6f0bf87c" name="aaa68002772ccc32a39cdf6eb6f0bf87c"></a>
-uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>tasks_by_state</b> [7]</td></tr>
-<tr class="memdesc:aaa68002772ccc32a39cdf6eb6f0bf87c"><td class="mdescLeft">&#160;</td><td class="mdescRight">occupancy indexed by MIZU_RS_* <br /></td></tr>
+<tr class="memitem:ac681b67b364325dbb3219c65dfe7c843" id="r_ac681b67b364325dbb3219c65dfe7c843"><td class="memItemLeft" align="right" valign="top"><a id="ac681b67b364325dbb3219c65dfe7c843" name="ac681b67b364325dbb3219c65dfe7c843"></a>
+uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>tasks_by_state</b> [8]</td></tr>
+<tr class="memdesc:ac681b67b364325dbb3219c65dfe7c843"><td class="mdescLeft">&#160;</td><td class="mdescRight">occupancy indexed by MIZU_RS_* <br /></td></tr>
 <tr class="memitem:acddb97d4a0f528424ea0efd50b6679d7" id="r_acddb97d4a0f528424ea0efd50b6679d7"><td class="memItemLeft" align="right" valign="top"><a id="acddb97d4a0f528424ea0efd50b6679d7" name="acddb97d4a0f528424ea0efd50b6679d7"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>inj_queued</b> [64]</td></tr>
 <tr class="memdesc:acddb97d4a0f528424ea0efd50b6679d7"><td class="mdescLeft">&#160;</td><td class="mdescRight">unclaimed injection entries <br /></td></tr>
@@ -147,7 +147,7 @@ int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>shutdown</b></td><
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Snapshots. </p>
-<p>info reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks), the cold-path introspection API behind a binding's dump output. Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
+<p>info reads shm-resident wire state; dump adds handle-local counters (free list, open caches, collect parks), the cold-path introspection API behind a binding's dump output. The caller stamps size = sizeof of the struct it passes (info_get / dump_get refuse a mismatch with MIZU_ERR: the stamp versions the struct). Per-slot arrays are indexed by slot; only the first n_workers / n_submitters entries are valid. The per-slot worker states are what a resize scans for free slots. All borrowed; valid until the next call. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>

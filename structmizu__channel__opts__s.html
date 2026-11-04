@@ -96,7 +96,7 @@ $(function(){initNavTree('structmizu__channel__opts__s.html','',''); });
 </div><!--header-->
 <div class="contents">
 
-<p>size-stamped options; mizu_channel_opts_init zeroes + stamps.  
+<p>size-stamped options; mizu_channel_opts_init zeroes + stamps, and create refuses a struct whose stamp is not this header's sizeof (the stamp is what lets a later release accept an older, shorter struct).  
  <a href="#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="mizu_8h_source.html">mizu.h</a>&gt;</code></p>
@@ -125,7 +125,7 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>drop_size</b></td
 <tr class="memdesc:a99d6193c334e63fa99142cb924ed3dac"><td class="mdescLeft">&#160;</td><td class="mdescRight">their byte count, at most MIZU_DROP_MAX <br /></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>size-stamped options; mizu_channel_opts_init zeroes + stamps. </p>
+<div class="textblock"><p>size-stamped options; mizu_channel_opts_init zeroes + stamps, and create refuses a struct whose stamp is not this header's sizeof (the stamp is what lets a later release accept an older, shorter struct). </p>
 <p>drop is the peer bootstrap payload, copied into the region at create (opaque bytes; its first byte is a MIZU_DROP_* tag by binding convention; the peer's binding reads them after attach). create validates every field and returns MIZU_ERR on a value out of range, an unknown flag bit, or a drop past MIZU_DROP_MAX. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
