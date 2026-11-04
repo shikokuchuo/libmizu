@@ -114,8 +114,15 @@ jobs:
       - name: test (${{ matrix.san }})
         run: |
           make clean
+          # The integration tier forks peers from a process whose death
+          # listener thread is already running, and the peer starts its
+          # own: TSan on Linux refuses to start threads after a
+          # multi-threaded fork and kills the child, so that tier runs
+          # under ASan and UBSan only (the unit tier covers TSan).
+          tiers="test test-integration"
+          if [ "${{ matrix.san }}" = thread ]; then tiers=test; fi
           make CFLAGS="-O1 -g -fsanitize=${{ matrix.san }} -fno-omit-frame-pointer" \
-               LDFLAGS="-fsanitize=${{ matrix.san }}" test test-integration
+               LDFLAGS="-fsanitize=${{ matrix.san }}" $tiers
 
   windows:
     runs-on: windows-latest
