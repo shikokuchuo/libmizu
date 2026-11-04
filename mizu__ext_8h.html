@@ -834,8 +834,9 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_err_describe</b>
 <tr class="memitem:ae5443558308279f096de9294312ac369" id="r_ae5443558308279f096de9294312ac369"><td class="memItemLeft" align="right" valign="top"><a id="ae5443558308279f096de9294312ac369" name="ae5443558308279f096de9294312ac369"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (int *seed)</td></tr>
 <tr class="memdesc:ae5443558308279f096de9294312ac369"><td class="mdescLeft">&#160;</td><td class="mdescRight">One 2^127-step L'Ecuyer-CMRG stream jump in place over a 6-word state (rng_jump.c; a binding's map derives per-element streams with it). <br /></td></tr>
-<tr class="memitem:a5e24079ee82760c130ec7014d4de8299" id="r_a5e24079ee82760c130ec7014d4de8299"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a5e24079ee82760c130ec7014d4de8299">mizu_tune</a> (void)</td></tr>
-<tr class="memdesc:a5e24079ee82760c130ec7014d4de8299"><td class="mdescLeft">&#160;</td><td class="mdescRight">malloc tuning (tune.c), called by the binding at load.  <br /></td></tr>
+<tr class="memitem:a5e24079ee82760c130ec7014d4de8299" id="r_a5e24079ee82760c130ec7014d4de8299"><td class="memItemLeft" align="right" valign="top"><a id="a5e24079ee82760c130ec7014d4de8299" name="a5e24079ee82760c130ec7014d4de8299"></a>
+void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_tune</b> (void)</td></tr>
+<tr class="memdesc:a5e24079ee82760c130ec7014d4de8299"><td class="mdescLeft">&#160;</td><td class="mdescRight">malloc tuning (tune.c), called by the binding at load. <br /></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>libmizu binding-author API (the unstable tier). </p>
@@ -1351,7 +1352,7 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </div><div class="memdoc">
 
 <p>The pull cursor. </p>
-<p>Stack-allocated by the caller; the frame stack is the depth cap's accounting (LIST / DICT / STRV / ATTR / TASK frames, the dict's remaining counting keys and values alike). </p>
+<p>Stack-allocated by the caller; the frame stack is the depth cap's accounting: the container frames (LIST / DICT / ATTR / TASK, the dict's remaining counting keys and values alike) count toward the cap, while an STRV frame is a leaf — nothing opens under it — and rides the one slot past it, so a string vector at depth 64 reads. </p>
 
 </div>
 </div>
@@ -1873,7 +1874,7 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_rng_jump</b> (in
 </div><div class="memdoc">
 
 <p>The consumer's published-not-yet-consumed message count: one acquire load on a local-cache miss, otherwise the cached tail. </p>
-<p>Only this consumer shrinks the count, so a caller sizing a receive buffer from it never over-allocates on a producer's later publish. Exported only (the ring locals are internal). </p>
+<p>Only this consumer shrinks the count, so a caller sizing a receive buffer from it never over-allocates on a producer's later publish. Total: a NULL, released or inherited (forked) handle answers 0. Exported only (the ring locals are internal). </p>
 
 </div>
 </div>
@@ -3737,26 +3738,6 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>The one-call stage over the handle seam, valid only during a stage_fn call. </p>
 <p>First the gate, touching no shared state: the capability conjunction (MIZU_CAP_MIZL | MIZU_CAP_ATTRS, plus MIZU_CAP_MIZS when any column is a string) off the classification and the peer_caps given at open, then the churn check. Then mizu_stage_reap, the spill checkout, the write, the SHM_VEC stamp (name payload, aux type VEC + used bytes) and mizu_stage_retain_zc. MIZU_OK staged; otherwise a non-OK status (the gate's decline, or the spill status when no region) with nothing claimed, so the caller's copy tiers take every non-OK alike. The caller pins nothing: the region is self-contained unless it registered remote leaves, whose pins are its own. warn (zeroed here) returns the conversion counts; the binding raises them after the stage returns. </p>
-
-</div>
-</div>
-<a id="a5e24079ee82760c130ec7014d4de8299" name="a5e24079ee82760c130ec7014d4de8299"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a5e24079ee82760c130ec7014d4de8299">&#9670;&#160;</a></span>mizu_tune()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">void mizu_tune </td>
-          <td>(</td>
-          <td class="paramtype">void</td>          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-<p>malloc tuning (tune.c), called by the binding at load. </p>
-<p>MIZU_EXT_H </p>
 
 </div>
 </div>

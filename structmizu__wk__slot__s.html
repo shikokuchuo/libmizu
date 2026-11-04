@@ -135,12 +135,11 @@ uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad1</b> [64]</td>
 <tr class="memdesc:a60273667a6ad21510a071e19df2918c0"><td class="mdescLeft">&#160;</td><td class="mdescRight">deque_top off the owner's span <br /></td></tr>
 <tr class="memitem:affc37e34fdc1e30b81ff05f9cf0ca190" id="r_affc37e34fdc1e30b81ff05f9cf0ca190"><td class="memItemLeft" align="right" valign="top"><a id="affc37e34fdc1e30b81ff05f9cf0ca190" name="affc37e34fdc1e30b81ff05f9cf0ca190"></a>
 int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>deque_top</b></td></tr>
-<tr class="memitem:a899475cd38f826b6cd04ab77b56350f9" id="r_a899475cd38f826b6cd04ab77b56350f9"><td class="memItemLeft" align="right" valign="top"><a id="a899475cd38f826b6cd04ab77b56350f9" name="a899475cd38f826b6cd04ab77b56350f9"></a>
-uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>live_dev</b></td></tr>
-<tr class="memdesc:a899475cd38f826b6cd04ab77b56350f9"><td class="mdescLeft">&#160;</td><td class="mdescRight">liveness-file identity, written once <br /></td></tr>
+<tr class="memitem:a899475cd38f826b6cd04ab77b56350f9" id="r_a899475cd38f826b6cd04ab77b56350f9"><td class="memItemLeft" align="right" valign="top">uint64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a899475cd38f826b6cd04ab77b56350f9">live_dev</a></td></tr>
+<tr class="memdesc:a899475cd38f826b6cd04ab77b56350f9"><td class="mdescLeft">&#160;</td><td class="mdescRight">The liveness-file identity (device, inode), written once at join before LIVE; a by-path prober identity-checks the file against it.  <br /></td></tr>
 <tr class="memitem:a7245c6f5901460c212bd006443e87eb9" id="r_a7245c6f5901460c212bd006443e87eb9"><td class="memItemLeft" align="right" valign="top"><a id="a7245c6f5901460c212bd006443e87eb9" name="a7245c6f5901460c212bd006443e87eb9"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>live_ino</b></td></tr>
-<tr class="memdesc:a7245c6f5901460c212bd006443e87eb9"><td class="mdescLeft">&#160;</td><td class="mdescRight">at join before LIVE <br /></td></tr>
+<tr class="memdesc:a7245c6f5901460c212bd006443e87eb9"><td class="mdescLeft">&#160;</td><td class="mdescRight">liveness-file inode <br /></td></tr>
 <tr class="memitem:a9330c0c9237b6b0704cb29fbb767bf8b" id="r_a9330c0c9237b6b0704cb29fbb767bf8b"><td class="memItemLeft" align="right" valign="top"><a id="a9330c0c9237b6b0704cb29fbb767bf8b" name="a9330c0c9237b6b0704cb29fbb767bf8b"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_tasks</b></td></tr>
 <tr class="memitem:a3d549f5994f885d29df6930d3bba9e5e" id="r_a3d549f5994f885d29df6930d3bba9e5e"><td class="memItemLeft" align="right" valign="top"><a id="a3d549f5994f885d29df6930d3bba9e5e" name="a3d549f5994f885d29df6930d3bba9e5e"></a>
@@ -157,7 +156,25 @@ uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad2</b> [64]</td>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Worker registry slot: two 128-byte spans, with the admin and owner-written fields on the first and the thief-CAS'd deque_top apart on the second, so no span carries two processes' stores. </p>
 <p>in_flight_rs/_seq are announced before any claim and read only post-mortem by a reaper serialized by the liveness lock. </p>
-</div><hr/>The documentation for this struct was generated from the following file:<ul>
+</div><a name="doc-variable-members" id="doc-variable-members"></a><h2 id="header-doc-variable-members" class="groupheader">Field Documentation</h2>
+<a id="a899475cd38f826b6cd04ab77b56350f9" name="a899475cd38f826b6cd04ab77b56350f9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a899475cd38f826b6cd04ab77b56350f9">&#9670;&#160;</a></span>live_dev</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">uint64_t mizu_wk_slot_s::live_dev</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The liveness-file identity (device, inode), written once at join before LIVE; a by-path prober identity-checks the file against it. </p>
+<p>liveness-file device </p>
+
+</div>
+</div>
+<hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>
 </div><!-- contents -->

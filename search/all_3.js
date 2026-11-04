@@ -12,5 +12,5 @@ var searchData=
   ['done_9',['done',['../structmizu__ix__s.html#a8c94770757595a0c73777237b3c6ab66',1,'mizu_ix_s']]],
   ['drop_10',['drop',['../structmizu__channel__opts__s.html#a08f4e2d5cf9ea35a48a7191a765e60ec',1,'mizu_channel_opts_s::drop'],['../structmizu__binding__s.html#a7963cae0c64984f66d1d3f18aa535303',1,'mizu_binding_s::drop']]],
   ['drop_5foffset_11',['drop_offset',['../structmizu__preamble__s.html#adf2db93cae8923f93a9c75224cb0feb6',1,'mizu_preamble_s']]],
-  ['drop_5fsize_12',['drop_size',['../structmizu__preamble__s.html#a1abdb3d6779af0e25bd14fbad1d4bce7',1,'mizu_preamble_s']]]
+  ['drop_5fsize_12',['drop_size',['../structmizu__preamble__s.html#a1abdb3d6779af0e25bd14fbad1d4bce7',1,'mizu_preamble_s::drop_size'],['../structmizu__channel__opts__s.html#a99d6193c334e63fa99142cb924ed3dac',1,'mizu_channel_opts_s::drop_size']]]
 ];

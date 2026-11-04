@@ -21,6 +21,7 @@ var mizu_8h =
     [ "MIZU_MAGIC", "mizu_8h.html#af8a8d9092ff351e1f53e8a34741a4527", null ],
     [ "MIZU_DROP_R", "mizu_8h.html#ab4bf0c43ed5a523bdbf5739cbffb6c0f", null ],
     [ "MIZU_DROP_SOURCE", "mizu_8h.html#aaca5c755ec2e11f00f6338072e46af19", null ],
+    [ "MIZU_DROP_MAX", "mizu_8h.html#a808b25b58d979212b0f744ea6fb86e0a", null ],
     [ "MIZU_ENTITY_HOST", "mizu_8h.html#a5f2a2eff12cecbe41a8a65a23cbba3de", null ],
     [ "MIZU_FLAG_SPIN", "mizu_8h.html#a0678e95ed229b538c2a38e4a220cae30", null ],
     [ "MIZU_WAIT_PARKED", "mizu_8h.html#ae6a79b06b7caf8c683e9c636a751efa2", null ],
@@ -113,6 +114,5 @@ var mizu_8h =
     [ "mizu_pool_task_release", "mizu_8h.html#a70fbaf4b71af5f3b7f9c09b9d97722d6", null ],
     [ "mizu_pool_task_state", "mizu_8h.html#abebbb012fadaf97925c9dd83ae09e6c8", null ],
     [ "mizu_pool_stop", "mizu_8h.html#a895a9771867e8a7e96bdc4580ba669b4", null ],
-    [ "mizu_pool_tasks_get", "mizu_8h.html#a7bf2492682c076d33f4d5c0ae953ec89", null ],
-    [ "mizu_pool_error", "mizu_8h.html#a0d7f8701c606c5b8f23129ce9c874ce2", null ]
+    [ "mizu_pool_tasks_get", "mizu_8h.html#a7bf2492682c076d33f4d5c0ae953ec89", null ]
 ];

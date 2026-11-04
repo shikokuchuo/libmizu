@@ -115,7 +115,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>done</b></td></tr>
 <tr class="memitem:ab52036bce2ef3ec59219654110e7276f" id="r_ab52036bce2ef3ec59219654110e7276f"><td class="memItemLeft" align="right" valign="top"><a id="ab52036bce2ef3ec59219654110e7276f" name="ab52036bce2ef3ec59219654110e7276f"></a>
 int&#160;</td><td class="memItemRight" valign="bottom"><b>err</b></td></tr>
 <tr class="memdesc:ab52036bce2ef3ec59219654110e7276f"><td class="mdescLeft">&#160;</td><td class="mdescRight">latched: all later calls fail <br /></td></tr>
-<tr class="memitem:"><td class="memItemLeft anon"><a id="acb758f58a9155ac619e107af35d66cb3" name="acb758f58a9155ac619e107af35d66cb3"></a>
+<tr class="memitem:"><td class="memItemLeft anon"><a id="a4a1131b3723db63bd1af4b45e4718ec4" name="a4a1131b3723db63bd1af4b45e4718ec4"></a>
 struct {&#160;</td><td class="memItemRight" valign="bottom"></td></tr>
 <tr class="memitem:a1f67edba2b3e955e5a747fd461111685" id="r_a1f67edba2b3e955e5a747fd461111685"><td class="memItemLeft anon">
 &#160;&#160;&#160;uint32_t&#160;&#160;&#160;<b>kind</b>&#160;</td><td class="memItemRight" valign="bottom"></td></tr>
@@ -123,11 +123,11 @@ struct {&#160;</td><td class="memItemRight" valign="bottom"></td></tr>
 <tr class="memitem:ac1d9097d7d59d242b66d98e5920e7019" id="r_ac1d9097d7d59d242b66d98e5920e7019"><td class="memItemLeft anon">
 &#160;&#160;&#160;uint64_t&#160;&#160;&#160;<b>remaining</b>&#160;</td><td class="memItemRight" valign="bottom"></td></tr>
 <tr class="memdesc:ac1d9097d7d59d242b66d98e5920e7019"><td class="mdescLeft">&#160;</td><td class="mdescRight">items owned at this level <br /></td></tr>
-<tr class="memitem:acb758f58a9155ac619e107af35d66cb3" id="r_acb758f58a9155ac619e107af35d66cb3"><td class="memItemLeft anonEnd" valign="top">}&#160;</td><td class="memItemRight" valign="bottom"><b>stack</b> [MIZU_IX_DEPTH_MAX]</td></tr>
+<tr class="memitem:a4a1131b3723db63bd1af4b45e4718ec4" id="r_a4a1131b3723db63bd1af4b45e4718ec4"><td class="memItemLeft anonEnd" valign="top">}&#160;</td><td class="memItemRight" valign="bottom"><b>stack</b> [MIZU_IX_DEPTH_MAX+1]</td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>The pull cursor. </p>
-<p>Stack-allocated by the caller; the frame stack is the depth cap's accounting (LIST / DICT / STRV / ATTR / TASK frames, the dict's remaining counting keys and values alike). </p>
+<p>Stack-allocated by the caller; the frame stack is the depth cap's accounting: the container frames (LIST / DICT / ATTR / TASK, the dict's remaining counting keys and values alike) count toward the cap, while an STRV frame is a leaf — nothing opens under it — and rides the one slot past it, so a string vector at depth 64 reads. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu__ext_8h_source.html">mizu_ext.h</a></li>
 </ul>

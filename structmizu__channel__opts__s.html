@@ -116,16 +116,17 @@ uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>arena_size</b></t
 <tr class="memdesc:aa71e1e0110860c9bf9789ad2c54300fb"><td class="mdescLeft">&#160;</td><td class="mdescRight">bytes per direction; 0 disables <br /></td></tr>
 <tr class="memitem:ab04e9611b08fc0ded95b9646f86fa142" id="r_ab04e9611b08fc0ded95b9646f86fa142"><td class="memItemLeft" align="right" valign="top"><a id="ab04e9611b08fc0ded95b9646f86fa142" name="ab04e9611b08fc0ded95b9646f86fa142"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>flags</b></td></tr>
-<tr class="memdesc:ab04e9611b08fc0ded95b9646f86fa142"><td class="mdescLeft">&#160;</td><td class="mdescRight">MIZU_FLAG_SPIN. <br /></td></tr>
+<tr class="memdesc:ab04e9611b08fc0ded95b9646f86fa142"><td class="mdescLeft">&#160;</td><td class="mdescRight">MIZU_FLAG_SPIN; other bits rejected. <br /></td></tr>
 <tr class="memitem:a08f4e2d5cf9ea35a48a7191a765e60ec" id="r_a08f4e2d5cf9ea35a48a7191a765e60ec"><td class="memItemLeft" align="right" valign="top"><a id="a08f4e2d5cf9ea35a48a7191a765e60ec" name="a08f4e2d5cf9ea35a48a7191a765e60ec"></a>
 const uint8_t *&#160;</td><td class="memItemRight" valign="bottom"><b>drop</b></td></tr>
 <tr class="memdesc:a08f4e2d5cf9ea35a48a7191a765e60ec"><td class="mdescLeft">&#160;</td><td class="mdescRight">peer bootstrap bytes (may be NULL) <br /></td></tr>
 <tr class="memitem:a99d6193c334e63fa99142cb924ed3dac" id="r_a99d6193c334e63fa99142cb924ed3dac"><td class="memItemLeft" align="right" valign="top"><a id="a99d6193c334e63fa99142cb924ed3dac" name="a99d6193c334e63fa99142cb924ed3dac"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>drop_size</b></td></tr>
+<tr class="memdesc:a99d6193c334e63fa99142cb924ed3dac"><td class="mdescLeft">&#160;</td><td class="mdescRight">their byte count, at most MIZU_DROP_MAX <br /></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>size-stamped options; mizu_channel_opts_init zeroes + stamps. </p>
-<p>drop is the peer bootstrap payload, copied into the region at create (opaque bytes; its first byte is a MIZU_DROP_* tag by binding convention; the peer's binding reads them after attach). </p>
+<p>drop is the peer bootstrap payload, copied into the region at create (opaque bytes; its first byte is a MIZU_DROP_* tag by binding convention; the peer's binding reads them after attach). create validates every field and returns MIZU_ERR on a value out of range, an unknown flag bit, or a drop past MIZU_DROP_MAX. </p>
 </div><hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>

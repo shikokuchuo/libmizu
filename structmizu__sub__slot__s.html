@@ -110,16 +110,17 @@ int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>status</b></td></t
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>park_epoch</b></td></tr>
 <tr class="memitem:a8046deba882bde6dc6b0f8f20f660cb0" id="r_a8046deba882bde6dc6b0f8f20f660cb0"><td class="memItemLeft" align="right" valign="top"><a id="a8046deba882bde6dc6b0f8f20f660cb0" name="a8046deba882bde6dc6b0f8f20f660cb0"></a>
 int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>pid</b></td></tr>
-<tr class="memitem:ab392fd6d72326d115a536032e6799286" id="r_ab392fd6d72326d115a536032e6799286"><td class="memItemLeft" align="right" valign="top"><a id="ab392fd6d72326d115a536032e6799286" name="ab392fd6d72326d115a536032e6799286"></a>
-uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>rs_start</b></td></tr>
-<tr class="memdesc:ab392fd6d72326d115a536032e6799286"><td class="mdescLeft">&#160;</td><td class="mdescRight">static partition: result_slots / <br /></td></tr>
+<tr class="memitem:ab392fd6d72326d115a536032e6799286" id="r_ab392fd6d72326d115a536032e6799286"><td class="memItemLeft" align="right" valign="top">uint32_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ab392fd6d72326d115a536032e6799286">rs_start</a></td></tr>
+<tr class="memdesc:ab392fd6d72326d115a536032e6799286"><td class="mdescLeft">&#160;</td><td class="mdescRight">The static result-slot partition: result_slots / max_submitters slots per submitter, slot j's starting at j times that count.  <br /></td></tr>
 <tr class="memitem:adf46d48bb76361ddcc8153e3c3638f28" id="r_adf46d48bb76361ddcc8153e3c3638f28"><td class="memItemLeft" align="right" valign="top"><a id="adf46d48bb76361ddcc8153e3c3638f28" name="adf46d48bb76361ddcc8153e3c3638f28"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>rs_count</b></td></tr>
-<tr class="memdesc:adf46d48bb76361ddcc8153e3c3638f28"><td class="mdescLeft">&#160;</td><td class="mdescRight">max_submitters <br /></td></tr>
+<tr class="memdesc:adf46d48bb76361ddcc8153e3c3638f28"><td class="mdescLeft">&#160;</td><td class="mdescRight">slots in the partition <br /></td></tr>
 <tr class="memitem:ac9b94f6e9920bb14aeba8ab05a54fe52" id="r_ac9b94f6e9920bb14aeba8ab05a54fe52"><td class="memItemLeft" align="right" valign="top"><a id="ac9b94f6e9920bb14aeba8ab05a54fe52" name="ac9b94f6e9920bb14aeba8ab05a54fe52"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>live_dev</b></td></tr>
+<tr class="memdesc:ac9b94f6e9920bb14aeba8ab05a54fe52"><td class="mdescLeft">&#160;</td><td class="mdescRight">liveness-file device (as the worker's) <br /></td></tr>
 <tr class="memitem:a39a310e4838df26d7a496d7393c9a2ae" id="r_a39a310e4838df26d7a496d7393c9a2ae"><td class="memItemLeft" align="right" valign="top"><a id="a39a310e4838df26d7a496d7393c9a2ae" name="a39a310e4838df26d7a496d7393c9a2ae"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>live_ino</b></td></tr>
+<tr class="memdesc:a39a310e4838df26d7a496d7393c9a2ae"><td class="mdescLeft">&#160;</td><td class="mdescRight">liveness-file inode <br /></td></tr>
 <tr class="memitem:a6cbed6fbd673bf09c65ada89bdf93d03" id="r_a6cbed6fbd673bf09c65ada89bdf93d03"><td class="memItemLeft" align="right" valign="top"><a id="a6cbed6fbd673bf09c65ada89bdf93d03" name="a6cbed6fbd673bf09c65ada89bdf93d03"></a>
 uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>stat_spills</b></td></tr>
 <tr class="memitem:a748da91fa1b653d7e9d77d449ef5eaa0" id="r_a748da91fa1b653d7e9d77d449ef5eaa0"><td class="memItemLeft" align="right" valign="top"><a id="a748da91fa1b653d7e9d77d449ef5eaa0" name="a748da91fa1b653d7e9d77d449ef5eaa0"></a>
@@ -133,7 +134,25 @@ uint8_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad</b> [68]</td><
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Submitter registry slot: one 128-byte span per submitter. </p>
 <p>stat_spills is a per-checkout RMW and notify the publishers' clear, so adjacent submitters must not share one. </p>
-</div><hr/>The documentation for this struct was generated from the following file:<ul>
+</div><a name="doc-variable-members" id="doc-variable-members"></a><h2 id="header-doc-variable-members" class="groupheader">Field Documentation</h2>
+<a id="ab392fd6d72326d115a536032e6799286" name="ab392fd6d72326d115a536032e6799286"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab392fd6d72326d115a536032e6799286">&#9670;&#160;</a></span>rs_start</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">uint32_t mizu_sub_slot_s::rs_start</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The static result-slot partition: result_slots / max_submitters slots per submitter, slot j's starting at j times that count. </p>
+<p>Written ahead of the LIVE transition, so a reader validates any non-FREE slot's pair against the formula. first result slot of the partition </p>
+
+</div>
+</div>
+<hr/>The documentation for this struct was generated from the following file:<ul>
 <li>include/<a class="el" href="mizu_8h_source.html">mizu.h</a></li>
 </ul>
 </div><!-- contents -->
