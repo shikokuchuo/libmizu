@@ -111,8 +111,9 @@ int32_t&#160;</td><td class="memItemRight" valign="bottom"><b>waiter_slot</b></t
 <tr class="memdesc:a724c59bca2c09f54cc7234c802180825"><td class="mdescLeft">&#160;</td><td class="mdescRight">submitter slot parked on this (-1; MIZU_WS_NOTIFY OR'd when the wake is a notify signal) <br /></td></tr>
 <tr class="memitem:a2dbb216adbc4148701420c63b431eb35" id="r_a2dbb216adbc4148701420c63b431eb35"><td class="memItemLeft" align="right" valign="top"><a id="a2dbb216adbc4148701420c63b431eb35" name="a2dbb216adbc4148701420c63b431eb35"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad0</b></td></tr>
-<tr class="memitem:a63bcfcc3955f019176d8d676c60e4019" id="r_a63bcfcc3955f019176d8d676c60e4019"><td class="memItemLeft" align="right" valign="top"><a id="a63bcfcc3955f019176d8d676c60e4019" name="a63bcfcc3955f019176d8d676c60e4019"></a>
-uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>pad1</b></td></tr>
+<tr class="memitem:ae027f5bc4fad75b7ff242febe1f36017" id="r_ae027f5bc4fad75b7ff242febe1f36017"><td class="memItemLeft" align="right" valign="top"><a id="ae027f5bc4fad75b7ff242febe1f36017" name="ae027f5bc4fad75b7ff242febe1f36017"></a>
+int64_t&#160;</td><td class="memItemRight" valign="bottom"><b>claimant_pid</b></td></tr>
+<tr class="memdesc:ae027f5bc4fad75b7ff242febe1f36017"><td class="mdescLeft">&#160;</td><td class="mdescRight">the claimant's pid; a reaper stores the dead worker's ahead of DIED (0 = never claimed) <br /></td></tr>
 <tr class="memitem:a4e4cfc815984fd5d2bbd082d19f63886" id="r_a4e4cfc815984fd5d2bbd082d19f63886"><td class="memItemLeft" align="right" valign="top"><a id="a4e4cfc815984fd5d2bbd082d19f63886" name="a4e4cfc815984fd5d2bbd082d19f63886"></a>
 mizu_slot_hdr&#160;</td><td class="memItemRight" valign="bottom"><b>ph</b></td></tr>
 </table>
