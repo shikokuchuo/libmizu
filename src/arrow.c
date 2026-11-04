@@ -606,7 +606,6 @@ struct mizu_arrow {
   int64_t *tab;          /* the validity table scratch (2 * ncols) */
   const void *root_blob; /* the root-blob override (borrowed) */
   size_t root_blob_len;
-  int any_remote;
   int any_str;
   int sized;
   size_t attrs_off;
@@ -1783,7 +1782,6 @@ int mizu_arrow_remote(mizu_arrow *a, int64_t col, const char *ident,
   r->ref_claim = mizu_type_elt_size(rtag) != 0 &&
     re.valid[0] == 0 && re.valid[1] == -1 ? -1 : 0;
   r->used = 1;
-  a->any_remote = 1;
   a->sized = 0;   /* the override moves the span: re-run the size pass */
   return 0;
 }

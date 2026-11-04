@@ -49,7 +49,13 @@ RngStreams, doxygen-awesome-css).
   family's releases under `MIZU_BINDING_SPLIT_WAITER`, every
   `mizu_pool_task_release`, and the controller's off-thread death-callback
   forces; the reap clears a dead worker's park announce, and the publish CAS
-  and `pool_fail_in_flight` both check the slot's incarnation), the raw-tier
+  and `pool_fail_in_flight` both check the slot's incarnation; the
+  claimant's stamp-then-re-read and the reaper's CAS-then-re-read are the
+  seq_cst Dekker pair closing the stale-announce false DIED, the reap
+  replays one wake unconditionally, the sink verbs re-read the sequence
+  before staging, submitter-slot geometry is written ahead of LIVE, and
+  `mizu_pool_leave` is idempotent with the claim verbs refusing a handle
+  that has left — `live_self == 0`), the raw-tier
   staging reservation (`stage_raw.c` — `mizu_stage_raw` /
   `mizu_stage_raw_spill`), the map morsel-claim protocol (`morsel.c` —
   `mizu_morsel_*`), the 'I' interchange cursor (`interop.c` — the
@@ -128,7 +134,7 @@ RngStreams, doxygen-awesome-css).
 - `.clang-tidy` / `.clang-format` / `.editorconfig` — diagnostics and style
   configs. clang-format matches the existing style but the tree isn't fully
   conformant; use it for new code, no whole-tree reformat, no CI gate.
-- `tools/amalgamate.sh` — generates the two-file distribution `mizu.c` + `mizu.h`.
+- `tools/amalgamate.sh` — generates the three-file distribution `mizu.c` + `mizu.h` + `mizu_ext.h`.
 - `tools/check-exports.sh` — diffs the shared library's exported `mizu_*`
   symbols against `tools/exports.txt` (no leaks, no missing = ABI break);
   `--write` regenerates after an intended change. Run in CI.

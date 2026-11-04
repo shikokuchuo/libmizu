@@ -732,6 +732,14 @@ static void test_retire_lame_duck(void) {
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_RETIRED);
   assert(mizu_pool_leave(wk) == MIZU_OK);   /* rk_n > 0: no release yet */
   assert(mizu_pool_lame_duck(wk) == 0);    /* still anchoring */
+  /* the lingering handle owns no slot: a second leave is a no-op, and
+     the claim verbs refuse it (a respawn may hold the slot by now) */
+  assert(mizu_pool_leave(wk) == MIZU_OK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_SHUTDOWN);
+  assert(strcmp(mizu_pool_error(wk), "worker has left the pool") == 0);
+  assert(mizu_pool_help_once(wk) == -1);
+  assert(mizu_pool_deque_pull(wk, 1) == -1);
+  assert(mizu_pool_lame_duck(wk) == 0);    /* still anchoring */
   collect_bytes(ctrl, &t, big, n);        /* frees the slot */
   assert(mizu_pool_lame_duck(wk) == 1);    /* swept + released */
   mizu_pool_destroy(wk);
@@ -962,6 +970,13 @@ static void test_collect_timeout(void) {
   assert(mizu_pool_collect(ctrl, &t, &obj, 30) == MIZU_TIMEOUT);
   assert(obj == NULL);
   assert(mizu_pool_task_state(ctrl, &t) == MIZU_RS_PENDING);
+  /* the vectored form's out-params are defined on a timeout too: no
+     failing index (n), nothing consumed */
+  void *vals[1] = { (void *) 1 };
+  size_t err = 9, consumed = 9;
+  assert(mizu_pool_collect_all(ctrl, &t, 1, vals, &err, &consumed, 30) ==
+         MIZU_TIMEOUT);
+  assert(err == 1 && consumed == 0);
   assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
   collect_bytes(ctrl, &t, "x", 1);
   pool_end();

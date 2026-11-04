@@ -43,6 +43,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_stage_retain_zc);
   refs += sink((mizu_any_fn) &mizu_stage_pin);
   refs += sink((mizu_any_fn) &mizu_stage_reap);
+  refs += sink((mizu_any_fn) &mizu_stage_rollback);
   refs += sink((mizu_any_fn) &mizu_read_region);
   refs += sink((mizu_any_fn) &mizu_result_publish);
   refs += sink((mizu_any_fn) &mizu_result_publish_err);
@@ -115,9 +116,10 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_na_build);
   refs += sink((mizu_any_fn) &mizu_na_apply);
 
-  /* The identity words. */
+  /* The identity words and the drain's count form. */
   refs += sink((mizu_any_fn) &mizu_channel_peer_ident);
   refs += sink((mizu_any_fn) &mizu_pool_worker_ident);
+  refs += sink((mizu_any_fn) &mizu_channel_avail);
 
   /* The interchange cursor and emit helpers (the put helpers are
      dual-form: the header's static inlines by default, the exported
@@ -197,7 +199,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 131);
+  assert(refs == 133);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

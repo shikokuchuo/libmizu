@@ -89,6 +89,11 @@ static void check_tests(void) {
   memcpy(shm->addr, &bad, sizeof bad);
   assert(mizu_morsel_hdr_check(shm->addr, shm->size, NULL) !=
          NULL);
+  bad = h;
+  bad.flags = 1;   /* a reserved format bit: a newer writer's, rejected */
+  memcpy(shm->addr, &bad, sizeof bad);
+  assert(strstr(mizu_morsel_hdr_check(shm->addr, shm->size, NULL),
+                "unknown map header flags") != NULL);
   /* morsel_size is bounded by n as the layout bounds it; near 2^64 the
      n + morsel_size - 1 sum wraps and would validate n_morsels == 0 */
   bad = h;

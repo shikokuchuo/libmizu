@@ -6,16 +6,19 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+actual=$(mktemp "${TMPDIR:-/tmp}/mizu-exports.XXXXXX")
+trap 'rm -f "$actual"' EXIT
+
 case "$(uname -s)" in
   Darwin)
     lib=$(ls libmizu.*.dylib)
     nm -gU "$lib" | awk '{print $NF}' | sed -n 's/^_\(mizu_.*\)/\1/p' | sort -u \
-      > /tmp/mizu-exports.actual
+      > "$actual"
     ;;
   Linux)
     lib=$(ls libmizu.so.*.*.*)
     nm -D --defined-only "$lib" | awk '{print $NF}' | grep '^mizu_' | sort -u \
-      > /tmp/mizu-exports.actual
+      > "$actual"
     ;;
   *)
     echo "check-exports: unsupported platform" >&2
@@ -24,12 +27,12 @@ case "$(uname -s)" in
 esac
 
 if [ "${1:-}" = "--write" ]; then
-  cp /tmp/mizu-exports.actual tools/exports.txt
+  cp "$actual" tools/exports.txt
   echo "check-exports: rewrote tools/exports.txt"
   exit 0
 fi
 
-if ! diff -u tools/exports.txt /tmp/mizu-exports.actual; then
+if ! diff -u tools/exports.txt "$actual"; then
   echo "check-exports: export surface drifted from tools/exports.txt" >&2
   echo "If the change is intended, regenerate: tools/check-exports.sh --write" >&2
   exit 1

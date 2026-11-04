@@ -547,6 +547,9 @@ static mizu_status chan_rx_verdict(mizu_channel *c, int *held) {
    buffer from it — only this consumer shrinks it, so it never
    over-allocates on a producer's later publish). */
 size_t mizu_channel_avail(mizu_channel *c) {
+  /* total, as the other reads: a released handle's ring is unmapped, an
+     inherited one belongs to the parent — both answer empty */
+  if (c == NULL || c->released || c->self_pid != mizu_self_pid()) return 0;
   mizu_chan_ring *r = &c->rx;
   if (r->lhead < r->cached_tail) return (size_t) (r->cached_tail - r->lhead);
   r->cached_tail = atomic_load_explicit(r->tail, memory_order_acquire);
@@ -792,10 +795,14 @@ static mizu_status chan_consume1(mizu_channel *c, void **out,
          be recovered (its region died with the producer's teardown): do
          not wedge the ring behind it — consume exactly as
          MIZU_READ_CONSUME, still returning the error for this message, so
-         a live consumer drains to CLOSED */
+         a live consumer drains to CLOSED / PEER_GONE. The lock probe
+         decides the death half: a hard-killed producer sets no close bit,
+         and the recv path forms no verdict while the ring holds data, so
+         without the probe every receive would fail on this slot forever. */
       uint32_t other = 3u ^ chan_closed_bit(c);
       consume = c->verdict_dead ||
-        (atomic_load_explicit(c->closedw, memory_order_acquire) & other) != 0;
+        (atomic_load_explicit(c->closedw, memory_order_acquire) & other) != 0 ||
+        chan_probe_dead(c);
     }
     if (!(may_consume_failure && consume)) return st;
   }
@@ -835,6 +842,17 @@ mizu_status mizu_channel_create(mizu_channel **out,
   if (opts->drop_size != 0 && opts->drop == NULL) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER,
                        "a nonzero drop_size needs drop bytes");
+    return MIZU_ERR;
+  }
+  if (opts->drop_size > MIZU_DROP_MAX) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                       "drop_size must be at most MIZU_DROP_MAX (2^30) bytes");
+    return MIZU_ERR;
+  }
+  /* unknown bits are rejected, not ignored: the option space stays
+     extensible (a later flag cannot be mistaken for a no-op today) */
+  if ((opts->flags & ~(uint32_t) MIZU_FLAG_SPIN) != 0) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "unknown channel flags");
     return MIZU_ERR;
   }
   const char *livedir = mizu_live_dir();

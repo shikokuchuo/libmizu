@@ -17,7 +17,10 @@ VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 
 CPPFLAGS += -Iinclude -Isrc
 CFLAGS   ?= -O2
-CFLAGS   += -std=c11 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
+# `override`: a CFLAGS given on the command line (the sanitizer and
+# coverage builds) would otherwise discard every append below and build
+# without the dialect, warning and visibility flags the library ships with.
+override CFLAGS += -std=c11 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
 LDFLAGS  ?=
 
 UNAME := $(shell uname -s)
@@ -33,9 +36,12 @@ STATIC := libmizu.a
 # MinGW — needs no macro); the object sets feeding the shared library
 # define MIZU_SHARED for the visibility attribute.
 ifeq ($(UNAME),Darwin)
-  CFLAGS   += -fPIC
+  override CFLAGS += -fPIC
   CPPFLAGS += -DMIZU_SHARED
   SHARED  := libmizu.$(VERSION_MAJOR).dylib
+  # the install name bakes PREFIX at link time: the .prefix stamp below
+  # relinks the dylib when PREFIX changes, so `make install PREFIX=...`
+  # never ships an id pointing at the build-time prefix
   SONAME_FLAG := -Wl,-install_name,$(PREFIX)/lib/libmizu.$(VERSION_MAJOR).dylib
   SHARED_LD := -dynamiclib $(SONAME_FLAG)
   SYMLINKS := libmizu.dylib
@@ -50,14 +56,16 @@ else
   # -fPIC: the one object set serves both libs; x86_64 ld refuses
   # non-PIC (TLS slot in err_tls.c) in the shared link. Not MinGW: PE is
   # always PIC and gcc warns on the flag.
-  CFLAGS   += -fPIC
+  override CFLAGS += -fPIC
   CPPFLAGS += -DMIZU_SHARED
   SHARED  := libmizu.so.$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
   SONAME_FLAG := -Wl,-soname,libmizu.so.$(VERSION_MAJOR)
   SHARED_LD := -shared $(SONAME_FLAG)
   SYMLINKS := libmizu.so.$(VERSION_MAJOR) libmizu.so
-  LDLIBS += -pthread
-  PC_LIBS_PRIVATE := -pthread
+  # -lrt: shm_open lives in librt on glibc < 2.34 (RHEL 8, Ubuntu 20.04);
+  # an empty stub on later glibc and on musl, so always safe to name
+  LDLIBS += -pthread -lrt
+  PC_LIBS_PRIVATE := -pthread -lrt
 endif
 
 TEST_UNIT_SRC := $(wildcard tests/unit/*.c)
@@ -88,11 +96,19 @@ static: $(STATIC)
 
 shared: $(SHARED)
 
+# The PREFIX stamp: rewritten only when PREFIX changes, so the shared
+# library (whose macOS install name embeds it) relinks exactly then.
+.prefix: FORCE
+	@echo '$(PREFIX)' | cmp -s - $@ || echo '$(PREFIX)' > $@
+
+FORCE:
+.PHONY: FORCE
+
 $(STATIC): $(OBJ)
 	$(AR) rcs $@ $(OBJ)
 
 ifneq ($(SHARED),)
-$(SHARED): $(OBJ)
+$(SHARED): $(OBJ) .prefix
 	$(CC) $(SHARED_LD) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
 endif
 
@@ -240,8 +256,10 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/include/mizu.h \
 	      $(DESTDIR)$(PREFIX)/include/mizu_ext.h
 	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/libmizu.pc
-	rm -f $(DESTDIR)$(PREFIX)/lib/$(STATIC) \
-	      $(DESTDIR)$(PREFIX)/lib/$(SHARED) $(SYMLINKS:%=$(DESTDIR)$(PREFIX)/lib/%)
+	rm -f $(DESTDIR)$(PREFIX)/lib/$(STATIC)
+ifneq ($(SHARED),)
+	rm -f $(DESTDIR)$(PREFIX)/lib/$(SHARED) $(SYMLINKS:%=$(DESTDIR)$(PREFIX)/lib/%)
+endif
 
 # Compilation database for clangd (which then picks up .clang-tidy and
 # .clang-format automatically). Regenerate after flag changes.
@@ -265,6 +283,8 @@ tidy:
 
 clean:
 	rm -f $(OBJ) $(STATIC) $(SHARED) $(TEST_UNIT_BIN) $(TEST_INT_BIN) \
-	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface
+	      $(TEST_SOAK_BIN) $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface .prefix
 	rm -rf mizu.c mizu.h mizu_ext.h mizu-*.profraw mizu.profdata \
-	      compile_commands.json docs/html docs/xml
+	      compile_commands.json docs/html docs/xml coverage.lcov build dist \
+	      $(addsuffix .dSYM,$(TEST_UNIT_BIN) $(TEST_INT_BIN) $(TEST_SOAK_BIN) \
+	                         $(FUZZ_BIN) $(BENCH_BIN) tests/ext_surface)

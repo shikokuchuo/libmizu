@@ -1,6 +1,6 @@
 # libmizu
 
-<a href="https://shikokuchuo.net/libmizu/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo-dark.svg"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" align="right" width="240" alt="libmizu logo"/></picture></a>
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo-dark.svg"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" align="right" width="240" alt="libmizu logo"/></picture>
 
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)
@@ -9,13 +9,13 @@
 
 Thread-speed, lock-free shared memory IPC in C11.
 
-libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to < 1 µs, so you can divide work as finely as you would with threads (see [Performance](#performance)).
+libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to < 1 µs, so you can divide work as finely as you would with threads (see the Performance section below).
 
 Channels and work-stealing task pools run over POSIX shared memory (Linux, macOS) or Win32 file mappings (Windows): lock-free single-producer single-consumer rings with batched publication, spin-then-park waiting that stays out of the kernel on the hot path, and OS notification when a peer dies.
 
 Bindings share one wire format, so processes in different languages can exchange data over the same channel.
 The first-party bindings are [mizu](https://github.com/shikokuchuo/mizu) for R and [pymizu](https://github.com/shikokuchuo/pymizu) for Python.
-[Writing a binding](#writing-a-binding) covers other languages.
+The Writing a binding section covers other languages.
 
 - Lock-free SPSC rings and work-stealing deques over shared memory
 - Bounded, microsecond-latency waiting: futex, `__ulock`, or `WaitOnAddress` per platform
@@ -81,7 +81,7 @@ The peer fills its binding with `mizu_binding_bytes()` too and attaches with `mi
 It reads the bootstrap payload with `mizu_channel_drop()` and signals `mizu_channel_ready_set()`.
 
 To move a language's own objects rather than byte buffers, register callbacks on the binding.
-This is the seam that [Writing a binding](#writing-a-binding) covers:
+This is the seam that the Writing a binding section covers:
 
 ```c
 mizu_binding binding;
@@ -90,7 +90,7 @@ binding.stage = my_stage;   /* frame your objects as (hdr, payload) */
 binding.read  = my_read;    /* the receive-side materializer */
 ```
 
-[`include/mizu.h`](include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
+[`include/mizu.h`](https://github.com/shikokuchuo/libmizu/blob/main/include/mizu.h) documents the full contract for each declaration: ownership, threading, and the `mizu_status` values that each verb returns.
 [`DESIGN.md`](DESIGN.md) gives the invariants.
 The rendered API reference is at [shikokuchuo.net/libmizu](https://shikokuchuo.net/libmizu/).
 
@@ -104,7 +104,7 @@ The built-in bytes binding, `mizu_binding_bytes()`, needs no callbacks and moves
 Every operation is an exported function.
 A language with a foreign function interface can call libmizu from the shared library, with no C of its own.
 Every handle is opaque, so libmizu's internals can change without breaking the binding.
-Bindings that compile C can add the amalgamation to their own build instead, as described under [Building](#building).
+Bindings that compile C can add the amalgamation to their own build instead, as described under Building below.
 
 ## API tiers
 
@@ -154,6 +154,8 @@ To generate the amalgamation, run:
 ```sh
 tools/amalgamate.sh   # writes mizu.c + mizu.h + mizu_ext.h
 ```
+
+On Linux, link the amalgamation (or the static library) with `-pthread`, and with `-lrt` too on glibc releases before 2.34, where `shm_open` lives in librt. `make install` records both in the pkg-config file. Pass the same `PREFIX` to `make` and to `make install` (or let the stamp relink): on macOS the shared library's install name embeds it.
 
 ## Contributing
 

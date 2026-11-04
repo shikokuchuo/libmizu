@@ -653,8 +653,9 @@ MIZU_API mizu_status mizu_channel_notify_unwatch(mizu_channel *);
 /** The consumer's published-not-yet-consumed message count: one acquire
    load on a local-cache miss, otherwise the cached tail. Only this
    consumer shrinks the count, so a caller sizing a receive buffer from
-   it never over-allocates on a producer's later publish. Exported only
-   (the ring locals are internal). */
+   it never over-allocates on a producer's later publish. Total: a NULL,
+   released or inherited (forked) handle answers 0. Exported only (the
+   ring locals are internal). */
 MIZU_API size_t mizu_channel_avail(mizu_channel *);
 MIZU_API mizu_status mizu_pool_notify_arm(mizu_pool *, int on);
 MIZU_API mizu_status mizu_pool_notify_watch(mizu_pool *,
@@ -1582,8 +1583,10 @@ typedef struct mizu_ix_item_s {
 } mizu_ix_item;
 
 /** The pull cursor. Stack-allocated by the caller; the frame stack is the
-   depth cap's accounting (LIST / DICT / STRV / ATTR / TASK frames, the
-   dict's remaining counting keys and values alike). */
+   depth cap's accounting: the container frames (LIST / DICT / ATTR / TASK,
+   the dict's remaining counting keys and values alike) count toward the
+   cap, while an STRV frame is a leaf — nothing opens under it — and rides
+   the one slot past it, so a string vector at depth 64 reads. */
 typedef struct mizu_ix_s {
   const unsigned char *p;
   const unsigned char *end;
@@ -1593,7 +1596,7 @@ typedef struct mizu_ix_s {
   struct {
     uint32_t kind;      /**< the MIZU_IX_* begin kind */
     uint64_t remaining; /**< items owned at this level */
-  } stack[MIZU_IX_DEPTH_MAX];
+  } stack[MIZU_IX_DEPTH_MAX + 1];
 } mizu_ix;
 
 /** Open a cursor over a whole stream: the magic and version checks, the
@@ -2512,4 +2515,4 @@ MIZU_API void mizu_tune(void);
 }
 #endif
 
-#endif /**< MIZU_EXT_H */
+#endif /* MIZU_EXT_H */

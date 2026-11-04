@@ -104,9 +104,10 @@ static int bytes_resolve(const mizu_slot_hdr *hdr, const uint8_t *payload,
     if (shm == NULL) return -1;
     /* aux is the exact stream length: a recycled region is larger than
        the stream it carries, and the slack bytes are a previous
-       payload's */
-    n = hdr->aux != 0 && hdr->aux <= (uint64_t) shm->size ?
-      (size_t) hdr->aux : shm->size;
+       payload's. A length past the region is a torn header, failed like
+       the RAWSPILL branch's — never a silent fallback to the slack. */
+    if (hdr->aux > (uint64_t) shm->size) return -1;
+    n = (size_t) hdr->aux;
     src = (const unsigned char *) shm->addr;
     break;
   }

@@ -179,6 +179,14 @@ static mizu_shm *spill_fl_pop(mizu_spill_fl *fl, size_t n) {
 mizu_shm *mizu_spill_region_get(mizu_spill_fl *fl, size_t n) {
   mizu_shm *shm = NULL;
   if (fl != NULL) {
+    if (fl->staging != NULL) {
+      /* one checkout per stage (the retain services key on it): a second
+         get within a stage is a binding bug, and the standing region
+         rejoins the free list rather than leaking unnamed (its pin, one
+         per stage, stands for the checkout that replaces it) */
+      mizu_spill_fl_insert(fl, fl->staging);
+      fl->staging = NULL;
+    }
     fl->last_reused = 0;
     shm = spill_fl_pop(fl, n);
   }

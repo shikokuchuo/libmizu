@@ -87,8 +87,13 @@ static mizu_status ix_string(mizu_ix *cur, mizu_ix_item *it, int key) {
   return MIZU_OK;
 }
 
+/* The cap counts nesting levels — the container frames (LIST / DICT /
+   ATTR / TASK), which is what every writer's value walk counts. An strv
+   frame only sequences its bare-string elements: nothing opens under it,
+   so it is a leaf for the cap and rides the one slot past it (the stack
+   carries MIZU_IX_DEPTH_MAX + 1). */
 static mizu_status ix_push(mizu_ix *cur, uint32_t kind, uint64_t n) {
-  if (cur->depth == MIZU_IX_DEPTH_MAX)
+  if (cur->depth >= MIZU_IX_DEPTH_MAX + (kind == MIZU_IX_STRV ? 1u : 0u))
     IX_FAIL(cur, "interop stream exceeds the depth cap (64)");
   cur->stack[cur->depth].kind = kind;
   cur->stack[cur->depth].remaining = n;

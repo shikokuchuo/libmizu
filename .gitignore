@@ -32,3 +32,4 @@ tests/ext_surface
 tests/ext_surface.dSYM
 /docs/html/
 /docs/xml/
+/.prefix

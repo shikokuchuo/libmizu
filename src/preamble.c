@@ -13,13 +13,6 @@
 
 #include <stdio.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 static int mizu_pow2_u32(uint32_t v) {
   return v != 0 && (v & (v - 1)) == 0;
 }

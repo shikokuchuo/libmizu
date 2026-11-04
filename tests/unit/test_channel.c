@@ -124,12 +124,20 @@ static int stage_rawspill(void *obj, mizu_slot_hdr *hdr, uint8_t *payload,
    process image (TSan forbids a thread start after a multi-threaded
    fork, and the test process has long armed its own listener). _exit
    skips the atexit leak report, as below. */
-static void gone_peer(const char *token) {
+static void gone_peer(const char *token, int spill) {
   mizu_binding b;
   mizu_binding_bytes(&b);
   mizu_channel *peer = NULL;
   if (mizu_channel_attach(&peer, token, &b) != MIZU_OK) _exit(2);
   if (mizu_channel_ready_set(peer) != MIZU_OK) _exit(3);
+  if (spill) {
+    /* one spilled payload in flight (the host's arena is off, so the
+       bytes ride a region this process creates and never releases) */
+    static unsigned char big[100 * 1024];
+    memset(big, 0x5A, sizeof big);
+    mizu_bytes out = { big, sizeof big };
+    if (mizu_channel_send(peer, &out) != MIZU_OK) _exit(4);
+  }
   _exit(0);                        /* dies holding no close bit */
 }
 
@@ -242,7 +250,9 @@ int main(int argc, char **argv) {
   (void) argc; (void) argv;              /* MinGW warns unused on _WIN32 */
 #ifndef _WIN32
   if (argc == 3 && strcmp(argv[1], "gonepeer") == 0)
-    gone_peer(argv[2]);                  /* never returns */
+    gone_peer(argv[2], 0);               /* never returns */
+  if (argc == 3 && strcmp(argv[1], "gonesender") == 0)
+    gone_peer(argv[2], 1);               /* never returns */
   if (argc == 5 && strcmp(argv[1], "peer") == 0)
     held_lock_peer(argv[2], argv[3], atoi(argv[4]));   /* never returns */
 #endif
@@ -314,9 +324,17 @@ int main(int argc, char **argv) {
     o2.drop = opts.drop;
     o2.drop_size = (uint64_t) 1 << 46;
     assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
-    assert(strstr(mizu_last_error_message(), "channel region too large") !=
-           NULL);
+    assert(strstr(mizu_last_error_message(), "MIZU_DROP_MAX") != NULL);
+    /* past the drop bound alone (under the region budget) */
+    o2.drop_size = MIZU_DROP_MAX + 1;
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "MIZU_DROP_MAX") != NULL);
     o2.drop_size = opts.drop_size;
+    o2.flags = 4u;   /* a reserved flag bit: rejected, never ignored */
+    assert(mizu_channel_create(&bad, &o2, &bytesb) == MIZU_ERR);
+    assert(strstr(mizu_last_error_message(), "unknown channel flags") !=
+           NULL);
+    o2.flags = opts.flags;
     /* a liveness directory path past the wire budget refuses */
 #ifndef _WIN32
     char longdir[1000];
@@ -674,6 +692,7 @@ int main(int argc, char **argv) {
   /* close rendezvous: the peer's bit is already set */
   assert(mizu_channel_close(host, 5000) == MIZU_OK);
   assert(mizu_channel_alive(host) == 0);   /* released handle */
+  assert(mizu_channel_avail(host) == 0);   /* answers empty, no ring read */
   /* the released handle keeps the sentinel / closed-error guards */
   {
     mizu_bytes b = { "x", 1 };
@@ -1258,6 +1277,39 @@ int main(int argc, char **argv) {
     mizu_bytes b = { "x", 1 };
     assert(mizu_channel_send(host, &b) == MIZU_PEER_GONE);
     void *obj = NULL;
+    assert(mizu_channel_recv(host, &obj, 0) == MIZU_PEER_GONE);
+    mizu_channel_destroy(host);
+  }
+
+  /* a hard-killed producer's spilled payload whose region is gone: the
+     failed read consumes the slot on the lock probe's verdict (no close
+     bit exists, and a ring holding data forms no empty-ring verdict), so
+     the next receive reports PEER_GONE instead of failing on that slot
+     forever */
+  {
+    mizu_channel_opts so = opts;
+    so.arena_size = 0;                      /* every big payload spills */
+    assert(mizu_channel_create(&host, &so, &bytesb) == MIZU_OK);
+    assert(mizu_channel_token(host, token, sizeof(token)) == MIZU_OK);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      execl(argv[0], argv[0], "gonesender", token, (char *) NULL);
+      _exit(9);
+    }
+    assert(mizu_channel_ready_wait(host, 30000) == MIZU_OK);
+    int wst;
+    assert(waitpid(pid, &wst, 0) == pid);
+    assert(WIFEXITED(wst) && WEXITSTATUS(wst) == 0);
+    /* the dead creator's region is an orphan: reap it before the read */
+    int nreaped = 0;
+    char **reaped = mizu_shm_reap(&nreaped);
+    assert(nreaped >= 1);
+    for (int i = 0; i < nreaped; i++) free(reaped[i]);
+    free(reaped);
+    void *obj = NULL;
+    assert(mizu_channel_recv(host, &obj, 0) == MIZU_ERR);
+    assert(strcmp(mizu_channel_error(host), "payload region vanished") == 0);
     assert(mizu_channel_recv(host, &obj, 0) == MIZU_PEER_GONE);
     mizu_channel_destroy(host);
   }

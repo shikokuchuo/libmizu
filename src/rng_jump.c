@@ -12,8 +12,8 @@
  *     Oriented Random-Number Package with Many Long Streams and Substreams",
  *     Operations Research, 50, 6 (2002), 1073-1075.
  *
- * The kernel ships in the core so a future mizu_map can derive per-element
- * streams. */
+ * The kernel ships in the core so the bindings' map verbs derive
+ * per-element streams from one implementation (mizu_map's .seed). */
 
 #include "internal.h"
 

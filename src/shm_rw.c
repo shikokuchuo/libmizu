@@ -79,7 +79,9 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
   mizu_shm_set_name(shm, name);
+  shm->pid = 0;                      /* consumer: never the creator */
 
   int fd = mizu_shm_os_open(name, O_RDWR, 0);
   if (fd < 0) return -1;
@@ -142,7 +144,9 @@ mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   if (shm == NULL) return NULL;
   shm->addr = NULL;
   shm->size = 0;
+  shm->collapsed = 0;
   mizu_shm_set_name(shm, name);
+  shm->pid = 0;                      /* consumer: never the creator */
 
   int fd = mizu_shm_os_open(name, O_RDONLY, 0);
   if (fd < 0) {

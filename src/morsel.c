@@ -108,6 +108,10 @@ const char *mizu_morsel_hdr_check(const void *base, size_t size,
   if (h.version != MIZU_ABI_VERSION)
     return "ABI version mismatch: worker and submitter were built against "
            "different mizu wire formats";
+  /* a format word: a bit this reader does not know is a newer writer's,
+     rejected rather than ignored, so a later flag can gate on it */
+  if (h.flags != 0)
+    return "unknown map header flags: the peer uses a newer format";
   if (h.n == 0 || h.n > ((uint64_t) 1 << 48))
     return "element count out of range";
   uint64_t end = MIZU_ALIGN64(sizeof(mizu_morsel_hdr) + h.desc_len);

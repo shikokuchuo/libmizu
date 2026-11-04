@@ -30,8 +30,10 @@
    - Handles are opaque typedefs; struct definitions live in
      src/internal.h. Nothing public passes or returns a struct by value;
      extensible structs carry a size field for ABI evolution.
-   - Every public operation is a real exported function (MIZU_API). Macros and
-     `static inline` are internal-only, since an FFI cannot reach them.
+   - Every public operation is a real exported function (MIZU_API), since
+     an FFI cannot reach a macro or a `static inline`. The one exception is
+     the three mizu_task_* bit helpers: pure bit math over the documented
+     40/24-bit task-handle layout, which an FFI consumer re-implements.
    - Functions return mizu_status; destructors return void. Terminal
      transport states (FULL/TIMEOUT/CLOSED/PEER_GONE) are values, not
      errors; MIZU_ERR comes with a category + message (see Errors).
@@ -142,11 +144,15 @@ typedef enum mizu_errcat_e {
 /** Error access. Handle verbs record the category + message on the handle
    and shadow them in the calling thread's slot, so a thread reads its own
    last record on that handle even while another thread's verb on the same
-   handle fails (the split-waiter configuration, mizu_ext.h); both are
-   valid until this thread's next call on that handle. The const snapshot
-   getters (info, dump, tasks) record on the thread slot and the shadow,
-   so the handle getters answer them on the calling thread too. Handle-free
-   entry points (regions, prune) use the thread-local slot alone. */
+   handle fails (the split-waiter configuration, mizu_ext.h). The shadow
+   is one record per thread — this thread's last handle record, whichever
+   handle it was on — so it stands until this thread's next failing call
+   on any handle; past that the getters answer from the handle's own
+   record, which stands until the next call on that handle. Read an error
+   before the next verb. The const snapshot getters (info, dump, tasks)
+   record on the thread slot and the shadow, so the handle getters answer
+   them on the calling thread too. Handle-free entry points (regions,
+   prune) use the thread-local slot alone. */
 MIZU_API mizu_errcat mizu_last_error_category(void);
 MIZU_API const char *mizu_last_error_message(void);
 
@@ -175,8 +181,9 @@ typedef struct mizu_preamble_s {
   uint32_t slot;             /**< slot size in bytes, power of two */
   uint64_t host_pid;         /**< the peer death listener's watch target */
   uint64_t arena_size;       /**< bytes per direction, multiple of 128, 0 disables */
-  uint64_t drop_offset;      /**< peer bootstrap bytes, exact-sized (opaque */
-  uint64_t drop_size;        /**<   to the core; tagged, see MIZU_DROP_*) */
+  uint64_t drop_offset;      /**< the peer bootstrap bytes: opaque to the core,
+                                  tagged by binding convention (MIZU_DROP_*) */
+  uint64_t drop_size;        /**< their exact byte count (at most MIZU_DROP_MAX) */
   uint64_t livedir_offset;   /**< directory holding the two liveness files */
   uint64_t livedir_size;
 } mizu_preamble;
@@ -190,6 +197,9 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
    tag is a binding convention. */
 #define MIZU_DROP_R       0x52u   /**< 'R' */
 #define MIZU_DROP_SOURCE  0x53u   /**< 'S' */
+/** The drop's size bound (create rejects a larger one): the bootstrap
+   payload is an expression or source text, never bulk data. */
+#define MIZU_DROP_MAX     (UINT64_C(1) << 30)
 
 /** Fixed channel layout: preamble (0), rendezvous line (64), one entity block
    per side (128 host, 192 peer), then the four ring index lines from 256: one
@@ -215,7 +225,12 @@ MIZU_STATIC_ASSERT(sizeof(mizu_preamble) == 64, "mizu_preamble is the wire forma
    the side's notify endpoint ("signal my endpoint when data is published for
    me"; the publisher clears it as it signals, so one signal per idle
    transition); bit 2 is reserved. The word has two writers (the side itself and
-   the publisher's clear): every store is an RMW. */
+   the publisher's clear): every store is an RMW. The wake register
+   (MIZU_ENTITY_REG) is the side's "published since you last looked" latch:
+   the peer ORs bit 0 after each tail publish, and the side clears it and
+   re-checks the ring before it parks, so a publish landing between the
+   side's empty read and its park is caught without a second tail load.
+   The other bits are reserved zero. */
 #define MIZU_WAIT_PARKED  1u
 #define MIZU_WAIT_NOTIFY  2u
 /** Offset 16 of the 64-byte entity block: the side's identity word (MIZU_IDENT
@@ -452,8 +467,10 @@ typedef struct mizu_wk_slot_s {
   uint8_t          pad0[4];
   uint8_t          pad1[64];      /**< deque_top off the owner's span */
   MIZU_ATOMIC(int64_t)  deque_top;
-  uint64_t         live_dev;      /**< liveness-file identity, written once */
-  uint64_t         live_ino;      /**<  at join before LIVE */
+  /** The liveness-file identity (device, inode), written once at join
+     before LIVE; a by-path prober identity-checks the file against it. */
+  uint64_t         live_dev;      /**< liveness-file device */
+  uint64_t         live_ino;      /**< liveness-file inode */
   MIZU_ATOMIC(uint64_t) stat_tasks;
   MIZU_ATOMIC(uint64_t) stat_steals;
   MIZU_ATOMIC(uint64_t) stat_inj;
@@ -471,10 +488,14 @@ typedef struct mizu_sub_slot_s {
   MIZU_ATOMIC(int32_t)  status;        /**< MIZU_SUB_* */
   MIZU_ATOMIC(uint32_t) park_epoch;
   int64_t          pid;
-  uint32_t         rs_start;      /**< static partition: result_slots / */
-  uint32_t         rs_count;      /**<  max_submitters */
-  uint64_t         live_dev;
-  uint64_t         live_ino;
+  /** The static result-slot partition: result_slots / max_submitters
+     slots per submitter, slot j's starting at j times that count. Written
+     ahead of the LIVE transition, so a reader validates any non-FREE
+     slot's pair against the formula. */
+  uint32_t         rs_start;      /**< first result slot of the partition */
+  uint32_t         rs_count;      /**< slots in the partition */
+  uint64_t         live_dev;      /**< liveness-file device (as the worker's) */
+  uint64_t         live_ino;      /**< liveness-file inode */
   MIZU_ATOMIC(uint64_t) stat_spills;
   MIZU_ATOMIC(uint64_t) stat_spill_reuse;
   MIZU_ATOMIC(uint32_t) notify;  /**< the submitter's notify-arm bitmask
@@ -610,15 +631,17 @@ MIZU_API void mizu_zc_flag_refheld(mizu_shm *);
 /** size-stamped options; mizu_channel_opts_init zeroes + stamps. drop is
    the peer bootstrap payload, copied into the region at create (opaque
    bytes; its first byte is a MIZU_DROP_* tag by binding convention; the
-   peer's binding reads them after attach). */
+   peer's binding reads them after attach). create validates every field
+   and returns MIZU_ERR on a value out of range, an unknown flag bit, or a
+   drop past MIZU_DROP_MAX. */
 typedef struct mizu_channel_opts_s {
   uint32_t size;
   uint32_t capacity;      /**< ring slots, power of two, 2..2^24 */
   uint32_t slot_size;     /**< bytes per slot, power of two, 64..2^20 */
   uint64_t arena_size;    /**< bytes per direction; 0 disables */
-  uint32_t flags;         /**< MIZU_FLAG_SPIN */
+  uint32_t flags;         /**< MIZU_FLAG_SPIN; other bits rejected */
   const uint8_t *drop;    /**< peer bootstrap bytes (may be NULL) */
-  uint64_t drop_size;
+  uint64_t drop_size;     /**< their byte count, at most MIZU_DROP_MAX */
 } mizu_channel_opts;
 
 #define MIZU_CHANNEL_SPIN MIZU_FLAG_SPIN
@@ -695,9 +718,12 @@ MIZU_API mizu_status mizu_channel_recv_batch_fn(mizu_channel *, size_t cap,
    signals, sends on both sides return MIZU_CLOSED and receives drain before
    reporting it. alive is the peer-liveness verdict (lock probe, not the
    listener flag); a peer that closed but still runs reads as alive. destroy is
-   the GC-finalizer target: idempotent, never blocks; on a handle that never
-   rendezvoused it signals close and releases what the (non-blocking) rendezvous
-   check completes; the death verdict and mizu_shm_reap backstop the rest.
+   the GC-finalizer target: idempotent, and it never waits for the peer's
+   close — on a handle that never rendezvoused it signals close and releases
+   what the (non-blocking) rendezvous check completes; the death verdict and
+   mizu_shm_reap backstop the rest. Its one wait is the bounded drain
+   described below (at most about a second, ended early by the peer's
+   drain or death), so a finalizer may stall that long once.
    Handles are process-private and do not survive fork(): verbs on an inherited
    handle fail MIZU_ERR; alive, peer_ident, and drop answer empty. destroy on an
    inherited handle is a contract violation, since teardown belongs to the
@@ -890,9 +916,12 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
    consumes nothing. A task is collected exactly once: the slot is released as
    the value is produced. Valid on worker handles too: a nested collect helps
    (executes/steals) instead of sleeping, so exec_fn reenters from inside
-   collect; on submitter handles (exec == NULL) the wait parks. (A binding's
-   collect may omit the pool argument: its task handle carries the pool
-   reference.) collect_any returns the first terminal handle (*index_out,
+   collect; on submitter handles (exec == NULL) the wait parks. On a worker
+   handle a zero timeout is therefore not a pure poll: the help beat runs
+   ahead of the timeout check, so the call may execute queued work (other
+   tasks, never the collected one's slot) before it reports MIZU_TIMEOUT.
+   (A binding's collect may omit the pool argument: its task handle carries
+   the pool reference.) collect_any returns the first terminal handle (*index_out,
    0-based; ties among already-terminal handles break to the earliest position);
    the reported handle is consumed, the rest stay collectible. collect_all fills
    values_out in input order once every task is terminal. On the first non-OK
@@ -906,7 +935,8 @@ MIZU_API mizu_status mizu_pool_submit_batch_fn(mizu_pool *, mizu_obj_supply,
    consumed prefix, for the binding to return or attach); every handle past the
    prefix stays collectible. *consumed_out is n on a fully collected run, 0 when
    the run reported a non-OK outcome. MIZU_TIMEOUT consumes nothing: every
-   handle stays valid. */
+   handle stays valid, and *err_index_out is n (as it is on any error raised
+   before a claim, such as a stale handle). */
 MIZU_API mizu_status mizu_pool_collect(mizu_pool *, const mizu_task *,
                                     void **value_out, double timeout_ms);
 MIZU_API mizu_status mizu_pool_collect_any(mizu_pool *, const mizu_task *,
@@ -1058,4 +1088,4 @@ MIZU_API const char *mizu_pool_error(const mizu_pool *);
 }
 #endif
 
-#endif /**< MIZU_MIZU_H */
+#endif /* MIZU_MIZU_H */
