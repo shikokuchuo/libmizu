@@ -8,8 +8,7 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ## [Unreleased]
 
-Pre-release; no tagged version yet. On the first tag, rename this section
-to `## [0.1.0] - <date>` and start a fresh `Unreleased` section above it.
+## [0.1.0] - 2026-11-04
 
 ### Added
 
@@ -18,70 +17,41 @@ First public release.
 - Lock-free SPSC channels and work-stealing task pools over POSIX shared
   memory (Linux, macOS) and Win32 file mappings, behind a
   language-agnostic, FFI-safe C ABI: opaque handles, `mizu_status`
-  terminal states instead of errors (a handle's error record is shadowed
-  per calling thread), vectored collects, batch submit, and pool
+  terminal states, vectored collects, batch submit, and pool
   introspection. 64-bit platforms; Linux needs kernel >= 5.3.
 - Crash-atomic wire formats: every cross-process claim is copy-then-CAS,
-  a result slot's state, claimant and incarnation are one tagged word so
-  every transition is a single CAS bound to its incarnation (the
-  claimant's pid rides the slot header beside it, so a death record and
-  the lent-region ledger name the exact dead process), and the
-  parker protocol (one epoch word per waiting entity over futex /
-  `__ulock` / WaitOnAddress, plus named events) is the sole guarantee
-  against lost wakeups. Wakes are single-waiter by default (the
-  directed-handoff `mizu_unpark`); `mizu_unpark_all` is reserved for the
-  one word a split-waiter submitter's two threads can share.
+  so a peer dying mid-operation cannot wedge a queue, and a per-waiter
+  parker protocol (futex / `__ulock` / WaitOnAddress) guarantees no lost
+  wakeups.
 - Process-liveness verdicts from a kernel-released exclusive lock per
-  entity; per-platform death listeners (pidfd + epoll, dispatch sources,
-  thread-pool waits) act as wake triggers only, and an orphan reaper
-  reclaims dead creators' regions.
-- Payload tiers: immediate NIL and single strings, raw vectors, a channel
-  spill arena, named spill regions, and zero-copy layout regions
-  (SHM_VEC) under a cross-process refcount — with a per-handle retain
-  table, explicit release points, and churn-gated fallback to the copy
-  tiers.
-- The binding seam: the core moves opaque frames and never sees a
-  language object. Bindings register `stage` / `read` / `exec` / `check`
-  / `park` / `sweep` / `drop` callbacks per handle; staging is
-  transactional, so a mid-stage abort leaves the handle consistent. A
-  binding that runs a submitter's collect family on a second thread
-  declares it with `MIZU_BINDING_SPLIT_WAITER`: the collect side then
-  hands its releases to the producing thread through per-slot masks
-  instead of touching the free list (no lock, no waiting). A built-in
-  bytes binding ships as the reference consumer.
+  entity, with per-platform death listeners and an orphan reaper
+  reclaiming dead creators' regions.
+- Payload tiers from immediate values to spill regions and zero-copy
+  layout regions (SHM_VEC) under a cross-process refcount, with
+  churn-gated fallback to the copy tiers.
+- A binding seam where the core moves opaque frames and never sees a
+  language object: bindings register `stage` / `read` / `exec` / `check`
+  / `park` / `sweep` / `drop` callbacks per handle, and staging is
+  transactional. A built-in bytes binding ships as the reference
+  consumer.
 - A three-tier API: the stable `mizu.h`, the binding-author `mizu_ext.h`
   (dual-form header inlines plus exported symbols, pinned per minor
-  release), and private internals. Extensible structs are size-stamped
-  by the caller, and create, attach, join and the snapshot getters refuse
-  a mismatched stamp.
-- The cross-language wire contract (normative in DESIGN.md, pinned by a
-  byte-exact golden corpus): per-handle identity words (language plus
-  append-only reader-capability bits), the 'I' interchange stream with a
-  validating pull cursor and emit helpers, the err / task / ref tags,
-  and the MIZH / MIZS / MIZL zero-copy layout formats.
-- Cross-language pools: the neutral task stream with its bounded error
-  envelope, task arguments by reference, the map descriptor and runner
-  streams, and the morsel-claim protocol (`mizu_morsel_*`) — one header
-  layout, generation-fenced claims, AIMD batch sizing, cancellation, and
-  the lost-set scan.
-- The Arrow frame writer: an Arrow C Data Interface → MIZL writer with
-  dictionary (factor), temporal (Date / POSIXct / difftime, nanosecond
-  verbatim) and uint64-verbatim forms, fixed-width conversion kernels,
-  an inline small-table form, and per-column writers a binding's own
+  release), and private internals.
+- The cross-language wire contract, normative in DESIGN.md and pinned by
+  a byte-exact golden corpus: per-handle identity words with append-only
+  capability bits, the 'I' interchange stream, and the MIZH / MIZS /
+  MIZL zero-copy layout formats.
+- Cross-language pools: a neutral task stream with a bounded error
+  envelope, task arguments by reference, and the morsel-claim map
+  protocol (`mizu_morsel_*`) for self-scheduling runners.
+- An Arrow C Data Interface → MIZL frame writer with dictionary,
+  temporal and uint64-verbatim forms, fixed-width conversion kernels, an
+  inline small-table form, and per-column writers a binding's own
   emitters can share.
-- Notify endpoints for event-driven bindings: named, edge-triggered
-  wakes (a filesystem datagram socket on POSIX, an auto-reset event on
-  Windows) signaled at the publish checkpoint; watches ride the
-  death-listener machinery, and close and peer death also signal. The
-  arm-time stale-datagram drop runs once per arm cycle, at the handle's
-  disarmed-to-armed transition (a re-arm under a standing arm never
-  drains a signal in flight), and the channel arm reports the
-  zero-timeout recv's verdict (data, closed, or peer gone), so a
-  terminal already present at the arm is surfaced by the caller's
-  synchronous drain.
+- Named, edge-triggered notify endpoints for event-driven bindings,
+  signaled at the publish checkpoint; close and peer death also signal.
 - L'Ecuyer-CMRG (MRG32k3a) stream jumping for deterministic per-element
   map seeds.
 - Distribution as a four-file amalgamation (`mizu.c` + `mizu.h` +
-  `mizu_ext.h` + `mizu_ext.c`, the exported ext surface for FFI
-  consumers), `make install` with pkg-config, and a doxygen API
-  reference.
+  `mizu_ext.h` + `mizu_ext.c`), `make install` with pkg-config, and a
+  doxygen API reference.
