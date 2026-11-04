@@ -78,6 +78,7 @@ var mizu__ext_8h =
     [ "mizu_binding_bytes", "mizu__ext_8h.html#a042a682dea0415ddb6fd1fc43deb19a8", null ],
     [ "mizu_parker_attach", "mizu__ext_8h.html#ad1787f90b4496b19147b17905021fa57", null ],
     [ "mizu_park", "mizu__ext_8h.html#ae86fd7a82500f869694e107db5b682d2", null ],
+    [ "mizu_unpark_all", "mizu__ext_8h.html#a4b78a75411ae2f5f9cb42d5623596f82", null ],
     [ "mizu_parker_snapshot", "mizu__ext_8h.html#a8466f6358c4c00263b6ac326f3745845", null ],
     [ "mizu_death_listener_teardown", "mizu__ext_8h.html#abe1cab3caf78986d73197f7bd6189128", null ],
     [ "mizu_channel_notify_arm", "mizu__ext_8h.html#aad8d5822cd30234e761c62abea32206b", null ],

@@ -120,7 +120,8 @@ var searchData=
   ['mizu_5ftimeout_5fms_117',['mizu_timeout_ms',['../mizu__ext_8h.html#a5b31365b0062df10b913cfa54e14dab6',1,'mizu_ext.h']]],
   ['mizu_5ftune_118',['mizu_tune',['../mizu__ext_8h.html#a5e24079ee82760c130ec7014d4de8299',1,'mizu_ext.h']]],
   ['mizu_5ftype_5felt_5fsize_119',['mizu_type_elt_size',['../mizu_8h.html#a793f5c3f0340b598c508dd8bd01578d6',1,'mizu.h']]],
-  ['mizu_5fversion_120',['mizu_version',['../mizu_8h.html#adfab818fbaf612b1c70d0fd88e49784f',1,'mizu.h']]],
-  ['mizu_5fzc_5frc_121',['mizu_zc_rc',['../mizu__ext_8h.html#a148b2e784558ecfb668d58fbfe34a84e',1,'mizu_ext.h']]],
-  ['mizu_5fzc_5fref_122',['mizu_zc_ref',['../mizu_8h.html#a94482e32d2b59e2e388ca1eee991d231',1,'mizu.h']]]
+  ['mizu_5funpark_5fall_120',['mizu_unpark_all',['../mizu__ext_8h.html#a4b78a75411ae2f5f9cb42d5623596f82',1,'mizu_ext.h']]],
+  ['mizu_5fversion_121',['mizu_version',['../mizu_8h.html#adfab818fbaf612b1c70d0fd88e49784f',1,'mizu.h']]],
+  ['mizu_5fzc_5frc_122',['mizu_zc_rc',['../mizu__ext_8h.html#a148b2e784558ecfb668d58fbfe34a84e',1,'mizu_ext.h']]],
+  ['mizu_5fzc_5fref_123',['mizu_zc_ref',['../mizu_8h.html#a94482e32d2b59e2e388ca1eee991d231',1,'mizu.h']]]
 ];
