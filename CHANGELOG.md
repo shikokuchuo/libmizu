@@ -8,6 +8,10 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ## [Unreleased]
 
+### Changed
+
+- Faster masked conversions of int32 and int64 Arrow columns.
+
 ## [0.1.0] - 2026-11-04
 
 ### Added
