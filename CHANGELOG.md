@@ -12,6 +12,11 @@ Versions carry an ABI contract: any wire-format change bumps
 
 - Faster masked conversions of int32 and int64 Arrow columns.
 
+### Fixed
+
+- An event-driven pool consumer could miss the wake for a task result
+  published immediately after submission and wait indefinitely.
+
 ## [0.1.0] - 2026-11-04
 
 ### Added

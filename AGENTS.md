@@ -249,6 +249,9 @@ these.
 - Commit messages: a short single-line summary, no body — describe the
   change, don't enumerate every file or edit.
 - PR descriptions: brief, tidyverse-style plain English.
+- Changelog entries are simple and user-facing: the observable symptom or
+  behavior and its trigger, never the internal mechanism (name the verb
+  that hung, not the lock that raced).
 
 ## CI
 

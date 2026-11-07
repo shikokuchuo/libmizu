@@ -282,6 +282,60 @@ static void test_pool_cross_process(void) {
   puts("ok pool_cross_process");
 }
 
+/* The announce/fence/probe transplant under a fast worker: submit,
+   announce, probe — a live probe relies on the publish's signal, and the
+   signal must come. A worker that publishes while the announce is still
+   on its way (an unfenced announce) signals nothing, and the bounded
+   wait below fails rather than hanging the job. */
+static void test_pool_announce_probe(void) {
+  mizu_binding b;
+  mizu_binding_bytes(&b);
+  mizu_pool_opts opts;
+  mizu_pool_opts_init(&opts);
+  opts.max_workers = 1;
+  opts.max_submitters = 8;
+  opts.injection_cap = 64;
+  opts.per_worker_cap = 64;
+  opts.result_slots = 512;
+  opts.slot_size = 512;
+  mizu_pool *ctrl;
+  assert(mizu_pool_create(&ctrl, &opts, &b) == MIZU_OK);
+  assert(mizu_pool_token(ctrl, token, sizeof(token)) == MIZU_OK);
+  fires = 0;
+  assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
+  assert(mizu_pool_notify_watch(ctrl, count_cb, NULL) == MIZU_OK);
+
+  fflush(stdout);
+  pid_t w = fork();
+  assert(w >= 0);
+  if (w == 0) run_pool_worker();
+
+  enum { N = 60000 };
+  mizu_bytes msg = { (void *) "t", 1 };
+  for (int i = 0; i < N; i++) {
+    mizu_task t;
+    assert(mizu_pool_submit(ctrl, &msg, &t, 1000) == MIZU_OK);
+    assert(mizu_pool_task_notify(ctrl, &t, 1, 1) == MIZU_OK);
+    int st = mizu_pool_task_state(ctrl, &t);
+    if (st == MIZU_RS_PENDING || st == MIZU_RS_RUNNING) {
+      /* live at the probe: the publish's signal is the only wake */
+      int base = atomic_load_explicit(&fires, memory_order_acquire);
+      assert(wait_fires(base + 1, 2000));
+      assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
+    }
+    void *obj = NULL;
+    assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
+    mizu_bytes_free(obj);
+  }
+
+  assert(mizu_pool_notify_unwatch(ctrl) == MIZU_OK);
+  assert(mizu_pool_notify_arm(ctrl, 0) == MIZU_OK);
+  assert(mizu_pool_stop(ctrl, 5000) == MIZU_OK);
+  assert(wait_exit(w) == 0);
+  mizu_pool_destroy(ctrl);
+  puts("ok pool_announce_probe");
+}
+
 /* The pool owner that dies with no workers: creates, hands the token
    over, then dies hard once the submitter is armed. With nobody left to
    broadcast, the armed submitter's chained owner watch must still fire. */
@@ -456,6 +510,7 @@ int main(void) {
   test_cross_process_burst();
   test_death_chain();
   test_pool_cross_process();
+  test_pool_announce_probe();
   test_pool_owner_death_chain();
   test_peer_endpoint_unlink();
   test_pool_endpoint_unlink();

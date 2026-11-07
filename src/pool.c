@@ -4468,6 +4468,12 @@ mizu_status mizu_pool_task_notify(mizu_pool *p, const mizu_task *tasks,
         atomic_store_explicit(&rs->waiter_slot, -1, memory_order_relaxed);
     }
   }
+  /* one fence for the batch: the caller's terminal probe follows this
+     call, and the fence is the Dekker pairing the publisher's post-CAS
+     waiter_slot read expects — an unfenced announce can still be on its
+     way when a fast worker publishes (reads -1, signals nothing) while
+     the probe reads a live state, and the wake is lost */
+  if (on != 0) atomic_thread_fence(memory_order_seq_cst);
   return MIZU_OK;
 }
 
