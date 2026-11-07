@@ -321,8 +321,11 @@ static void test_pool_announce_probe(void) {
       /* live at the probe: the publish's signal is the only wake */
       int base = atomic_load_explicit(&fires, memory_order_acquire);
       assert(wait_fires(base + 1, 2000));
-      assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
     }
+    /* re-arm every pass: a publish that beat the probe claimed the edge
+       (one signal, the word cleared), and the next live probe's publish
+       only signals against a standing arm */
+    assert(mizu_pool_notify_arm(ctrl, 1) == MIZU_OK);
     void *obj = NULL;
     assert(mizu_pool_collect(ctrl, &t, &obj, 5000) == MIZU_OK);
     mizu_bytes_free(obj);
