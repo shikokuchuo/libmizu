@@ -25,8 +25,9 @@ var NAVTREEINDEX0 =
 "md_CHANGELOG.html":[8],
 "md_CHANGELOG.html#autotoc_md33":[8,0],
 "md_CHANGELOG.html#autotoc_md34":[8,0,0],
-"md_CHANGELOG.html#autotoc_md35":[8,1],
-"md_CHANGELOG.html#autotoc_md36":[8,1,0],
+"md_CHANGELOG.html#autotoc_md35":[8,0,1],
+"md_CHANGELOG.html#autotoc_md36":[8,1],
+"md_CHANGELOG.html#autotoc_md37":[8,1,0],
 "md_DESIGN.html":[7],
 "md_DESIGN.html#autotoc_md10":[7,1],
 "md_DESIGN.html#autotoc_md11":[7,2],
@@ -248,6 +249,5 @@ var NAVTREEINDEX0 =
 "mizu__ext_8h.html#aa35eda60e5d8ba03789b8fd3c715acc1":[10,0,0,1,24],
 "mizu__ext_8h.html#aa517ba2ce513d7bd0be2dcf18a7435f4":[10,0,0,1,163],
 "mizu__ext_8h.html#aa6217f0cd99b9fe4f02ca011c84aea03":[10,0,0,1,124],
-"mizu__ext_8h.html#aa630b1ff2ac1b77c324b103e792f6e57":[10,0,0,1,51],
-"mizu__ext_8h.html#aa760f038aa9a702121d94645492acbc7":[10,0,0,1,143]
+"mizu__ext_8h.html#aa630b1ff2ac1b77c324b103e792f6e57":[10,0,0,1,51]
 };
