@@ -104,7 +104,6 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
   if (size > MIZU_SPILL_FL_BYTES) {
     mizu_region_destroy(fl->large);
     fl->large = shm;
-    fl->large_size = size;
     spill_collapse(shm);
     return;
   }
@@ -145,32 +144,34 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
   spill_collapse(shm);
 }
 
-/* Smallest entry with size >= n, removed from the list. A miss runs a
-   full ledger sweep (zero-count lent regions rejoin here) and retries
-   once — the free-list-miss full sweep of the release protocol. */
+/* Smallest entry with size >= n, removed from the list — an over-cap
+   request instead takes the one large slot (the insert gate keeps
+   over-cap regions off the list, so the scan cannot serve one). A miss
+   runs a full ledger sweep (zero-count lent regions rejoin here) and
+   retries once — the free-list-miss full sweep of the release protocol. */
 static mizu_shm *spill_fl_pop(mizu_spill_fl *fl, size_t n) {
   for (int attempt = 0; attempt < 2; attempt++) {
-    int best = -1;
-    for (int i = 0; i < MIZU_SPILL_FL_MAX; i++) {
-      if (fl->size[i] < n || fl->size[i] == 0) continue;
-      if (best < 0 || fl->size[i] < fl->size[best]) best = i;
-    }
-    if (best >= 0) {
-      mizu_shm *shm = fl->regions[best];
-      fl->regions[best] = NULL;
-      fl->total -= fl->size[best];
-      fl->size[best] = 0;
-      fl->n--;
-      return shm;
-    }
-    /* the large slot serves over-cap requests only (its insert gate):
-       a smaller stage never steals it from a same-class relay */
-    if (n > MIZU_SPILL_FL_BYTES && fl->large != NULL &&
-        fl->large_size >= n) {
-      mizu_shm *shm = fl->large;
-      fl->large = NULL;
-      fl->large_size = 0;
-      return shm;
+    if (n > MIZU_SPILL_FL_BYTES) {
+      /* a smaller stage never steals the slot from a same-class relay */
+      if (fl->large != NULL && fl->large->size >= n) {
+        mizu_shm *shm = fl->large;
+        fl->large = NULL;
+        return shm;
+      }
+    } else {
+      int best = -1;
+      for (int i = 0; i < MIZU_SPILL_FL_MAX; i++) {
+        if (fl->size[i] < n || fl->size[i] == 0) continue;
+        if (best < 0 || fl->size[i] < fl->size[best]) best = i;
+      }
+      if (best >= 0) {
+        mizu_shm *shm = fl->regions[best];
+        fl->regions[best] = NULL;
+        fl->total -= fl->size[best];
+        fl->size[best] = 0;
+        fl->n--;
+        return shm;
+      }
     }
     if (attempt > 0 || fl->led_n == 0) break;
     mizu_ledger_sweep(fl, MIZU_LEDGER_MAX);
@@ -379,7 +380,6 @@ void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl) {
   fl->total = 0;
   mizu_region_destroy(fl->large);
   fl->large = NULL;
-  fl->large_size = 0;
   for (int i = 0; i < MIZU_LEDGER_MAX; i++) {
     mizu_region_destroy(fl->led_regions[i]);
     fl->led_regions[i] = NULL;

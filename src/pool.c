@@ -4024,20 +4024,23 @@ mizu_status mizu_pool_collect_terminal(mizu_pool *p, const mizu_task *tasks,
   if (atomic_load_explicit(&p->owner_dead, memory_order_acquire) != 0)
     pool_orphan_teardown_try(p);
   size_t count = 0, i = 0;
+  if (n > 0) memset(values_out, 0, n * sizeof *values_out);
   for (i = 0; i < n; i++) {
-    values_out[i] = NULL;
     const uint32_t idx = mizu_task_rs_index(&tasks[i]);
     if (idx >= p->hdr.result_slots) {
       mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "invalid task handle");
       goto fail;
     }
     mizu_rs_hdr *rs = pool_rs(p, idx);
-    if (!pool_seq_match(rs, mizu_task_seq(&tasks[i]))) {
+    /* one load serves both pre-checks, seq first: a stale word naming a
+       live recommitted slot fails here rather than skipping */
+    const uint64_t cur = rs_load(rs);
+    if (!pool_word_match(cur, mizu_task_seq(&tasks[i]))) {
       mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
                      "task handle already collected or invalidated");
       goto fail;
     }
-    if (mizu_rs_live(mizu_rs_st(rs_load(rs)))) continue;
+    if (mizu_rs_live(mizu_rs_st(cur))) continue;
     int taken_back;
     void *v = pool_rs_claim(p, rs, idx, mizu_task_seq(&tasks[i]),
                             &taken_back);

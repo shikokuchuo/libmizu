@@ -241,7 +241,7 @@ int main(void) {
   uint32_t n_before = h.fl.n;
   mizu_spill_fl_insert(&h.fl, big);
   assert(h.fl.n == n_before && h.fl.large == big &&
-         h.fl.large_size == MIZU_SPILL_FL_BYTES + 4096);
+         h.fl.large->size == MIZU_SPILL_FL_BYTES + 4096);
   mizu_spill_fl_teardown(&h, &h.fl);
   assert(h.fl.large == NULL && h.fl.n == 0);
 
@@ -494,7 +494,7 @@ int main(void) {
   mizu_shm *L = mizu_spill_region_get(&h.fl, bign);
   assert(L != NULL && L->size == bign && !h.fl.last_reused);
   mizu_stage_rollback(&h);
-  assert(h.fl.n == 0 && h.fl.large == L && h.fl.large_size == bign);
+  assert(h.fl.n == 0 && h.fl.large == L && h.fl.large->size == bign);
 
   mizu_shm *sm = mizu_spill_region_get(&h.fl, 100);
   assert(sm != NULL && sm != L && sm->size == MIZU_SPILL_FL_FLOOR);
@@ -510,10 +510,10 @@ int main(void) {
   mizu_shm *L3 = mizu_spill_region_get(&h.fl, bign + (1u << 20));
   assert(L3 != NULL && L3 != L && !h.fl.last_reused);
   mizu_stage_rollback(&h);
-  assert(h.fl.large == L3 && h.fl.large_size == bign + (1u << 20));
+  assert(h.fl.large == L3 && h.fl.large->size == bign + (1u << 20));
 
   mizu_spill_fl_teardown(&h, &h.fl);
-  assert(h.fl.large == NULL && h.fl.large_size == 0 && h.fl.n == 0);
+  assert(h.fl.large == NULL && h.fl.n == 0);
 
   /* a zero-length region name is gone, never opened */
   handle_reset();
