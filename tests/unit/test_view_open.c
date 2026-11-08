@@ -3,9 +3,18 @@
    it, leaving the mizu_zc_ref timing to the caller (a binding whose wrap
    can fail between map and count). Assert-based; run via `make test`. */
 
+/* _GNU_SOURCE: glibc hides mincore behind __USE_BSD under strict -std=c11. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#  include <unistd.h>
+#endif
 
 #include "internal.h"
 
@@ -58,6 +67,45 @@ int main(void) {
     assert(mizu_shm_open_view_flags(&bad, bad_names[i], 0) == MIZU_ERR);
     assert(bad == NULL);
   }
+
+  /* Past the prefault gate (MIZU_VIEW_PREFAULT_MIN, 1 MiB): the open's
+     MADV_POPULATE_READ leaves the read-only tail resident where the
+     kernel has it (>= 5.14), and the view reads exactly what the creator
+     wrote. */
+  mizu_shm *big = NULL;
+  assert(mizu_shm_create(&big, 2 << 20) == MIZU_OK);
+  unsigned char *baddr = mizu_shm_addr(big);
+  mizu_mizh_write(baddr, MIZU_TYPE_RAW, 0);
+  atomic_store(mizu_zc_rc(baddr), 1);        /* the write zeroed it */
+  const size_t bsize = mizu_shm_size(big);
+  baddr[bsize / 2] = 0x5A;
+  baddr[bsize - 1] = 0xA5;
+  mizu_shm *bv = NULL;
+  assert(mizu_shm_open_view(&bv, mizu_shm_name(big)) == MIZU_OK);
+  const unsigned char *vaddr = mizu_shm_addr(bv);
+  assert(vaddr[bsize / 2] == 0x5A && vaddr[bsize - 1] == 0xA5);
+  assert(mizu_zc_refcount(big) == 2);
+#if defined(__linux__)
+  /* Residency is asserted only where POPULATE_READ works (the pre-5.14
+     fallback leaves the mapping lazy by design). */
+  const long ps = sysconf(_SC_PAGESIZE);
+  void *probe = mmap(NULL, (size_t) ps, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  assert(probe != MAP_FAILED);
+  const int has_populate = madvise(probe, (size_t) ps, MADV_POPULATE_READ) == 0;
+  munmap(probe, (size_t) ps);
+  if (has_populate) {
+    const size_t npages = (bsize + (size_t) ps - 1) / (size_t) ps;
+    unsigned char *res = malloc(npages);
+    assert(res != NULL);
+    assert(mincore(mizu_shm_addr(bv), bsize, res) == 0);
+    assert((res[npages / 2] & 1) && (res[npages - 1] & 1));
+    free(res);
+  }
+#endif
+  mizu_zc_unref(bv);
+  mizu_shm_close(bv, 0);
+  mizu_shm_close(big, 1);
 
   mizu_zc_unref(v1);
   mizu_zc_unref(v2);
