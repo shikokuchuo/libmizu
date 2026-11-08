@@ -100,20 +100,26 @@ $(function(){initNavTree('md_CHANGELOG.html','',''); });
 <h1 class="doxsection"><a class="anchor" id="autotoc_md33"></a>
 [Unreleased]</h1>
 <h2 class="doxsection"><a class="anchor" id="autotoc_md34"></a>
+Added</h2>
+<ul>
+<li><span class="tt"><a class="el" href="mizu__ext_8h.html#a09976e0b2b02c8c71151c489b61c5ae1" title="The event-driven drain&#39;s batch collect: mizu_pool_collect&#39;s claim half over a task set,...">mizu_pool_collect_terminal</a></span> (binding-author tier): collect every terminal task in a set in one call, never parking.</li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
 Changed</h2>
 <ul>
 <li>Much faster conversions of large nullable Arrow columns.</li>
 <li>Faster conversions of large int32 and int64 Arrow columns.</li>
 <li>Faster first reads of large zero-copy views on Linux.</li>
+<li>Repeated sends of a payload larger than 64 MB no longer create a fresh shared-memory region per send.</li>
 </ul>
-<h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md36"></a>
 Fixed</h2>
 <ul>
 <li>An event-driven pool consumer could miss the wake for a task result published immediately after submission and wait indefinitely.</li>
 </ul>
-<h1 class="doxsection"><a class="anchor" id="autotoc_md36"></a>
+<h1 class="doxsection"><a class="anchor" id="autotoc_md37"></a>
 [0.1.0] - 2026-11-04</h1>
-<h2 class="doxsection"><a class="anchor" id="autotoc_md37"></a>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md38"></a>
 Added</h2>
 <p>First public release.</p>
 <ul>

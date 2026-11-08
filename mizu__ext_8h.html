@@ -545,6 +545,8 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_death_listener_t
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_notify_unwatch</b> (mizu_pool *)</td></tr>
 <tr class="memitem:aa3f6f7bbbca65f465626f040df27e1a6" id="r_aa3f6f7bbbca65f465626f040df27e1a6"><td class="memItemLeft" align="right" valign="top"><a id="aa3f6f7bbbca65f465626f040df27e1a6" name="aa3f6f7bbbca65f465626f040df27e1a6"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_task_notify</b> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, int on)</td></tr>
+<tr class="memitem:a09976e0b2b02c8c71151c489b61c5ae1" id="r_a09976e0b2b02c8c71151c489b61c5ae1"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a09976e0b2b02c8c71151c489b61c5ae1">mizu_pool_collect_terminal</a> (mizu_pool *, const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *, size_t n, void **values_out, size_t *count_out, size_t *fail_out)</td></tr>
+<tr class="memdesc:a09976e0b2b02c8c71151c489b61c5ae1"><td class="mdescLeft">&#160;</td><td class="mdescRight">The event-driven drain's batch collect: mizu_pool_collect's claim half over a task set, never parking, the per-task checks (handle, submitter slot, deferred drain, owner-death probe) hoisted to once per batch.  <br /></td></tr>
 <tr class="memitem:a5c66c429d4a8b1afe4c2f5bd0611ded5" id="r_a5c66c429d4a8b1afe4c2f5bd0611ded5"><td class="memItemLeft" align="right" valign="top">const char *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a5c66c429d4a8b1afe4c2f5bd0611ded5">mizu_live_dir</a> (void)</td></tr>
 <tr class="memdesc:a5c66c429d4a8b1afe4c2f5bd0611ded5"><td class="mdescLeft">&#160;</td><td class="mdescRight">Directory for liveness lock files: the MIZU_LIVENESS_DIR override (read-through, checked every call) else a per-platform default resolved once: /dev/shm on Linux, the per-user temp dir on macOS and Windows.  <br /></td></tr>
 <tr class="memitem:a8a52337cdc7133df4cad8c4f33937ed5" id="r_a8a52337cdc7133df4cad8c4f33937ed5"><td class="memItemLeft" align="right" valign="top"><a id="a8a52337cdc7133df4cad8c4f33937ed5" name="a8a52337cdc7133df4cad8c4f33937ed5"></a>
@@ -1897,6 +1899,50 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_tune</b> (void)<
 
 <p>The consumer's published-not-yet-consumed message count: one acquire load on a local-cache miss, otherwise the cached tail. </p>
 <p>Only this consumer shrinks the count, so a caller sizing a receive buffer from it never over-allocates on a producer's later publish. Total: a NULL, released or inherited (forked) handle answers 0. Exported only (the ring locals are internal). </p>
+
+</div>
+</div>
+<a id="a09976e0b2b02c8c71151c489b61c5ae1" name="a09976e0b2b02c8c71151c489b61c5ae1"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a09976e0b2b02c8c71151c489b61c5ae1">&#9670;&#160;</a></span>mizu_pool_collect_terminal()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_pool_collect_terminal </td>
+          <td>(</td>
+          <td class="paramtype">mizu_pool *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t</td>          <td class="paramname"><span class="paramname"><em>n</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">void **</td>          <td class="paramname"><span class="paramname"><em>values_out</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t *</td>          <td class="paramname"><span class="paramname"><em>count_out</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t *</td>          <td class="paramname"><span class="paramname"><em>fail_out</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The event-driven drain's batch collect: mizu_pool_collect's claim half over a task set, never parking, the per-task checks (handle, submitter slot, deferred drain, owner-death probe) hoisted to once per batch. </p>
+<p>values_out is fully written: values_out[i] receives each terminal task's outcome (owned, as collect's), or NULL for a live slot (a take-back to RUNNING included); *count_out the number collected. The first item whose collect fails ends the batch: MIZU_ERR with the failure on the handle, *fail_out the item's index, *count_out the consumed prefix; items past it are unprobed, their entries NULL. The caller surfaces the failure from the handle record or its binding state and resumes past the item; a failure the read hook did not consume leaves the slot terminal for that later collect. count_out and fail_out may be NULL. n == 0 is MIZU_OK with count 0. Same threading discipline as mizu_pool_collect. </p>
 
 </div>
 </div>

@@ -62,11 +62,12 @@ var NAVTREE =
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
       [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", [
-        [ "Changed", "md_CHANGELOG.html#autotoc_md34", null ],
-        [ "Fixed", "md_CHANGELOG.html#autotoc_md35", null ]
+        [ "Added", "md_CHANGELOG.html#autotoc_md34", null ],
+        [ "Changed", "md_CHANGELOG.html#autotoc_md35", null ],
+        [ "Fixed", "md_CHANGELOG.html#autotoc_md36", null ]
       ] ],
-      [ "[0.1.0] - 2026-11-04", "md_CHANGELOG.html#autotoc_md36", [
-        [ "Added", "md_CHANGELOG.html#autotoc_md37", null ]
+      [ "[0.1.0] - 2026-11-04", "md_CHANGELOG.html#autotoc_md37", [
+        [ "Added", "md_CHANGELOG.html#autotoc_md38", null ]
       ] ]
     ] ],
     [ "Data Structures", "annotated.html", [
@@ -94,7 +95,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#aa760f038aa9a702121d94645492acbc7"
+"mizu__ext_8h.html#aa6217f0cd99b9fe4f02ca011c84aea03"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';
