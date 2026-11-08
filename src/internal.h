@@ -27,6 +27,9 @@
    real header, so every core TU compiles the same paths whatever its
    headers: support is a kernel property, probed at run time — an older
    kernel EINVALs into the existing fallbacks. */
+#  ifndef MADV_POPULATE_READ
+#    define MADV_POPULATE_READ 22    /* kernel >= 5.14 */
+#  endif
 #  ifndef MADV_POPULATE_WRITE
 #    define MADV_POPULATE_WRITE 23   /* kernel >= 5.14 */
 #  endif

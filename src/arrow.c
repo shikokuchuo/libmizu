@@ -103,6 +103,13 @@ static double half_to_double(uint16_t h) {
    Declared ahead of cvt_run, which fuses the count. */
 static const mizu_cvt_row CVT_ROW_I64_V;
 
+/* Run bytes past which the int64 sentinel count fuses into the copy loop
+   instead of riding a second pass: below it the count's re-read of src
+   hits the LLC (the memcpy's non-temporal stores keep dst out of the
+   way); past it src is DRAM-resident and the fused single pass wins.
+   Measured on 4-16 MB LLC hosts at the 8/64 MB shapes. */
+#define MIZU_CVT_FUSE_MIN ((size_t) 16 << 20)
+
 /* Convert a run of n valid elements. Per-element memcpy keeps every
    access alignment-safe (a contiguous buffer can still be
    element-misaligned — np.frombuffer with a byte offset); fixed-size
@@ -124,31 +131,63 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
                     const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   switch (row->cvt) {
   case MIZU_CVT_COPY:
-    memcpy(dst, src, n * row->w_out);
     /* Fuse the genuine-sentinel count into the copy: the int32/int64
        identity rows read a sentinel as NA in R, so their count rides the
-       run rather than re-reading dst in a second pass (the masked path's
-       64-lane runs would otherwise pay an O(n) scan per run). The verbatim
-       i64 row (a cap-peer's agreed values) is keyed out by pointer. The
-       count rides a local — a warn-> store per lane would alias-block
+       run rather than re-reading src in a second pass. The verbatim i64
+       row (a cap-peer's agreed values) is keyed out by pointer. The count
+       rides a local — a warn-> store per lane would alias-block
        vectorization. */
     if (warn != NULL && row != &CVT_ROW_I64_V) {
       uint64_t cnt = 0;
       if (row->wire == MIZU_TYPE_INT) {
-        for (size_t i = 0; i < n; i++) {
-          int32_t v;
-          memcpy(&v, src + 4 * i, 4);
-          cnt += v == INT32_MIN;
+        /* The int32 count is lane-bound (2x lanes per byte moved), so the
+           fused single pass wins at every size measured; element-misaligned
+           runs keep the alignment-safe pair. */
+        if (((uintptr_t) dst | (uintptr_t) src) % 4 == 0) {
+          int32_t *restrict d = (int32_t *) (void *) dst;
+          const int32_t *restrict s = (const int32_t *) (const void *) src;
+          for (size_t i = 0; i < n; i++) {
+            const int32_t v = s[i];
+            d[i] = v;
+            cnt += v == INT32_MIN;
+          }
+        } else {
+          memcpy(dst, src, n * 4);
+          for (size_t i = 0; i < n; i++) {
+            int32_t v;
+            memcpy(&v, src + 4 * i, 4);
+            cnt += v == INT32_MIN;
+          }
         }
         warn->n_intmin += cnt;
       } else if (row->wire == MIZU_TYPE_INT64) {
-        for (size_t i = 0; i < n; i++) {
-          int64_t v;
-          memcpy(&v, src + 8 * i, 8);
-          cnt += v == INT64_MIN;
+        /* Below the fuse gate the memcpy + count pair wins: the count's
+           re-read of src hits the LLC and the monolithic memcpy earns
+           non-temporal stores. Past it (src DRAM-resident) the pair pays
+           a second full src stream and the fused single pass wins. */
+        if (n * 8 >= MIZU_CVT_FUSE_MIN &&
+            ((uintptr_t) dst | (uintptr_t) src) % 8 == 0) {
+          int64_t *restrict d = (int64_t *) (void *) dst;
+          const int64_t *restrict s = (const int64_t *) (const void *) src;
+          for (size_t i = 0; i < n; i++) {
+            const int64_t v = s[i];
+            d[i] = v;
+            cnt += v == INT64_MIN;
+          }
+        } else {
+          memcpy(dst, src, n * 8);
+          for (size_t i = 0; i < n; i++) {
+            int64_t v;
+            memcpy(&v, src + 8 * i, 8);
+            cnt += v == INT64_MIN;
+          }
         }
         warn->n_int64 += cnt;
+      } else {
+        memcpy(dst, src, n * row->w_out);
       }
+    } else {
+      memcpy(dst, src, n * row->w_out);
     }
     break;
   ARROW_CVT_WIDEN(MIZU_CVT_I8_INT, int8_t, 1, int32_t, 4, (int32_t) v)
@@ -247,26 +286,39 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
   return w;
 }
 
-/* The masked variant (Arrow nulls): word-wise over the validity bitmap —
-   an all-ones word a 64-lane convert, a zero word a 64-sentinel fill,
-   mixed the per-lane select. off is the element offset: a bit offset
-   into the bitmap (the word reads absorb it). Genuine sentinel values
-   are counted on the int32 and int64 identity rows (they read as
-   NA_integer_ / NA_integer64_ in R) inside cvt_run's fused copy; the
-   other rows cannot produce one. */
+/* The masked variant (Arrow nulls): word-wise over the validity bitmap,
+   run-coalesced — consecutive all-ones words accumulate into one convert,
+   consecutive zero words into one sentinel fill, and the per-lane select
+   survives only at mixed words. A 64-lane-at-a-time convert caps the copy
+   width at 512 bytes, which loses memcpy's non-temporal path on multi-MB
+   columns (an all-valid masked column is the common shape: Arrow null_count
+   "unknown" forces the masked path with no nulls in it). off is the
+   element offset: a bit offset into the bitmap (the word reads absorb
+   it). Genuine sentinel values are counted on the int32 and int64
+   identity rows (they read as NA_integer_ / NA_integer64_ in R) inside
+   cvt_run's fused copy; the other rows cannot produce one. */
 static void convert_masked(uint8_t *dst, const uint8_t *src,
                            const uint8_t *valid, uint64_t off, size_t n,
                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   const size_t wo = row->w_out, wi = row->w_in;
   size_t i = 0;
   while (i < n) {
-    size_t lanes = n - i < 64 ? n - i : 64;
-    uint64_t w = bitmap_word(valid, off + i, lanes);
-    uint64_t full = arrow_lanes_mask(lanes);
-    if (w == full) {
-      cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
-    } else if (w == 0) {
-      cvt_fill_na(dst + i * wo, lanes, row->wire);
+    const size_t lanes = n - i < 64 ? n - i : 64;
+    const uint64_t w = bitmap_word(valid, off + i, lanes);
+    if (w == 0 || w == arrow_lanes_mask(lanes)) {
+      const int is_valid = w != 0;
+      size_t run = lanes;
+      while (i + run < n) {
+        const size_t l2 = n - (i + run) < 64 ? n - (i + run) : 64;
+        const uint64_t w2 = bitmap_word(valid, off + i + run, l2);
+        if (is_valid ? w2 != arrow_lanes_mask(l2) : w2 != 0) break;
+        run += l2;
+      }
+      if (is_valid)
+        cvt_run(dst + i * wo, src + i * wi, run, row, warn);
+      else
+        cvt_fill_na(dst + i * wo, run, row->wire);
+      i += run;
     } else {
       for (size_t j = 0; j < lanes; j++) {
         if ((w >> j) & 1) {
@@ -275,8 +327,8 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
           cvt_fill_na(dst + (i + j) * wo, 1, row->wire);
         }
       }
+      i += lanes;
     }
-    i += lanes;
   }
 }
 

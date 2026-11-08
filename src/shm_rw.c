@@ -19,6 +19,14 @@
    (16 KiB pages on arm64 macOS take four stores). */
 #define MIZU_TOUCH_STRIDE 4096
 
+/* View-open prefault gate (Linux): a bulk view (a pool task argument, a
+   frame's columns) is read in full, and demand faulting there is a soft
+   fault per page — 2,048 per 8 MB — where one MADV_POPULATE_READ installs
+   the PTEs. Below the gate the mapping stays lazy: a partial read (a
+   list-tree view's extracted elements) never pays for untouched pages,
+   and the demand-fault total is bounded at 256 pages. */
+#define MIZU_VIEW_PREFAULT_MIN ((size_t) 1 << 20)
+
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
@@ -306,6 +314,15 @@ mizu_status mizu_shm_open_view_flags(mizu_shm **out, const char *name,
   if (size > (size_t) pagesz)
     (void) mprotect((unsigned char *) shm->addr + pagesz, size - pagesz,
                     PROT_READ);
+#if defined(__linux__)
+  /* Prefault the read-only tail past the gate (MIZU_VIEW_PREFAULT_MIN):
+     bulk readers skip the per-page fault loop. Any failure (EINVAL on a
+     pre-5.14 kernel) leaves the mapping lazy — an optimization, never a
+     failure mode. Page 0 sits out: the counted add faults it RW anyway. */
+  if (size >= MIZU_VIEW_PREFAULT_MIN && size > (size_t) pagesz)
+    (void) madvise((unsigned char *) shm->addr + pagesz, size - pagesz,
+                   MADV_POPULATE_READ);
+#endif
 #endif
   if (!(flags & MIZU_OPEN_VIEW_NOCOUNT))
     atomic_fetch_add_explicit(mizu_zc_rc(shm->addr), 1, memory_order_acq_rel);

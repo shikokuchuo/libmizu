@@ -1600,6 +1600,37 @@ static void test_cvt_kernels(void) {
   assert(mizu_cvt_for_arrow("L")->wire == MIZU_TYPE_INT64);
 }
 
+/* Run-coalescing across every word class: a two-word valid run, a
+   two-word null run, a mixed word (the per-lane select), and a short
+   all-valid tail. Genuine sentinels count on valid lanes only, wherever
+   the run boundaries fall. */
+static void test_cvt_masked_runs(void) {
+  const mizu_cvt_row *i32 = mizu_cvt_for_arrow("i");
+  enum { N = 330 };
+  int32_t src[N];
+  for (int i = 0; i < N; i++) src[i] = i;
+  src[5] = src[257] = src[325] = INT32_MIN;   /* valid lanes: count */
+  src[200] = src[258] = INT32_MIN;            /* null lanes: no count */
+  uint8_t bm[(N + 7) / 8];
+  memset(bm, 0xFF, 16);                       /* lanes 0..127 valid */
+  memset(bm + 16, 0, 16);                     /* lanes 128..255 null */
+  memset(bm + 32, 0x55, 8);                   /* lanes 256..319 alternating */
+  bm[40] = 0xFF;                              /* lanes 320..327 valid */
+  bm[41] = 0x03;                              /* lanes 328..329 valid */
+  int32_t dst[N];
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+  mizu_cvt_convert((uint8_t *) dst, (const uint8_t *) src, bm, 0, N, i32,
+                   &warn);
+  assert(warn.n_intmin == 3);
+  assert(dst[0] == 0 && dst[5] == INT32_MIN && dst[127] == 127);
+  assert(dst[128] == MIZU_NA_INT32 && dst[200] == MIZU_NA_INT32 &&
+         dst[255] == MIZU_NA_INT32);
+  assert(dst[256] == 256 && dst[257] == INT32_MIN &&
+         dst[258] == MIZU_NA_INT32 && dst[319] == MIZU_NA_INT32);
+  assert(dst[320] == 320 && dst[325] == INT32_MIN && dst[329] == 329);
+}
+
 /* Open-time declines the frame tests have no shape for. */
 static void test_open_declines2(void) {
   ArrowSchema cx, lv, root;
@@ -2808,6 +2839,7 @@ int main(void) {
   test_short_formats();
   test_struct_batch_shape();
   test_cvt_kernels();
+  test_cvt_masked_runs();
   test_open_declines2();
   test_rows_bound();
   test_dict_widths();
