@@ -8,6 +8,12 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ## [Unreleased]
 
+### Added
+
+- `mizu_pool_collect_terminal` (binding-author tier): a batch collect
+  for event-driven drains that claims every terminal task in a set in
+  one call, skipping tasks still in flight.
+
 ### Changed
 
 - Much faster conversions of large nullable Arrow columns.

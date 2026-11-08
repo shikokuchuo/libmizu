@@ -681,6 +681,27 @@ MIZU_API mizu_status mizu_pool_notify_unwatch(mizu_pool *);
 MIZU_API mizu_status mizu_pool_task_notify(mizu_pool *, const mizu_task *,
                                         size_t n, int on);
 
+// Batch collect (pool.c) ----------------------------------------------------------
+
+/** The event-driven drain's batch collect: mizu_pool_collect's claim half
+   over a task set, never parking, the per-task checks (handle, submitter
+   slot, deferred drain, owner-death probe) hoisted to once per batch.
+   values_out[i] receives each terminal task's outcome (owned, as
+   collect's), or NULL for a live slot (a take-back to RUNNING included);
+   *count_out the number collected. The first item whose collect fails
+   ends the batch: MIZU_ERR with the failure on the handle, *fail_out the
+   item's index, *count_out the consumed prefix; items past it are
+   unprobed. The caller surfaces the failure from the handle record or
+   its binding state and resumes past the item; a failure the read hook
+   did not consume leaves the slot terminal for that later collect.
+   count_out and fail_out may be NULL. n == 0 is MIZU_OK with count 0.
+   Same threading discipline as mizu_pool_collect. */
+MIZU_API mizu_status mizu_pool_collect_terminal(mizu_pool *,
+                                             const mizu_task *, size_t n,
+                                             void **values_out,
+                                             size_t *count_out,
+                                             size_t *fail_out);
+
 // Liveness lock (liveness.c) ---------------------------------------------------
 
 /** Exclusive flock (POSIX) / LockFileEx (Windows) held for a process's

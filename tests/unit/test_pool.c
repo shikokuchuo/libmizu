@@ -1154,6 +1154,82 @@ static void test_collect_all(void) {
   puts("ok collect_all");
 }
 
+/* Batch collect: terminal items claimed in input order, live items
+   skipped, the first failure ending the batch at its index. */
+static void test_collect_terminal(void) {
+  pool_pair(1, 1, 8, 64, 64, 64, 512);
+  mizu_task t1 = submit_bytes(ctrl, "a", 1);
+  mizu_task t2 = submit_bytes(ctrl, "bb", 2);
+  mizu_task t3 = submit_bytes(ctrl, "ccc", 3);
+  mizu_task t4 = submit_bytes(ctrl, "dddd", 4);
+  mizu_task ts[4] = { t1, t2, t3, t4 };
+  void *vals[4] = { NULL, NULL, NULL, NULL };
+  size_t count = 99, fail = 99;
+
+  /* nothing published: the whole batch skips */
+  assert(mizu_pool_collect_terminal(ctrl, ts, 4, vals, &count, &fail) ==
+         MIZU_OK);
+  assert(count == 0 && fail == 99);
+  for (int i = 0; i < 4; i++) assert(vals[i] == NULL);
+
+  /* n == 0 is a no-op */
+  assert(mizu_pool_collect_terminal(ctrl, ts, 0, vals, &count, &fail) ==
+         MIZU_OK);
+  assert(count == 0);
+
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);
+
+  /* the terminal prefix collects, the live tail skips */
+  assert(mizu_pool_collect_terminal(ctrl, ts, 4, vals, &count, &fail) ==
+         MIZU_OK);
+  assert(count == 2 && fail == 99);
+  mizu_bytes *b = vals[0];
+  assert(b->len == 1 && memcmp(b->data, "a", 1) == 0);
+  mizu_bytes_free(b);
+  b = vals[1];
+  assert(b->len == 2 && memcmp(b->data, "bb", 2) == 0);
+  mizu_bytes_free(b);
+  assert(vals[2] == NULL && vals[3] == NULL);
+
+  /* a stale handle ends the batch at its index, the prefix consumed */
+  mizu_task t5 = submit_bytes(ctrl, "e", 1);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* t3 */
+  mizu_task ts2[3] = { t3, t1, t5 };
+  void *vals2[3] = { NULL, NULL, NULL };
+  assert(mizu_pool_collect_terminal(ctrl, ts2, 3, vals2, &count, &fail) ==
+         MIZU_ERR);
+  assert(fail == 1 && count == 1);
+  assert(mizu_pool_errcat(ctrl) == MIZU_ERRCAT_OTHER);
+  /* FREE unrecommitted reads "already collected", recommitted
+     "...or invalidated" — either is the stale-handle record */
+  b = vals2[0];
+  assert(b->len == 3 && memcmp(b->data, "ccc", 3) == 0);
+  mizu_bytes_free(b);
+  assert(vals2[2] == NULL);   /* unprobed past the failure */
+
+  /* a cancelled task is terminal but its claim fails (the bytes read of
+     a non-OK outcome): same stop, resumable past it */
+  assert(mizu_pool_cancel(ctrl, &t4) == 1);
+  mizu_task ts3[2] = { t4, t5 };
+  void *vals3[2] = { NULL, NULL };
+  assert(mizu_pool_collect_terminal(ctrl, ts3, 2, vals3, &count, &fail) ==
+         MIZU_ERR);
+  assert(fail == 0 && count == 0);
+  assert(strcmp(mizu_pool_error(ctrl),
+                "task cancelled or pool stopped") == 0);
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* t4: claims, skips */
+  assert(mizu_pool_step(wk, 0) == MIZU_STEP_TASK);   /* t5 */
+  assert(mizu_pool_collect_terminal(ctrl, &ts3[1], 1, vals3, &count,
+                                   &fail) == MIZU_OK);
+  assert(count == 1);
+  b = vals3[0];
+  assert(b->len == 1 && memcmp(b->data, "e", 1) == 0);
+  mizu_bytes_free(b);
+  pool_end();
+  puts("ok collect_terminal");
+}
+
 /* info/dump/tasks snapshots: wire-state reads plus the handle-local
    counters. */
 static void test_introspection(void) {
@@ -4686,6 +4762,7 @@ int main(void) {
 #endif
   test_collect_any();
   test_collect_all();
+  test_collect_terminal();
   test_introspection();
   test_map_support();
   test_ledger_key_kinds();

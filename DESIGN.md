@@ -758,6 +758,8 @@ A full deque runs the task inline.
 A worker blocked in a nested collect helps (executes or steals) instead of sleeping.
 A task error never crosses as the caught condition itself.
 The ERR publish carries the flattened envelope of the binding, framed so that the publish cannot raise: fail the task, never the worker.
+The event-driven drain's batch collect (`mizu_pool_collect_terminal`, ext tier) is the collect claim half applied across a task set with the wait loop's per-task checks hoisted to once per batch; it never parks.
+A live slot is skipped (a take-back to RUNNING under the claim included), a terminal slot is claimed exactly as a zero-timeout collect claims it, and the first per-item failure ends the batch at that index with the consumed prefix returned — the channel batch's discipline, so a binding's drain surfaces one failure and resumes past it.
 
 ## ABI discipline
 

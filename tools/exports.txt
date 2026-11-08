@@ -124,6 +124,7 @@ mizu_pool_collect
 mizu_pool_collect_all
 mizu_pool_collect_all_fn
 mizu_pool_collect_any
+mizu_pool_collect_terminal
 mizu_pool_create
 mizu_pool_deque_pull
 mizu_pool_destroy
