@@ -310,7 +310,10 @@ static void test_pool_announce_probe(void) {
   assert(w >= 0);
   if (w == 0) run_pool_worker();
 
-  enum { N = 60000 };
+  /* Enough rounds that the publish-beats-probe window still surfaces on a
+     loaded runner (its CI failures fired well inside 10k), few enough to
+     keep the integration leg in minutes — 60k rounds ran 7-10 min. */
+  enum { N = 6000 };
   mizu_bytes msg = { (void *) "t", 1 };
   for (int i = 0; i < N; i++) {
     mizu_task t;
