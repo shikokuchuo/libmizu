@@ -102,7 +102,9 @@ $(function(){initNavTree('md_CHANGELOG.html','',''); });
 <h2 class="doxsection"><a class="anchor" id="autotoc_md34"></a>
 Changed</h2>
 <ul>
-<li>Faster masked conversions of int32 and int64 Arrow columns.</li>
+<li>Much faster conversions of large nullable Arrow columns.</li>
+<li>Faster conversions of large int32 and int64 Arrow columns.</li>
+<li>Faster first reads of large zero-copy views on Linux.</li>
 </ul>
 <h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
 Fixed</h2>
