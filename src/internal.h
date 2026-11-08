@@ -448,6 +448,11 @@ typedef struct mizu_spill_fl_s {
   uint64_t tick;
   size_t   total;
   uint32_t n;
+  /* one over-cap region (size > MIZU_SPILL_FL_BYTES) retained against a
+     same-class relay re-stage, outside the list accounting. Newest
+     insert wins. */
+  mizu_shm *large;
+  size_t   large_size;
   int      last_reused;               /* whether the last pop hit */
   uint64_t hits;                      /* process-local, dump-only */
   mizu_shm *led_regions[MIZU_LEDGER_MAX];  /* lent: views outstanding */

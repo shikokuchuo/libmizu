@@ -234,13 +234,16 @@ int main(void) {
   mizu_ledger_sweep(&h.fl, 2);              /* wraps to r[2], r[3] */
   assert(h.fl.led_n == 2 && h.fl.n == n0 + 2);
 
-  /* free-list caps: a region past the byte cap is destroyed, not listed */
+  /* free-list caps: a region past the byte cap rides the one large slot */
   mizu_shm *big = NULL;
   assert(mizu_shm_create_heap(&big, MIZU_SPILL_FL_BYTES + 4096) ==
          MIZU_ERRCAT_NONE);
   uint32_t n_before = h.fl.n;
   mizu_spill_fl_insert(&h.fl, big);
-  assert(h.fl.n == n_before);
+  assert(h.fl.n == n_before && h.fl.large == big &&
+         h.fl.large_size == MIZU_SPILL_FL_BYTES + 4096);
+  mizu_spill_fl_teardown(&h, &h.fl);
+  assert(h.fl.large == NULL && h.fl.n == 0);
 
   /* open cache: store, hit, LRU eviction at capacity, teardown. The
      cache owns its mappings (evict/teardown closes them), so store
@@ -483,6 +486,34 @@ int main(void) {
   assert(h.fl.lent_bytes == (MIZU_LEDGER_MAX + 1) * MIZU_SPILL_FL_FLOOR);
   mizu_spill_fl_teardown(&h, &h.fl);           /* the deferred name dies here */
   assert(h.fl.dropped_n == 0 && h.fl.dropped == NULL);
+
+  /* the large slot: retained for a same-class relay re-stage; smaller
+     pops never steal it, a larger insert replaces it */
+  handle_reset();
+  size_t bign = MIZU_SPILL_FL_BYTES + (1u << 20);
+  mizu_shm *L = mizu_spill_region_get(&h.fl, bign);
+  assert(L != NULL && L->size == bign && !h.fl.last_reused);
+  mizu_stage_rollback(&h);
+  assert(h.fl.n == 0 && h.fl.large == L && h.fl.large_size == bign);
+
+  mizu_shm *sm = mizu_spill_region_get(&h.fl, 100);
+  assert(sm != NULL && sm != L && sm->size == MIZU_SPILL_FL_FLOOR);
+  assert(h.fl.large == L);                     /* not stolen by the small pop */
+  mizu_stage_rollback(&h);
+  assert(h.fl.n == 1 && h.fl.large == L);
+
+  mizu_shm *L2 = mizu_spill_region_get(&h.fl, bign);
+  assert(L2 == L && h.fl.last_reused && h.fl.large == NULL);
+  mizu_stage_rollback(&h);
+  assert(h.fl.large == L);
+
+  mizu_shm *L3 = mizu_spill_region_get(&h.fl, bign + (1u << 20));
+  assert(L3 != NULL && L3 != L && !h.fl.last_reused);
+  mizu_stage_rollback(&h);
+  assert(h.fl.large == L3 && h.fl.large_size == bign + (1u << 20));
+
+  mizu_spill_fl_teardown(&h, &h.fl);
+  assert(h.fl.large == NULL && h.fl.large_size == 0 && h.fl.n == 0);
 
   /* a zero-length region name is gone, never opened */
   handle_reset();
