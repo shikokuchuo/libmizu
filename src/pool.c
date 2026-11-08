@@ -4000,6 +4000,65 @@ again:
   return MIZU_OK;
 }
 
+/* The event-driven drain's batch collect: mizu_pool_collect's claim half
+   over a task set, never parking. A live slot is skipped (a take-back to
+   RUNNING included); a terminal one is claimed as a zero-timeout collect
+   claims it. The first per-item failure ends the batch at that index,
+   the prefix consumed (the channel batch's discipline); a failure the
+   read hook did not consume leaves the slot terminal for a later
+   collect. */
+mizu_status mizu_pool_collect_terminal(mizu_pool *p, const mizu_task *tasks,
+                                       size_t n, void **values_out,
+                                       size_t *count_out, size_t *fail_out) {
+  if (pool_get(p) == NULL) return MIZU_ERR;
+  if (!pool_split_waiter(p)) pool_deferred_drain(p);
+  if (p->sub_slot < 0) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "not a submitter's task handle");
+    return MIZU_ERR;
+  }
+  if (n > 0 && (tasks == NULL || values_out == NULL)) {
+    mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                   "expected a task array and a values array");
+    return MIZU_ERR;
+  }
+  if (atomic_load_explicit(&p->owner_dead, memory_order_acquire) != 0)
+    pool_orphan_teardown_try(p);
+  size_t count = 0, i = 0;
+  if (n > 0) memset(values_out, 0, n * sizeof *values_out);
+  for (i = 0; i < n; i++) {
+    const uint32_t idx = mizu_task_rs_index(&tasks[i]);
+    if (idx >= p->hdr.result_slots) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER, "invalid task handle");
+      goto fail;
+    }
+    mizu_rs_hdr *rs = pool_rs(p, idx);
+    /* one load serves both pre-checks, seq first: a stale word naming a
+       live recommitted slot fails here rather than skipping */
+    const uint64_t cur = rs_load(rs);
+    if (!pool_word_match(cur, mizu_task_seq(&tasks[i]))) {
+      mizu_err_record(&p->h, MIZU_ERRCAT_OTHER,
+                     "task handle already collected or invalidated");
+      goto fail;
+    }
+    if (mizu_rs_live(mizu_rs_st(cur))) continue;
+    int taken_back;
+    void *v = pool_rs_claim(p, rs, idx, mizu_task_seq(&tasks[i]),
+                            &taken_back);
+    if (v == NULL) {
+      if (taken_back) continue;   /* the rival's take-back won: it runs */
+      goto fail;                  /* the claim recorded it */
+    }
+    values_out[i] = v;
+    count++;
+  }
+  if (count_out != NULL) *count_out = count;
+  return MIZU_OK;
+fail:
+  if (count_out != NULL) *count_out = count;
+  if (fail_out != NULL) *fail_out = i;
+  return MIZU_ERR;
+}
+
 /* The collect-any predicate: the first handle (input order) whose slot
    reached a terminal state. OK, ERR, DIED, and CANCEL all report — a
    cancelled task is "done", as in asyncio's FIRST_COMPLETED. */

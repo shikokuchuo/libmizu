@@ -682,6 +682,9 @@ One uncommitted checkout (region plus pin) rides `fl->staging*`.
 It rolls back at the next verb entry or at teardown, so a mid-stage abandon never leaks.
 
 The free list of the producer recycles retired regions: power-of-two size classes, per-class and total-byte caps, largest-oldest eviction.
+One region past the total-byte cap is kept in a dedicated large slot, outside the list accounting.
+The newest insert wins the slot, and only an over-cap request pops it.
+A relay that re-stages the same large size then reuses the region instead of paying a fresh create per send.
 Steady-state spill traffic creates and unlinks no regions.
 An SHM_VEC region recycles only after its zc refcount reaches zero.
 A nonzero region waits in the lent-region ledger.
@@ -758,6 +761,11 @@ A full deque runs the task inline.
 A worker blocked in a nested collect helps (executes or steals) instead of sleeping.
 A task error never crosses as the caught condition itself.
 The ERR publish carries the flattened envelope of the binding, framed so that the publish cannot raise: fail the task, never the worker.
+The batch collect (`mizu_pool_collect_terminal`, ext tier) serves event-driven drains.
+It claims every terminal task in a set in one call and never parks.
+A live slot is skipped, including a slot the reaper takes back to RUNNING.
+A terminal slot is claimed exactly as a zero-timeout collect claims it.
+The first failing item ends the batch at that index and returns the consumed prefix, as with the channel batch: the caller reports the failure and resumes past it.
 
 ## ABI discipline
 

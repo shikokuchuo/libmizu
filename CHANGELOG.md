@@ -8,11 +8,18 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ## [Unreleased]
 
+### Added
+
+- `mizu_pool_collect_terminal` (binding-author tier): collect every
+  terminal task in a set in one call, never parking.
+
 ### Changed
 
 - Much faster conversions of large nullable Arrow columns.
 - Faster conversions of large int32 and int64 Arrow columns.
 - Faster first reads of large zero-copy views on Linux.
+- Repeated sends of a payload larger than 64 MB no longer create a fresh
+  shared-memory region per send.
 
 ### Fixed
 

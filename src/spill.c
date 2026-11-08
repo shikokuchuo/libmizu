@@ -71,13 +71,40 @@ static size_t spill_round(size_t n) {
   return c;
 }
 
+/* The Linux create/insert collapse applied to one retained region. */
+static void spill_collapse(mizu_shm *shm) {
+#if defined(__linux__)
+  /* Collapse a proved-reusable region to huge pages (Linux >= 6.1): on
+     stock Linux shmem THP is off, so the create-time MADV_HUGEPAGE is
+     inert and a reused region would stay on 4 KiB pages forever. At
+     insert — not create — so only regions that completed a consumer-done
+     cycle pay; under zc churn lent regions never reach here. The
+     extent-aligned mapping passes the congruence gate; the length still
+     rounds down to whole extents (a partial tail EINVALs the call).
+     Benign on failure. Skipped once the mapping is known huge (the
+     create-time collapse already succeeded, or an earlier insert's did):
+     the folios persist for the mapping's life, so a re-collapse would be
+     a redundant scan per cycle. */
+  if (shm->size >= MIZU_HUGE_EXTENT && !shm->collapsed &&
+      madvise(shm->addr, shm->size & ~(MIZU_HUGE_EXTENT - 1),
+              MADV_COLLAPSE) == 0)
+    shm->collapsed = 1;
+#else
+  (void) shm;
+#endif
+}
+
 /* The free-list insert under the size-class and total-byte caps (evicting
-   largest-oldest), shared by keeper releases and the ledger sweep. A
-   region that doesn't fit is closed + unlinked in place. */
+   largest-oldest), shared by keeper releases and the ledger sweep. An
+   over-cap region rides the one large slot (newest wins) for a
+   same-class relay re-stage; anything else that doesn't fit is closed +
+   unlinked in place. */
 void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
   size_t size = shm->size;
   if (size > MIZU_SPILL_FL_BYTES) {
-    mizu_region_destroy(shm);
+    mizu_region_destroy(fl->large);
+    fl->large = shm;
+    spill_collapse(shm);
     return;
   }
   int cls = 0, slot = -1;
@@ -114,42 +141,37 @@ void mizu_spill_fl_insert(mizu_spill_fl *fl, mizu_shm *shm) {
   fl->stamp[slot] = ++fl->tick;
   fl->total += size;
   fl->n++;
-#if defined(__linux__)
-  /* Collapse a proved-reusable region to huge pages (Linux >= 6.1): on
-     stock Linux shmem THP is off, so the create-time MADV_HUGEPAGE is
-     inert and a reused region would stay on 4 KiB pages forever. At
-     insert — not create — so only regions that completed a consumer-done
-     cycle pay; under zc churn lent regions never reach here. The
-     extent-aligned mapping passes the congruence gate; the length still
-     rounds down to whole extents (a partial tail EINVALs the call).
-     Benign on failure. Skipped once the mapping is known huge (the
-     create-time collapse already succeeded, or an earlier insert's did):
-     the folios persist for the mapping's life, so a re-collapse would be
-     a redundant scan per cycle. */
-  if (size >= MIZU_HUGE_EXTENT && !shm->collapsed &&
-      madvise(shm->addr, size & ~(MIZU_HUGE_EXTENT - 1),
-              MADV_COLLAPSE) == 0)
-    shm->collapsed = 1;
-#endif
+  spill_collapse(shm);
 }
 
-/* Smallest entry with size >= n, removed from the list. A miss runs a
-   full ledger sweep (zero-count lent regions rejoin here) and retries
-   once — the free-list-miss full sweep of the release protocol. */
+/* Smallest entry with size >= n, removed from the list — an over-cap
+   request instead takes the one large slot (the insert gate keeps
+   over-cap regions off the list, so the scan cannot serve one). A miss
+   runs a full ledger sweep (zero-count lent regions rejoin here) and
+   retries once — the free-list-miss full sweep of the release protocol. */
 static mizu_shm *spill_fl_pop(mizu_spill_fl *fl, size_t n) {
   for (int attempt = 0; attempt < 2; attempt++) {
-    int best = -1;
-    for (int i = 0; i < MIZU_SPILL_FL_MAX; i++) {
-      if (fl->size[i] < n || fl->size[i] == 0) continue;
-      if (best < 0 || fl->size[i] < fl->size[best]) best = i;
-    }
-    if (best >= 0) {
-      mizu_shm *shm = fl->regions[best];
-      fl->regions[best] = NULL;
-      fl->total -= fl->size[best];
-      fl->size[best] = 0;
-      fl->n--;
-      return shm;
+    if (n > MIZU_SPILL_FL_BYTES) {
+      /* a smaller stage never steals the slot from a same-class relay */
+      if (fl->large != NULL && fl->large->size >= n) {
+        mizu_shm *shm = fl->large;
+        fl->large = NULL;
+        return shm;
+      }
+    } else {
+      int best = -1;
+      for (int i = 0; i < MIZU_SPILL_FL_MAX; i++) {
+        if (fl->size[i] < n || fl->size[i] == 0) continue;
+        if (best < 0 || fl->size[i] < fl->size[best]) best = i;
+      }
+      if (best >= 0) {
+        mizu_shm *shm = fl->regions[best];
+        fl->regions[best] = NULL;
+        fl->total -= fl->size[best];
+        fl->size[best] = 0;
+        fl->n--;
+        return shm;
+      }
     }
     if (attempt > 0 || fl->led_n == 0) break;
     mizu_ledger_sweep(fl, MIZU_LEDGER_MAX);
@@ -356,6 +378,8 @@ void mizu_spill_fl_teardown(mizu_handle *h, mizu_spill_fl *fl) {
   }
   fl->n = 0;
   fl->total = 0;
+  mizu_region_destroy(fl->large);
+  fl->large = NULL;
   for (int i = 0; i < MIZU_LEDGER_MAX; i++) {
     mizu_region_destroy(fl->led_regions[i]);
     fl->led_regions[i] = NULL;
