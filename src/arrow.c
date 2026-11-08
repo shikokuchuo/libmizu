@@ -247,26 +247,39 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
   return w;
 }
 
-/* The masked variant (Arrow nulls): word-wise over the validity bitmap —
-   an all-ones word a 64-lane convert, a zero word a 64-sentinel fill,
-   mixed the per-lane select. off is the element offset: a bit offset
-   into the bitmap (the word reads absorb it). Genuine sentinel values
-   are counted on the int32 and int64 identity rows (they read as
-   NA_integer_ / NA_integer64_ in R) inside cvt_run's fused copy; the
-   other rows cannot produce one. */
+/* The masked variant (Arrow nulls): word-wise over the validity bitmap,
+   run-coalesced — consecutive all-ones words accumulate into one convert,
+   consecutive zero words into one sentinel fill, and the per-lane select
+   survives only at mixed words. A 64-lane-at-a-time convert caps the copy
+   width at 512 bytes, which loses memcpy's non-temporal path on multi-MB
+   columns (an all-valid masked column is the common shape: Arrow null_count
+   "unknown" forces the masked path with no nulls in it). off is the
+   element offset: a bit offset into the bitmap (the word reads absorb
+   it). Genuine sentinel values are counted on the int32 and int64
+   identity rows (they read as NA_integer_ / NA_integer64_ in R) inside
+   cvt_run's fused copy; the other rows cannot produce one. */
 static void convert_masked(uint8_t *dst, const uint8_t *src,
                            const uint8_t *valid, uint64_t off, size_t n,
                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
   const size_t wo = row->w_out, wi = row->w_in;
   size_t i = 0;
   while (i < n) {
-    size_t lanes = n - i < 64 ? n - i : 64;
-    uint64_t w = bitmap_word(valid, off + i, lanes);
-    uint64_t full = arrow_lanes_mask(lanes);
-    if (w == full) {
-      cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
-    } else if (w == 0) {
-      cvt_fill_na(dst + i * wo, lanes, row->wire);
+    const size_t lanes = n - i < 64 ? n - i : 64;
+    const uint64_t w = bitmap_word(valid, off + i, lanes);
+    if (w == 0 || w == arrow_lanes_mask(lanes)) {
+      const int is_valid = w != 0;
+      size_t run = lanes;
+      while (i + run < n) {
+        const size_t l2 = n - (i + run) < 64 ? n - (i + run) : 64;
+        const uint64_t w2 = bitmap_word(valid, off + i + run, l2);
+        if (is_valid ? w2 != arrow_lanes_mask(l2) : w2 != 0) break;
+        run += l2;
+      }
+      if (is_valid)
+        cvt_run(dst + i * wo, src + i * wi, run, row, warn);
+      else
+        cvt_fill_na(dst + i * wo, run, row->wire);
+      i += run;
     } else {
       for (size_t j = 0; j < lanes; j++) {
         if ((w >> j) & 1) {
@@ -275,8 +288,8 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
           cvt_fill_na(dst + (i + j) * wo, 1, row->wire);
         }
       }
+      i += lanes;
     }
-    i += lanes;
   }
 }
 
