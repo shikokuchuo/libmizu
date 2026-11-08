@@ -10,7 +10,9 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ### Changed
 
-- Faster masked conversions of int32 and int64 Arrow columns.
+- Much faster conversions of large nullable Arrow columns.
+- Faster conversions of large int32 and int64 Arrow columns.
+- Faster first reads of large zero-copy views on Linux.
 
 ### Fixed
 
