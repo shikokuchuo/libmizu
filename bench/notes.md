@@ -156,20 +156,23 @@ Results (ms):
 ## 2026-11-10 — Arrow kernel speedups (5d8734c + working tree)
 
 Same host and shapes. Unknown-count resolution moved from the size pass to
-open: it now costs 0.128-0.187 ms there (dictionary 1.336 ms including index
+open: it now costs 0.129-0.191 ms there (dictionary 1.341 ms including index
 validation), while every unknown size row is below the clock precision. The
-1%-null numeric body rows are within about 2x of their null-free rows.
+1%-null numeric body rows are within about 2x of their null-free rows, and
+the 50%-null rows within about 4x. The dictionary bounds check consults
+validity only where a 64-lane word's range fails, so open does not depend
+on the null density.
 
 Results (ms):
 
 | column | open, null-free / 1% | body, null-free | body, unknown | body, 1% | body, 50% | body, all null |
 |---|---:|---:|---:|---:|---:|---:|
-| float64 copy | 0.000 / 0.000 | 1.158 | 1.071 | 1.643 | 7.174 | 2.016 |
-| int64 copy | 0.000 / 0.000 | 1.065 | 1.064 | 1.837 | 8.026 | 2.018 |
-| float32 widen | 0.000 / 0.000 | 1.342 | 1.363 | 1.674 | 7.473 | 2.020 |
-| date32 | 0.000 / 0.000 | 1.351 | 1.444 | 1.708 | 4.238 | 2.015 |
-| timestamp[us] | 0.000 / 0.000 | 1.960 | 1.871 | 2.478 | 5.209 | 2.036 |
-| dictionary, int32 index | 1.194 / 4.716 | 1.093 | 1.107 | 1.635 | 7.507 | 2.016 |
+| float64 copy | 0.000 / 0.000 | 1.193 | 1.050 | 1.554 | 2.871 | 2.017 |
+| int64 copy | 0.000 / 0.000 | 1.066 | 1.053 | 1.751 | 4.330 | 2.014 |
+| float32 widen | 0.000 / 0.000 | 1.346 | 1.363 | 1.621 | 3.108 | 2.017 |
+| date32 | 0.000 / 0.000 | 1.369 | 1.370 | 1.590 | 3.305 | 2.021 |
+| timestamp[us] | 0.000 / 0.000 | 1.874 | 1.917 | 2.391 | 4.146 | 2.023 |
+| dictionary, int32 index | 1.200 / 1.515 | 1.155 | 1.068 | 1.479 | 4.113 | 2.039 |
 
 Status: unit + ext + integration + fuzz (100k runs per harness, fuzzer+UBSan)
 green; interop corpus unchanged; export surface unchanged.

@@ -2227,6 +2227,27 @@ static void test_dict_masked_differential(void) {
   mizu_arrow *a = NULL;
   assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
+
+  /* with nulls in the batch: an out-of-range value in a null slot is
+     ignored, the same value in a valid slot of a mixed word declines */
+  enum { M = 70 };
+  int32_t mixed[M] = { 0 };
+  uint8_t mvalid[(M + 7) / 8];
+  memset(mvalid, 0xFF, sizeof mvalid);
+  test_set_bit(mvalid, 3, 0);
+  test_set_bit(mvalid, 67, 0);
+  mixed[3] = -1;
+  mixed[67] = 3;
+  const void *mixedcb[2] = { mvalid, mixed };
+  mk_schema(&cd, "i", "d", NULL, 0, &lv, 0);
+  mk_array(&ai, M, 2, 0, 2, mixedcb, NULL, &dict);
+  mk_array(&batch, M, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_OK);
+  mizu_arrow_close(a);
+  mixed[66] = 3;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
 }
 
 /* A dict column on a zero-batch stream stages as the empty factor; a
