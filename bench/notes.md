@@ -208,3 +208,39 @@ Results (ms, before → after):
 Status: null-free, unknown, 1% and all-null body rows within run-to-run
 noise (±5%). Unit + ext + integration + fuzz (100k runs per harness,
 fuzzer+UBSan) green; export surface unchanged.
+
+## 2026-11-10 — Arrow sentinel fill and validity rebuild follow-up (c6d4942)
+
+Same host and shapes; same-session A/B (best of five `bench_arrow`
+invocations before, ten after). Null-lane sentinel fills copy a replicated
+64-byte block instead of storing per lane (the per-lane loop stayed scalar);
+the rebuilt validity tail stores each batch's whole bytes directly — one
+memcpy when the source is byte-congruent with the destination, shifted
+words otherwise — instead of clearing nulls byte by byte; a 64-lane
+validity load at a bit offset is one word load plus the spill byte; unknown
+null counts take the plain word loads at any offset, after the head lanes
+up to a byte boundary.
+
+Results (ms, before → after):
+
+| row | before | after |
+|---|---:|---:|
+| body, all-null, float64 / int64 / float32 / date32 / timestamp | 2.015 | 0.631 |
+| body, all-null, dictionary | 2.017 | 0.393 |
+| frame, float64, two sliced batches, 1% | 2.026 | 1.417 |
+| frame, float64, two sliced batches, 50% | 2.765 | 2.093 |
+
+Not in `bench_arrow` (one-off harness over the same 8M rows): validity
+rebuild alone 0.681 → 0.019 (the frame row's shape) and 0.420 → 0.048
+(offset-0 batches, source bit-shifted against the destination); unknown
+count at bit offset 5, 0.447 → 0.013; float64 body, 1% random nulls at bit
+offset 5, 1.985 → 1.581.
+
+Tried and dropped: coalescing mixed validity words into one bounded convert
+run (5-20% slower on most masked rows), and a branchless select for dense
+8-byte lanes (random 50% nulls 7-13% faster, periodic 50% and random 10%
+20% slower).
+
+Status: all other rows within run-to-run noise (±5%). Unit + ext +
+integration + fuzz (100k runs per harness, fuzzer+UBSan) green; unit
+test_arrow also green under ASan+UBSan; export surface unchanged.
