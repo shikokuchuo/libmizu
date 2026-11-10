@@ -1,5 +1,5 @@
-/* Bench: Arrow open/classification and per-column body conversion kernels.
-   Hand-built one-column struct frames, one warmup and the best of seven
+/* Bench: Arrow open/classification, per-column body conversion kernels, and
+   a two-batch whole-frame write. Hand-built one-column struct frames, one warmup and the best of seven
    runs. Report-only (no timing asserts — runner timing is too variable);
    records are appended to bench/notes.md by hand with the commit SHA.
    `make bench`. */
@@ -225,6 +225,45 @@ static void bench_case(const struct column_case *c,
   mizu_arrow_close(a);
 }
 
+/* A whole-frame write of one float64 column split across two sliced
+   batches: the shape whose validity tail is rebuilt rather than copied. */
+static void bench_frame(const struct null_case *nc, uint8_t *data,
+                        uint8_t *validity) {
+  ArrowSchema child, root;
+  ArrowSchema *schema_children[1] = { &child };
+  mk_schema(&child, "g", "x", NULL, NULL);
+  mk_schema(&root, "+s", NULL, schema_children, NULL);
+  fill_values(&columns[0], data);
+  fill_validity(nc->kind, validity);
+  const int64_t len = NROWS / 2 - 3;
+  const void *buffers[2] = { validity, data };
+  ArrowArray array[2], batch[2];
+  ArrowArray *array_children[2][1] = { { &array[0] }, { &array[1] } };
+  for (int b = 0; b < 2; b++) {
+    mk_array(&array[b], len, -1, buffers, NULL, NULL);
+    array[b].offset = b == 0 ? 0 : 5;
+    mk_array(&batch[b], len, 0, NULL, array_children[b], NULL);
+  }
+  const ArrowArray *batches[2] = { &batch[0], &batch[1] };
+  mizu_arrow *a = NULL;
+  if (mizu_arrow_open(&a, &root, batches, 2, 0) != MIZU_OK)
+    fail("mizu_arrow_open failed before frame benchmark");
+  uint8_t *out = xmalloc(mizu_arrow_size(a));
+  double best = 0;
+  for (int run = 0; run <= NRUNS; run++) {
+    mizu_arrow_warn warn;
+    memset(&warn, 0, sizeof(warn));
+    double t0 = mizu_now();
+    mizu_arrow_write(a, out, &warn);
+    double elapsed = (mizu_now() - t0) * 1e3;
+    if (run != 0 && (run == 1 || elapsed < best)) best = elapsed;
+  }
+  printf("arrow_frame float64_copy   two_batches %-9s %7.3f ms\n", nc->name,
+         best);
+  free(out);
+  mizu_arrow_close(a);
+}
+
 int main(void) {
   uint8_t *data = xmalloc((size_t) NROWS * 8);
   uint8_t *validity = xmalloc((size_t) (NROWS + 7) / 8);
@@ -235,6 +274,8 @@ int main(void) {
   for (size_t i = 0; i < sizeof(columns) / sizeof(columns[0]); i++)
     for (size_t j = 0; j < sizeof(nulls) / sizeof(nulls[0]); j++)
       bench_case(&columns[i], &nulls[j], data, validity, out);
+  bench_frame(&nulls[2], data, validity);
+  bench_frame(&nulls[3], data, validity);
   free(out);
   free(validity);
   free(data);

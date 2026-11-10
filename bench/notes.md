@@ -153,7 +153,7 @@ Results (ms):
 | timestamp[us] | 0.000 / 0.000 | 1.941 | 3.454 | 5.494 | 6.294 | 4.952 | 4.058 |
 | dictionary, int32 index | 5.694 / 8.331 | 2.018 | 6.038 | 7.644 | 8.299 | 5.952 | 4.133 |
 
-## 2026-11-10 — Arrow kernel speedups (5d8734c + working tree)
+## 2026-11-10 — Arrow kernel speedups (e3099f2)
 
 Same host and shapes. Unknown-count resolution moved from the size pass to
 open: it now costs 0.129-0.191 ms there (dictionary 1.341 ms including index
@@ -176,3 +176,35 @@ Results (ms):
 
 Status: unit + ext + integration + fuzz (100k runs per harness, fuzzer+UBSan)
 green; interop corpus unchanged; export surface unchanged.
+
+## 2026-11-10 — Arrow open and dense-null follow-up (e3099f2 + working tree)
+
+Same host and shapes; before/after are same-session A/B runs (best of five
+or six `bench_arrow` invocations each), so compare within this table rather
+than against the absolute numbers above. The dictionary bounds check
+reduces in the index's own type and checks masked batches 4096 lanes at a
+time; unknown null counts resolve with plain word loads at a byte-aligned
+offset; dense mixed validity words count their valid lanes' sentinels
+directly and patch 4-byte lanes with a branchless select; the rebuilt
+validity tail (multi-batch or sliced frames) clears nulls a validity word
+at a time, measured by the new `arrow_frame` whole-frame row.
+
+Results (ms, before → after):
+
+| row | before | after |
+|---|---:|---:|
+| open, dictionary, null-free | 1.376 | 0.430 |
+| open, dictionary, 1% / 50% null | 1.710 / 1.728 | 0.441 / 0.433 |
+| open, unknown count (numeric rows) | 0.152 | 0.013 |
+| body, float64 copy, 50% | 3.072 | 2.105 |
+| body, int64 copy, 50% | 4.761 | 3.183 |
+| body, float32 widen, 50% | 3.449 | 2.821 |
+| body, date32, 50% | 3.465 | 2.859 |
+| body, timestamp[us], 50% | 4.646 | 3.576 |
+| body, dictionary, 50% | 4.607 | 3.635 |
+| frame, float64, two sliced batches, 1% | 5.960 | 1.938 |
+| frame, float64, two sliced batches, 50% | 9.069 | 2.624 |
+
+Status: null-free, unknown, 1% and all-null body rows within run-to-run
+noise (±5%). Unit + ext + integration + fuzz (100k runs per harness,
+fuzzer+UBSan) green; export surface unchanged.
