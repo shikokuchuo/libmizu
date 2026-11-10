@@ -2440,6 +2440,16 @@ MIZU_API mizu_status mizu_arrow_open(mizu_arrow **out,
                                      const ArrowArray *const *batches,
                                      size_t n_batches, uint32_t peer_caps);
 
+/** The bare-vector counterpart, for a binding's per-column writers over a
+   one-column struct wrapper. Classification and batch vetting are identical
+   to mizu_arrow_open, but the automatic frame row.names limit does not apply.
+   Use mizu_arrow_open for the whole-frame writers. */
+MIZU_API mizu_status mizu_arrow_open_vector(mizu_arrow **out,
+                                            const ArrowSchema *schema,
+                                            const ArrowArray *const *batches,
+                                            size_t n_batches,
+                                            uint32_t peer_caps);
+
 /** The per-column classification, for a binding's own emitters over the
    same batches (pymizu's inline frame forms). col shall be in range. */
 MIZU_API void mizu_arrow_col_info(const mizu_arrow *, int64_t col,

@@ -1570,9 +1570,9 @@ static uint64_t arrow_name_hash(const char *s) {
   return h;
 }
 
-mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
-                            const ArrowArray *const *batches,
-                            size_t n_batches, uint32_t peer_caps) {
+static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
+                              const ArrowArray *const *batches,
+                              size_t n_batches, uint32_t peer_caps, int frame) {
   *out = NULL;
   if (schema == NULL || schema->format == NULL ||
       strcmp(schema->format, "+s") != 0)
@@ -1667,7 +1667,7 @@ mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
   /* the root dict's automatic row.names are the compact c(NA, -n) int32
      form — past 2^31 rows the emit would wrap, and the inline 'I' form
      has no root-blob override to escape it */
-  if (a->rows > INT32_MAX) {
+  if (frame && a->rows > INT32_MAX) {
     mizu_arrow_close(a);
     return arrow_decline("an Arrow frame past the int32 row range has no "
                          "portable home");
@@ -1686,6 +1686,18 @@ fail_classify:
 fail:
   mizu_arrow_close(a);
   return MIZU_ERR;
+}
+
+mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
+                            const ArrowArray *const *batches,
+                            size_t n_batches, uint32_t peer_caps) {
+  return arrow_open(out, schema, batches, n_batches, peer_caps, 1);
+}
+
+mizu_status mizu_arrow_open_vector(mizu_arrow **out, const ArrowSchema *schema,
+                                   const ArrowArray *const *batches,
+                                   size_t n_batches, uint32_t peer_caps) {
+  return arrow_open(out, schema, batches, n_batches, peer_caps, 0);
 }
 
 void mizu_arrow_col_info(const mizu_arrow *a, int64_t col,

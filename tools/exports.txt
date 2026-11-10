@@ -3,6 +3,7 @@ mizu_arrow_col_blob
 mizu_arrow_col_body
 mizu_arrow_col_info
 mizu_arrow_open
+mizu_arrow_open_vector
 mizu_arrow_remote
 mizu_arrow_root_blob
 mizu_arrow_size

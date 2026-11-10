@@ -12,6 +12,8 @@ Versions carry an ABI contract: any wire-format change bumps
 
 - `mizu_pool_collect_terminal` (binding-author tier): collect every
   terminal task in a set in one call, never parking.
+- `mizu_arrow_open_vector` (binding-author tier): open a bare Arrow vector
+  without applying the frame's automatic-row.names row limit.
 
 ### Changed
 

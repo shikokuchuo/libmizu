@@ -545,7 +545,7 @@ The core owns the protocol bytes (the column classification, the batch vetting, 
 The ABI structs are the spec's, defined in `mizu_ext.h` under its two include guards: frozen ABI, no headers, no dependency.
 The writer borrows them: the schema and the batches pointer array are caller-owned and shall outlive the handle until `mizu_arrow_close`, and the writer reads them only inside the write.
 
-`mizu_arrow_open` classifies every column off the schema (a struct schema) and vets every batch before a byte is staged (buffer counts, offsets, null-count range, column lengths, unnamed or duplicate names, a zero-column frame), and validates the dictionaries: batch 0's levels canonical and stable across batches, every index range-checked.
+`mizu_arrow_open` classifies every column off the schema (a struct schema) and vets every batch before a byte is staged (buffer counts, offsets, null-count range, column lengths, unnamed or duplicate names, a zero-column frame), and validates the dictionaries: batch 0's levels canonical and stable across batches, every index range-checked. Its automatic `c(NA, -n)` row.names bound the whole-frame forms to `INT32_MAX` rows; `mizu_arrow_open_vector` is the same open for a binding's bare-vector per-column writers, without that frame-only bound.
 The column kinds:
 
 - **CVT**: a fixed-width column through its `mizu_cvt_row` (the conversion table below), the identity rows included.

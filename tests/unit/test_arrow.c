@@ -1716,7 +1716,7 @@ static void test_open_declines2(void) {
                 "invalid Arrow dictionary export") != NULL);
 }
 
-/* Dictionary index widths: every integer width signs and stages. */
+/* Automatic frame row.names stop at the int32 bound; bare vectors do not. */
 static void test_rows_bound(void) {
   /* the automatic row.names are the compact c(NA, -n) int32 form: past
      2^31 rows the open declines instead of wrapping the emit */
@@ -1736,6 +1736,11 @@ static void test_rows_bound(void) {
   mizu_arrow *a = NULL;
   assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "int32 row range") != NULL);
+
+  /* a bare vector has no automatic row.names and crosses past the bound */
+  assert(mizu_arrow_open_vector(&a, &root, batches, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_rows(a) == (int64_t) INT32_MAX + 1);
+  mizu_arrow_close(a);
 
   /* the sum across batches is bounded too */
   mk_array(&ax, INT32_MAX, 0, 0, 2, xb, NULL, NULL);
