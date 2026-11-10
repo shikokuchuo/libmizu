@@ -1,8 +1,8 @@
 # Recorded benchmark notes
 
 Dated performance records for libmizu's C bench suite (`make bench` —
-`bench_channel` and `bench_pool`). Report-only: nothing here is asserted
-against — runner timing is too variable for thresholds.
+`bench_channel`, `bench_pool` and `bench_arrow`). Report-only: nothing
+here is asserted against — runner timing is too variable for thresholds.
 
 Two parts: the best-known table below is the headline — swap a row's
 value in only when a run beats it, with the date of that measurement
@@ -134,3 +134,45 @@ Results:
 
 Status: all other rows inside the 2026-08-22/23 bands — no core
 regression.
+
+## 2026-11-10 — Arrow kernel baseline (5d8734c)
+
+Apple M4 Pro, macOS 27.2, arm64. New report-only `bench_arrow`: 8M rows,
+one batch, one warmup and the best of seven; open, size and body are timed
+separately. These are the pre-optimization records for the sparse-null,
+dictionary, popcount, temporal and open-overhead work.
+
+Results (ms):
+
+| column | open, null-free / 1% | size, unknown | body, null-free | body, unknown | body, 1% | body, 50% | body, all null |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| float64 copy | 0.000 / 0.000 | 2.385 | 1.176 | 1.272 | 13.862 | 12.540 | 2.027 |
+| int64 copy | 0.000 / 0.000 | 1.913 | 1.068 | 1.282 | 18.689 | 20.022 | 2.020 |
+| float32 widen | 0.000 / 0.000 | 2.051 | 1.404 | 1.560 | 9.717 | 8.863 | 2.015 |
+| date32 | 0.000 / 0.000 | 1.920 | 2.716 | 4.812 | 5.569 | 4.546 | 4.159 |
+| timestamp[us] | 0.000 / 0.000 | 1.941 | 3.454 | 5.494 | 6.294 | 4.952 | 4.058 |
+| dictionary, int32 index | 5.694 / 8.331 | 2.018 | 6.038 | 7.644 | 8.299 | 5.952 | 4.133 |
+
+## 2026-11-10 — Arrow kernel speedups (5d8734c + working tree)
+
+Same host and shapes. Unknown-count resolution moved from the size pass to
+open: it now costs 0.129-0.191 ms there (dictionary 1.341 ms including index
+validation), while every unknown size row is below the clock precision. The
+1%-null numeric body rows are within about 2x of their null-free rows, and
+the 50%-null rows within about 4x. The dictionary bounds check consults
+validity only where a 64-lane word's range fails, so open does not depend
+on the null density.
+
+Results (ms):
+
+| column | open, null-free / 1% | body, null-free | body, unknown | body, 1% | body, 50% | body, all null |
+|---|---:|---:|---:|---:|---:|---:|
+| float64 copy | 0.000 / 0.000 | 1.193 | 1.050 | 1.554 | 2.871 | 2.017 |
+| int64 copy | 0.000 / 0.000 | 1.066 | 1.053 | 1.751 | 4.330 | 2.014 |
+| float32 widen | 0.000 / 0.000 | 1.346 | 1.363 | 1.621 | 3.108 | 2.017 |
+| date32 | 0.000 / 0.000 | 1.369 | 1.370 | 1.590 | 3.305 | 2.021 |
+| timestamp[us] | 0.000 / 0.000 | 1.874 | 1.917 | 2.391 | 4.146 | 2.023 |
+| dictionary, int32 index | 1.200 / 1.515 | 1.155 | 1.068 | 1.479 | 4.113 | 2.039 |
+
+Status: unit + ext + integration + fuzz (100k runs per harness, fuzzer+UBSan)
+green; interop corpus unchanged; export surface unchanged.

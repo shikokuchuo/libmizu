@@ -83,6 +83,27 @@ static void raw(uint8_t *d, size_t off, const void *s, size_t n) {
   memcpy(d + off, s, n);
 }
 
+static uint64_t test_rng(uint64_t *state) {
+  uint64_t x = *state;
+  x ^= x >> 12;
+  x ^= x << 25;
+  x ^= x >> 27;
+  *state = x;
+  return x * UINT64_C(0x2545F4914F6CDD1D);
+}
+
+static int test_bit(const uint8_t *bm, size_t i) {
+  return (bm[i >> 3] >> (i & 7)) & 1;
+}
+
+static void test_set_bit(uint8_t *bm, size_t i, int value) {
+  const uint8_t bit = (uint8_t) (1u << (i & 7));
+  if (value)
+    bm[i >> 3] |= bit;
+  else
+    bm[i >> 3] &= (uint8_t) ~bit;
+}
+
 /* memmem, portable. */
 static const void *find_span(const void *hay, size_t hay_n, const void *ndl,
                              size_t ndl_n) {
@@ -674,6 +695,96 @@ static void test_null_count_forms(void) {
   mizu_arrow_close(a);
 }
 
+static void test_null_count_equivalence(void) {
+  enum { N = 149, MAX_OFF = 13 };
+  const int offsets[] = { 0, 1, 7, 8, 13 };
+  ArrowSchema ci, root;
+  ArrowSchema *kids[1] = { &ci };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  for (size_t o = 0; o < sizeof offsets / sizeof offsets[0]; o++) {
+    const int64_t off = offsets[o];
+    for (int form = 0; form < 3; form++) {
+      uint8_t valid[(N + MAX_OFF + 7) / 8];
+      int32_t x[N + MAX_OFF];
+      uint64_t rng = UINT64_C(0xD1B54A32D192ED03) ^ (uint64_t) off;
+      for (size_t i = 0; i < sizeof valid; i++)
+        valid[i] = form == 0 ? (uint8_t) test_rng(&rng) :
+          form == 1 ? 0xFF : 0;
+      for (int i = 0; i < N + MAX_OFF; i++) x[i] = 37 * i + 1;
+      x[off + 2] = x[off + 3] = INT32_MIN;
+      if (form == 0) {
+        test_set_bit(valid, (size_t) off + 2, 1);
+        test_set_bit(valid, (size_t) off + 3, 0);
+      }
+      int64_t nulls = 0;
+      for (int i = 0; i < N; i++)
+        nulls += !test_bit(valid, (size_t) (off + i));
+      const void *xb[2] = { valid, x };
+      ArrowArray ax, batch;
+      ArrowArray *bk[1] = { &ax };
+      mk_array(&ax, N, -1, off, 2, xb, NULL, NULL);
+      mk_array(&batch, N, 0, 0, 1, NULL, bk, NULL);
+      batch.n_children = 1;
+      const ArrowArray *batches[1] = { &batch };
+      size_t nu, ne;
+      mizu_arrow_warn wu, we;
+      mizu_arrow *au, *ae;
+      uint8_t *unknown = frame_write(&root, batches, 1, 0, &nu, &wu, &au);
+      ax.null_count = nulls;
+      uint8_t *explicit_count = frame_write(&root, batches, 1, 0, &ne,
+                                            &we, &ae);
+      assert(nu == ne && memcmp(unknown, explicit_count, nu) == 0);
+      assert(wu.n_range == we.n_range && wu.n_intmin == we.n_intmin &&
+             wu.n_int64 == we.n_int64);
+      assert(wu.n_intmin == (form == 2 ? 0 : form == 1 ? 2 : 1));
+      if (form == 1) {
+        int64_t aoff, asz, tally[2];
+        assert(frame_check(unknown, nu, &aoff, &asz, tally) == 1);
+        assert(tally[0] == 0 && tally[1] == -1);
+        mizu_mizl_entry e;
+        assert(mizu_mizl_elem(unknown, nu, 0, &e) == 0);
+        assert(e.valid[0] == 0 && e.valid[1] == -1);
+      }
+      free(unknown);
+      free(explicit_count);
+      mizu_arrow_close(au);
+      mizu_arrow_close(ae);
+    }
+  }
+
+  /* the resolved counts stay batch-local */
+  uint8_t v0[16], v1[16];
+  int32_t x0[80], x1[80];
+  memset(v0, 0xFF, sizeof v0);
+  memset(v1, 0xFF, sizeof v1);
+  for (int i = 0; i < 80; i++) x0[i] = x1[i] = i;
+  test_set_bit(v0, 3 + 67, 0);
+  const void *xb0[2] = { v0, x0 }, *xb1[2] = { v1, x1 };
+  ArrowArray a0, a1, b0, b1;
+  ArrowArray *bk0[1] = { &a0 }, *bk1[1] = { &a1 };
+  mk_array(&a0, 70, -1, 3, 2, xb0, NULL, NULL);
+  mk_array(&a1, 65, -1, 5, 2, xb1, NULL, NULL);
+  mk_array(&b0, 70, 0, 0, 1, NULL, bk0, NULL);
+  mk_array(&b1, 65, 0, 0, 1, NULL, bk1, NULL);
+  b0.n_children = b1.n_children = 1;
+  const ArrowArray *two[2] = { &b0, &b1 };
+  size_t nu, ne;
+  mizu_arrow_warn wu, we;
+  mizu_arrow *au, *ae;
+  uint8_t *unknown = frame_write(&root, two, 2, 0, &nu, &wu, &au);
+  a0.null_count = 1;
+  a1.null_count = 0;
+  uint8_t *explicit_count = frame_write(&root, two, 2, 0, &ne, &we, &ae);
+  assert(nu == ne && memcmp(unknown, explicit_count, nu) == 0);
+  assert(wu.n_range == we.n_range && wu.n_intmin == we.n_intmin &&
+         wu.n_int64 == we.n_int64);
+  free(unknown);
+  free(explicit_count);
+  mizu_arrow_close(au);
+  mizu_arrow_close(ae);
+}
+
 static void test_nan_vs_na(void) {
   ArrowSchema cg, root;
   ArrowSchema *kids[1] = { &cg };
@@ -1214,6 +1325,82 @@ static void test_temporal(void) {
   mizu_arrow_close(a);
 }
 
+static void test_temporal_differential(void) {
+  enum { N = 149, MAX_OFF = 13 };
+  const char *const fmts[] = { "tdD", "tss:", "tsm:", "tsu:", "tsn:",
+                               "tDs", "tDm", "tDu", "tDn" };
+  const double scales[] = { 0, 1.0, 1e-3, 1e-6, 1e-9,
+                            1.0, 1e-3, 1e-6, 1e-9 };
+  const int offsets[] = { 0, 1, 7, 8, 13, 1, 7, 8, 13 };
+  const uint64_t na_r = UINT64_C(0x7FF00000000007A2);
+  assert(na_r != MIZU_NA_REAL_BITS);
+  for (size_t t = 0; t < sizeof fmts / sizeof fmts[0]; t++) {
+    const size_t width = t == 0 ? 4 : 8;
+    const int64_t off = offsets[t];
+    ArrowSchema cx, root;
+    ArrowSchema *kids[1] = { &cx };
+    mk_schema(&cx, fmts[t], "x", NULL, 0, NULL, 0);
+    mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+    for (int form = 0; form < 3; form++) {
+      uint8_t valid[(N + MAX_OFF + 7) / 8];
+      uint8_t values[(N + MAX_OFF) * 8];
+      uint64_t rng = UINT64_C(0xBF58476D1CE4E5B9) ^ t;
+      for (size_t i = 0; i < sizeof valid; i++)
+        valid[i] = form == 0 ? (uint8_t) test_rng(&rng) :
+          form == 1 ? 0xFF : 0;
+      if (form == 0) {
+        test_set_bit(valid, (size_t) off, 1);
+        test_set_bit(valid, (size_t) off + 1, 0);
+        test_set_bit(valid, (size_t) off + 64, 1);
+        test_set_bit(valid, (size_t) off + 65, 0);
+      }
+      for (int i = 0; i < N; i++) {
+        const uint64_t bits = test_rng(&rng);
+        if (t == 0) {
+          const int32_t days = (int32_t) (bits % 2000001) - 1000000;
+          memcpy(values + (size_t) (off + i) * 4, &days, 4);
+        } else {
+          memcpy(values + (size_t) (off + i) * 8, &bits, 8);
+        }
+      }
+      const void *xb[2] = { valid, values };
+      ArrowArray ax, batch;
+      ArrowArray *bk[1] = { &ax };
+      mk_array(&ax, N, form == 0 ? -1 : form == 1 ? 0 : N, off, 2, xb,
+               NULL, NULL);
+      mk_array(&batch, N, 0, 0, 1, NULL, bk, NULL);
+      batch.n_children = 1;
+      const ArrowArray *batches[1] = { &batch };
+      mizu_arrow *a = NULL;
+      assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+      mizu_arrow_warn warn = { 0, 0, 0 };
+      assert(mizu_arrow_col_body(a, 0, NULL, &warn) == N * 8);
+      uint8_t got[N * 8], expected[N * 8];
+      assert(mizu_arrow_col_body(a, 0, got, &warn) == N * 8);
+      for (int i = 0; i < N; i++) {
+        if (!test_bit(valid, (size_t) (off + i))) {
+          memcpy(expected + 8 * i, &na_r, 8);
+          continue;
+        }
+        double value;
+        if (t == 0) {
+          int32_t days;
+          memcpy(&days, values + (size_t) (off + i) * width, 4);
+          value = (double) days;
+        } else {
+          int64_t count;
+          memcpy(&count, values + (size_t) (off + i) * width, 8);
+          value = (double) count * scales[t];
+        }
+        memcpy(expected + 8 * i, &value, 8);
+      }
+      assert(memcmp(got, expected, sizeof got) == 0);
+      assert(warn.n_range == 0 && warn.n_intmin == 0 && warn.n_int64 == 0);
+      mizu_arrow_close(a);
+    }
+  }
+}
+
 static void test_temporal_ns(void) {
   /* tsn / tDn: the verbatim INT64 leaf with a capable peer word, the REAL
      fallback without */
@@ -1631,6 +1818,100 @@ static void test_cvt_masked_runs(void) {
   assert(dst[320] == 320 && dst[325] == INT32_MIN && dst[329] == 329);
 }
 
+static void cvt_lane_reference(uint8_t *dst, const uint8_t *src,
+                               const uint8_t *valid, size_t off, size_t n,
+                               const mizu_cvt_row *row,
+                               mizu_arrow_warn *warn) {
+  const uint8_t null_lane = 0;
+  for (size_t i = 0; i < n; i++) {
+    const int present = test_bit(valid, off + i);
+    mizu_cvt_convert(dst + i * row->w_out, src + i * row->w_in,
+                     present ? NULL : &null_lane, 0, 1, row, warn);
+  }
+}
+
+static void test_cvt_masked_differential(void) {
+  enum { N = 149, MAX_OFF = 13 };
+  const char *const fmts[] = { "c", "C", "s", "S", "i", "I", "l", "L",
+                               "e", "f", "g" };
+  const int offsets[] = { 0, 1, 7, 8, 13 };
+  const mizu_cvt_row bool8 = { MIZU_TYPE_LGL, MIZU_CVT_BOOL8_LGL, 1, 4 };
+  const mizu_cvt_row c64 = { MIZU_TYPE_CPLX, MIZU_CVT_C64_CPLX, 8, 16 };
+  for (size_t r = 0; r < 13; r++) {
+    const mizu_cvt_row *row = r < 11 ? mizu_cvt_for_arrow(fmts[r]) :
+      r == 11 ? &bool8 : &c64;
+    assert(row != NULL);
+    for (size_t o = 0; o < sizeof offsets / sizeof offsets[0]; o++) {
+      const size_t off = (size_t) offsets[o];
+      uint8_t src[(N + MAX_OFF) * 8];
+      uint8_t valid[(N + MAX_OFF + 7) / 8];
+      uint8_t got_store[N * 16 + 1], expected[N * 16];
+      uint64_t rng = UINT64_C(0x9E3779B97F4A7C15) ^ (r << 8) ^ off;
+      for (size_t i = 0; i < sizeof src; i++)
+        src[i] = (uint8_t) test_rng(&rng);
+      for (size_t i = 0; i < sizeof valid; i++)
+        valid[i] = (uint8_t) test_rng(&rng);
+      test_set_bit(valid, off + 2, 1);
+      test_set_bit(valid, off + 3, 0);
+      test_set_bit(valid, off + 66, 1);
+      test_set_bit(valid, off + 67, 0);
+      const int lanes[4] = { 2, 3, 66, 67 };
+      if (r == 4) {
+        for (size_t i = 0; i < 4; i++) {
+          const int32_t v = INT32_MIN;
+          memcpy(src + 4 * lanes[i], &v, 4);
+        }
+      } else if (r == 6) {
+        for (size_t i = 0; i < 4; i++) {
+          const int64_t v = INT64_MIN;
+          memcpy(src + 8 * lanes[i], &v, 8);
+        }
+      } else if (r == 7) {
+        for (size_t i = 0; i < 4; i++) {
+          const uint64_t v = i & 1 ? UINT64_MAX :
+            (uint64_t) INT64_MAX + 1;
+          memcpy(src + 8 * lanes[i], &v, 8);
+        }
+      }
+      uint8_t *got = got_store + (o == 4);
+      mizu_arrow_warn wg = { 0, 0, 0 }, we = { 0, 0, 0 };
+      mizu_cvt_convert(got, src, valid, off, N, row, &wg);
+      cvt_lane_reference(expected, src, valid, off, N, row, &we);
+      assert(memcmp(got, expected, N * row->w_out) == 0);
+      assert(wg.n_range == we.n_range && wg.n_intmin == we.n_intmin &&
+             wg.n_int64 == we.n_int64);
+      if (r == 4) assert(wg.n_intmin == 2);
+      if (r == 6) assert(wg.n_int64 == 2);
+      if (r == 7) assert(wg.n_range >= 2);
+    }
+  }
+}
+
+static void test_wide_names(void) {
+  ArrowSchema cols[9], root;
+  ArrowSchema *kids[9];
+  const char names[9][3] = { "a", "b", "c", "d", "e", "f", "g", "h", "i" };
+  for (int i = 0; i < 9; i++) {
+    mk_schema(&cols[i], "i", names[i], NULL, 0, NULL, 0);
+    kids[i] = &cols[i];
+  }
+  mk_schema(&root, "+s", NULL, kids, 9, NULL, 0);
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, NULL, 0, 0) == MIZU_OK);
+  mizu_arrow_close(a);
+
+  root.n_children = (int64_t) INT32_MAX + 1;
+  assert(mizu_arrow_open(&a, &root, NULL, 0, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "column range") != NULL);
+  root.n_children = 9;
+  cols[8].name = names[0];
+  assert(mizu_arrow_open(&a, &root, NULL, 0, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "duplicate") != NULL);
+  cols[8].name = NULL;
+  assert(mizu_arrow_open(&a, &root, NULL, 0, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "unnamed") != NULL);
+}
+
 /* Open-time declines the frame tests have no shape for. */
 static void test_open_declines2(void) {
   ArrowSchema cx, lv, root;
@@ -1801,6 +2082,172 @@ static void test_dict_widths(void) {
     free(buf);
     mizu_arrow_close(a);
   }
+}
+
+static void dict_store(uint8_t *dst, size_t width, int is_signed,
+                       uint64_t value) {
+  if (is_signed) {
+    const int64_t v = (int64_t) value;
+    if (width == 1) {
+      const int8_t x = (int8_t) v;
+      memcpy(dst, &x, 1);
+    } else if (width == 2) {
+      const int16_t x = (int16_t) v;
+      memcpy(dst, &x, 2);
+    } else if (width == 4) {
+      const int32_t x = (int32_t) v;
+      memcpy(dst, &x, 4);
+    } else {
+      memcpy(dst, &v, 8);
+    }
+  } else if (width == 1) {
+    const uint8_t x = (uint8_t) value;
+    memcpy(dst, &x, 1);
+  } else if (width == 2) {
+    const uint16_t x = (uint16_t) value;
+    memcpy(dst, &x, 2);
+  } else if (width == 4) {
+    const uint32_t x = (uint32_t) value;
+    memcpy(dst, &x, 4);
+  } else {
+    memcpy(dst, &value, 8);
+  }
+}
+
+static uint64_t dict_load(const uint8_t *src, size_t width, int is_signed) {
+  if (is_signed) {
+    if (width == 1) {
+      int8_t v;
+      memcpy(&v, src, 1);
+      return (uint64_t) (int64_t) v;
+    }
+    if (width == 2) {
+      int16_t v;
+      memcpy(&v, src, 2);
+      return (uint64_t) (int64_t) v;
+    }
+    if (width == 4) {
+      int32_t v;
+      memcpy(&v, src, 4);
+      return (uint64_t) (int64_t) v;
+    }
+    int64_t v;
+    memcpy(&v, src, 8);
+    return (uint64_t) v;
+  }
+  if (width == 1) {
+    uint8_t v;
+    memcpy(&v, src, 1);
+    return v;
+  }
+  if (width == 2) {
+    uint16_t v;
+    memcpy(&v, src, 2);
+    return v;
+  }
+  if (width == 4) {
+    uint32_t v;
+    memcpy(&v, src, 4);
+    return v;
+  }
+  uint64_t v;
+  memcpy(&v, src, 8);
+  return v;
+}
+
+static void test_dict_masked_differential(void) {
+  enum { N = 149, MAX_OFF = 13 };
+  const char fmts[8][2] = { "c", "C", "s", "S", "i", "I", "l", "L" };
+  const int offsets[8] = { 13, 8, 7, 1, 0, 13, 8, 7 };
+  ArrowSchema lv, cd, root;
+  ArrowSchema *kids[1] = { &cd };
+  mk_schema(&lv, "u", NULL, NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  const char levels[3] = { 'a', 'b', 'c' };
+  const int32_t levoffs[4] = { 0, 1, 2, 3 };
+  const void *db[3] = { NULL, levoffs, levels };
+  ArrowArray dict, ai, batch;
+  ArrowArray *bk[1] = { &ai };
+  mk_array(&dict, 3, 0, 0, 3, db, NULL, NULL);
+  for (size_t k = 0; k < 8; k++) {
+    const size_t width = (size_t) 1 << (k / 2);
+    const int is_signed = k % 2 == 0;
+    const int64_t off = offsets[k];
+    mk_schema(&cd, fmts[k], "d", NULL, 0, &lv, 0);
+    for (int form = 0; form < 3; form++) {
+      uint8_t valid[(N + MAX_OFF + 7) / 8];
+      uint8_t codes[(N + MAX_OFF) * 8];
+      uint64_t rng = UINT64_C(0x94D049BB133111EB) ^ k;
+      for (size_t i = 0; i < sizeof valid; i++)
+        valid[i] = form == 0 ? (uint8_t) test_rng(&rng) :
+          form == 1 ? 0xFF : 0;
+      if (form == 0) {
+        test_set_bit(valid, (size_t) off, 1);
+        test_set_bit(valid, (size_t) off + 1, 0);
+        test_set_bit(valid, (size_t) off + 64, 1);
+        test_set_bit(valid, (size_t) off + 65, 0);
+      }
+      for (int i = 0; i < N; i++) {
+        const int present = test_bit(valid, (size_t) (off + i));
+        const uint64_t code = present ? test_rng(&rng) % 3 :
+          is_signed ? (uint64_t) -65 : UINT64_MAX - k;
+        dict_store(codes + (size_t) (off + i) * width, width, is_signed,
+                   code);
+      }
+      const void *cb[2] = { valid, codes };
+      mk_array(&ai, N, form == 0 ? -1 : form == 1 ? 0 : N, off, 2, cb,
+               NULL, &dict);
+      mk_array(&batch, N, 0, 0, 1, NULL, bk, NULL);
+      batch.n_children = 1;
+      const ArrowArray *batches[1] = { &batch };
+      mizu_arrow *a = NULL;
+      assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_OK);
+      mizu_arrow_warn warn = { 0, 0, 0 };
+      assert(mizu_arrow_col_body(a, 0, NULL, &warn) == N * 4);
+      uint8_t got[N * 4], expected[N * 4];
+      assert(mizu_arrow_col_body(a, 0, got, &warn) == N * 4);
+      for (int i = 0; i < N; i++) {
+        int32_t code = MIZU_NA_INT32;
+        if (test_bit(valid, (size_t) (off + i)))
+          code = (int32_t) dict_load(codes + (size_t) (off + i) * width,
+                                     width, is_signed) + 1;
+        memcpy(expected + 4 * i, &code, 4);
+      }
+      assert(memcmp(got, expected, sizeof got) == 0);
+      assert(warn.n_range == 0 && warn.n_intmin == 0 && warn.n_int64 == 0);
+      mizu_arrow_close(a);
+    }
+  }
+  const uint64_t bad[2] = { 0, 3 };
+  const void *badcb[2] = { NULL, bad };
+  mk_array(&ai, 2, 0, 0, 2, badcb, NULL, &dict);
+  mk_array(&batch, 2, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  const ArrowArray *badbatch[1] = { &batch };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
+
+  /* with nulls in the batch: an out-of-range value in a null slot is
+     ignored, the same value in a valid slot of a mixed word declines */
+  enum { M = 70 };
+  int32_t mixed[M] = { 0 };
+  uint8_t mvalid[(M + 7) / 8];
+  memset(mvalid, 0xFF, sizeof mvalid);
+  test_set_bit(mvalid, 3, 0);
+  test_set_bit(mvalid, 67, 0);
+  mixed[3] = -1;
+  mixed[67] = 3;
+  const void *mixedcb[2] = { mvalid, mixed };
+  mk_schema(&cd, "i", "d", NULL, 0, &lv, 0);
+  mk_array(&ai, M, 2, 0, 2, mixedcb, NULL, &dict);
+  mk_array(&batch, M, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_OK);
+  mizu_arrow_close(a);
+  mixed[66] = 3;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
 }
 
 /* A dict column on a zero-batch stream stages as the empty factor; a
@@ -2830,6 +3277,7 @@ int main(void) {
   test_chunked_and_offsets();
   test_null_span_collapse();
   test_null_count_forms();
+  test_null_count_equivalence();
   test_nan_vs_na();
   test_string_forms();
   test_strview_buffer_bound();
@@ -2838,6 +3286,7 @@ int main(void) {
   test_dict_declines();
   test_dict_batch_shape();
   test_temporal();
+  test_temporal_differential();
   test_temporal_ns();
   test_uint64_verbatim();
   test_declines();
@@ -2845,9 +3294,12 @@ int main(void) {
   test_struct_batch_shape();
   test_cvt_kernels();
   test_cvt_masked_runs();
+  test_cvt_masked_differential();
+  test_wide_names();
   test_open_declines2();
   test_rows_bound();
   test_dict_widths();
+  test_dict_masked_differential();
   test_dict_edge_shapes();
   test_dict_strview_inline();
   test_remote_decline();
