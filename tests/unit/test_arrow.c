@@ -3140,8 +3140,8 @@ static void test_col_concat(void) {
     i = 0;
     for (int b = 0; b < NB; b++)
       for (int64_t k = 0; k < lens[b]; k++, i++) {
-        const uint8_t *s;
-        int32_t len;
+        const uint8_t *s = NULL;
+        int32_t len = 0;
         assert(mizu_arrow_str_at(&as[b], k, 1, &s, &len) == 1);
         assert(o32[i + 1] - o32[i] == len);
         assert(memcmp(data + o32[i], s, (size_t) len) == 0);
