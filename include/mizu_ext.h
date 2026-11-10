@@ -2389,7 +2389,8 @@ MIZU_API const mizu_cvt_row *mizu_cvt_for_arrow(const char *fmt);
    applies the element offset); off is the bit offset into data and
    validity for the bit-packed forms, and into validity for the masked
    forms. valid NULL converts every lane. The warning counts accumulate
-   into warn. */
+   into warn; warn NULL skips the counting (MIZU_CVT_U64_INT64 needs it
+   non-NULL). */
 MIZU_API void mizu_cvt_convert(uint8_t *dst, const uint8_t *src,
                                const uint8_t *valid, uint64_t off, size_t n,
                                const mizu_cvt_row *row,
