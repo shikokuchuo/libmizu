@@ -209,7 +209,7 @@ Status: null-free, unknown, 1% and all-null body rows within run-to-run
 noise (±5%). Unit + ext + integration + fuzz (100k runs per harness,
 fuzzer+UBSan) green; export surface unchanged.
 
-## 2026-11-10 — Arrow sentinel fill and validity rebuild follow-up (f5f4dba + working tree)
+## 2026-11-10 — Arrow sentinel fill and validity rebuild follow-up (c6d4942)
 
 Same host and shapes; same-session A/B (best of five `bench_arrow`
 invocations before, ten after). Null-lane sentinel fills copy a replicated
