@@ -625,6 +625,64 @@ static void test_chunked_and_offsets(void) {
   mizu_arrow_close(a);
 }
 
+/* The rebuilt validity tail against a per-bit reference: three batches at
+   bit-unaligned offsets and lengths, sparse and dense nulls, one batch
+   null-free. Padding bits past the rows stay set. */
+static void test_bitmap_differential(void) {
+  enum { NB = 3, CAP = 400 };
+  const int64_t lens[NB] = { 131, 64, 197 };
+  const int64_t offs[NB] = { 3, 0, 13 };
+  ArrowSchema ci, root;
+  ArrowSchema *kids[1] = { &ci };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
+  static int32_t x[CAP];
+  for (int form = 0; form < 3; form++) {
+    uint8_t valid[NB][CAP / 8];
+    const void *bufs[NB][2];
+    ArrowArray arr[NB], bat[NB];
+    ArrowArray *bk[NB][1];
+    const ArrowArray *batches[NB];
+    uint64_t rng = UINT64_C(0xA0761D6478BD642F) ^ (uint64_t) form;
+    int64_t rows = 0;
+    for (int b = 0; b < NB; b++) {
+      for (size_t i = 0; i < sizeof valid[b]; i++)
+        valid[b][i] = form == 0 ? (uint8_t) test_rng(&rng) : 0xFF;
+      if (form == 1) {
+        test_set_bit(valid[b], (size_t) offs[b], 0);
+        test_set_bit(valid[b], (size_t) (offs[b] + lens[b] - 1), 0);
+      }
+      if (form == 2 && b != 1) test_set_bit(valid[b], (size_t) offs[b] + 60, 0);
+      bufs[b][0] = valid[b];
+      bufs[b][1] = x;
+      bk[b][0] = &arr[b];
+      mk_array(&arr[b], lens[b], -1, offs[b], 2, bufs[b], NULL, NULL);
+      mk_array(&bat[b], lens[b], 0, 0, 1, NULL, bk[b], NULL);
+      bat[b].n_children = 1;
+      batches[b] = &bat[b];
+      rows += lens[b];
+    }
+    size_t total;
+    mizu_arrow_warn warn;
+    mizu_arrow *a;
+    uint8_t *buf = frame_write(&root, batches, NB, 0, &total, &warn, &a);
+    mizu_mizl_entry e;
+    assert(mizu_mizl_elem(buf, total, 0, &e) == 0);
+    const uint8_t *got = buf + e.valid[0];
+    int64_t i = 0, nulls = 0;
+    for (int b = 0; b < NB; b++)
+      for (int64_t k = 0; k < lens[b]; k++, i++) {
+        const int v = test_bit(valid[b], (size_t) (offs[b] + k));
+        assert(test_bit(got, (size_t) i) == v);
+        nulls += !v;
+      }
+    assert(e.valid[1] == nulls);
+    for (; i < (rows + 7) / 8 * 8; i++) assert(test_bit(got, (size_t) i));
+    free(buf);
+    mizu_arrow_close(a);
+  }
+}
+
 static void test_null_span_collapse(void) {
   /* a utf8 null whose offsets span is non-empty collapses to zero bytes */
   ArrowSchema cs, root;
@@ -1841,8 +1899,10 @@ static void test_cvt_masked_differential(void) {
     const mizu_cvt_row *row = r < 11 ? mizu_cvt_for_arrow(fmts[r]) :
       r == 11 ? &bool8 : &c64;
     assert(row != NULL);
-    for (size_t o = 0; o < sizeof offsets / sizeof offsets[0]; o++) {
-      const size_t off = (size_t) offsets[o];
+    /* dense = 0: sparse nulls, so the per-null patch and uncount run */
+    for (size_t o = 0; o < 2 * (sizeof offsets / sizeof offsets[0]); o++) {
+      const int dense = o >= sizeof offsets / sizeof offsets[0];
+      const size_t off = (size_t) offsets[o % 5];
       uint8_t src[(N + MAX_OFF) * 8];
       uint8_t valid[(N + MAX_OFF + 7) / 8];
       uint8_t got_store[N * 16 + 1], expected[N * 16];
@@ -1850,7 +1910,7 @@ static void test_cvt_masked_differential(void) {
       for (size_t i = 0; i < sizeof src; i++)
         src[i] = (uint8_t) test_rng(&rng);
       for (size_t i = 0; i < sizeof valid; i++)
-        valid[i] = (uint8_t) test_rng(&rng);
+        valid[i] = dense ? (uint8_t) test_rng(&rng) : 0xFF;
       test_set_bit(valid, off + 2, 1);
       test_set_bit(valid, off + 3, 0);
       test_set_bit(valid, off + 66, 1);
@@ -1873,7 +1933,7 @@ static void test_cvt_masked_differential(void) {
           memcpy(src + 8 * lanes[i], &v, 8);
         }
       }
-      uint8_t *got = got_store + (o == 4);
+      uint8_t *got = got_store + (o % 5 == 4);
       mizu_arrow_warn wg = { 0, 0, 0 }, we = { 0, 0, 0 };
       mizu_cvt_convert(got, src, valid, off, N, row, &wg);
       cvt_lane_reference(expected, src, valid, off, N, row, &we);
@@ -2246,6 +2306,25 @@ static void test_dict_masked_differential(void) {
   assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_OK);
   mizu_arrow_close(a);
   mixed[66] = 3;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
+
+  /* past one range-check chunk: the same pair in a later chunk */
+  enum { L = 9000 };
+  static int16_t big[L];
+  static uint8_t bvalid[(L + 7) / 8];
+  memset(big, 0, sizeof big);
+  memset(bvalid, 0xFF, sizeof bvalid);
+  test_set_bit(bvalid, 8500, 0);
+  big[8500] = 3;
+  const void *bigcb[2] = { bvalid, big };
+  mk_schema(&cd, "s", "d", NULL, 0, &lv, 0);
+  mk_array(&ai, L, 1, 0, 2, bigcb, NULL, &dict);
+  mk_array(&batch, L, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 1;
+  assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_OK);
+  mizu_arrow_close(a);
+  big[8499] = -1;
   assert(mizu_arrow_open(&a, &root, badbatch, 1, 0) == MIZU_ERR);
   assert(strstr(mizu_last_error_message(), "outside the levels") != NULL);
 }
@@ -3275,6 +3354,7 @@ int main(void) {
   test_unaligned_buffers();
   test_zero_rows();
   test_chunked_and_offsets();
+  test_bitmap_differential();
   test_null_span_collapse();
   test_null_count_forms();
   test_null_count_equivalence();
