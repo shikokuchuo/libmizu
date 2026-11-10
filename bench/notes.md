@@ -1,8 +1,8 @@
 # Recorded benchmark notes
 
 Dated performance records for libmizu's C bench suite (`make bench` —
-`bench_channel` and `bench_pool`). Report-only: nothing here is asserted
-against — runner timing is too variable for thresholds.
+`bench_channel`, `bench_pool` and `bench_arrow`). Report-only: nothing
+here is asserted against — runner timing is too variable for thresholds.
 
 Two parts: the best-known table below is the headline — swap a row's
 value in only when a run beats it, with the date of that measurement
@@ -134,3 +134,42 @@ Results:
 
 Status: all other rows inside the 2026-08-22/23 bands — no core
 regression.
+
+## 2026-11-10 — Arrow kernel baseline (5d8734c)
+
+Apple M4 Pro, macOS 27.2, arm64. New report-only `bench_arrow`: 8M rows,
+one batch, one warmup and the best of seven; open, size and body are timed
+separately. These are the pre-optimization records for the sparse-null,
+dictionary, popcount, temporal and open-overhead work.
+
+Results (ms):
+
+| column | open, null-free / 1% | size, unknown | body, null-free | body, unknown | body, 1% | body, 50% | body, all null |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| float64 copy | 0.000 / 0.000 | 2.385 | 1.176 | 1.272 | 13.862 | 12.540 | 2.027 |
+| int64 copy | 0.000 / 0.000 | 1.913 | 1.068 | 1.282 | 18.689 | 20.022 | 2.020 |
+| float32 widen | 0.000 / 0.000 | 2.051 | 1.404 | 1.560 | 9.717 | 8.863 | 2.015 |
+| date32 | 0.000 / 0.000 | 1.920 | 2.716 | 4.812 | 5.569 | 4.546 | 4.159 |
+| timestamp[us] | 0.000 / 0.000 | 1.941 | 3.454 | 5.494 | 6.294 | 4.952 | 4.058 |
+| dictionary, int32 index | 5.694 / 8.331 | 2.018 | 6.038 | 7.644 | 8.299 | 5.952 | 4.133 |
+
+## 2026-11-10 — Arrow kernel speedups (5d8734c + working tree)
+
+Same host and shapes. Unknown-count resolution moved from the size pass to
+open: it now costs 0.128-0.187 ms there (dictionary 1.336 ms including index
+validation), while every unknown size row is below the clock precision. The
+1%-null numeric body rows are within about 2x of their null-free rows.
+
+Results (ms):
+
+| column | open, null-free / 1% | body, null-free | body, unknown | body, 1% | body, 50% | body, all null |
+|---|---:|---:|---:|---:|---:|---:|
+| float64 copy | 0.000 / 0.000 | 1.158 | 1.071 | 1.643 | 7.174 | 2.016 |
+| int64 copy | 0.000 / 0.000 | 1.065 | 1.064 | 1.837 | 8.026 | 2.018 |
+| float32 widen | 0.000 / 0.000 | 1.342 | 1.363 | 1.674 | 7.473 | 2.020 |
+| date32 | 0.000 / 0.000 | 1.351 | 1.444 | 1.708 | 4.238 | 2.015 |
+| timestamp[us] | 0.000 / 0.000 | 1.960 | 1.871 | 2.478 | 5.209 | 2.036 |
+| dictionary, int32 index | 1.194 / 4.716 | 1.093 | 1.107 | 1.635 | 7.507 | 2.016 |
+
+Status: unit + ext + integration + fuzz (100k runs per harness, fuzzer+UBSan)
+green; interop corpus unchanged; export surface unchanged.

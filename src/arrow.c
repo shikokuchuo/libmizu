@@ -53,19 +53,6 @@ static void arrow_store_na_r(uint8_t *dst) {
 // access are the ext tier's dual-form mizu_arrow_valid / mizu_arrow_str_at
 // (mizu_ext.h) ----------------------------------------------------------------
 
-/* A batch's exact null count (Arrow's -1 "not computed" resolved). */
-static int64_t arrow_batch_nulls(const ArrowArray *a) {
-  if (a->null_count == 0 || a->buffers[0] == NULL) return 0;
-  if (a->null_count > 0) return a->null_count;
-  const uint8_t *bm = (const uint8_t *) a->buffers[0];
-  int64_t n = 0;
-  for (int64_t k = 0; k < a->length; k++) {
-    int64_t i = a->offset + k;
-    n += !((bm[i >> 3] >> (i & 7)) & 1);
-  }
-  return n;
-}
-
 // The conversion kernels ------------------------------------------------------------
 
 /* IEEE 754 half -> double, exact: half's 5-bit exponent / 10-bit
@@ -114,6 +101,25 @@ static const mizu_cvt_row CVT_ROW_I64_V;
    access alignment-safe (a contiguous buffer can still be
    element-misaligned — np.frombuffer with a byte offset); fixed-size
    memcpys compile to single load/store pairs. */
+/* Internal conversion rows: dictionary codes widen and add one; temporal
+   counts widen to doubles at their declared scale. Their null lanes use
+   R's verbatim NA payload rather than the wire's quiet-bit-set twin. */
+enum {
+  ARROW_CVT_DICT_I8 = 256,
+  ARROW_CVT_DICT_U8,
+  ARROW_CVT_DICT_I16,
+  ARROW_CVT_DICT_U16,
+  ARROW_CVT_DICT_I32,
+  ARROW_CVT_DICT_U32,
+  ARROW_CVT_DICT_I64,
+  ARROW_CVT_DICT_U64,
+  ARROW_CVT_DATE,
+  ARROW_CVT_TS_S,
+  ARROW_CVT_TS_MS,
+  ARROW_CVT_TS_US,
+  ARROW_CVT_TS_NS
+};
+
 /* The widening rows are one shape: fixed-size memcpys (single load/store
    pairs) around a per-lane conversion. U64_INT64 (the range check + warn),
    BOOL8_LGL, C64_CPLX and COPY stay explicit below. */
@@ -210,6 +216,29 @@ static void cvt_run(uint8_t *dst, const uint8_t *src, size_t n,
     break;
   ARROW_CVT_WIDEN(MIZU_CVT_F16_REAL, uint16_t, 2, double, 8, half_to_double(v))
   ARROW_CVT_WIDEN(MIZU_CVT_F32_REAL, float, 4, double, 8, v)
+#define ARROW_CVT_DICT(NAME, ST, SW)                                          \
+  case NAME:                                                                  \
+    for (size_t i = 0; i < n; i++) {                                          \
+      ST v;                                                                   \
+      memcpy(&v, src + (SW) * i, (SW));                                       \
+      uint32_t o = (uint32_t) v + 1u;  /* null lanes may hold any bits */     \
+      memcpy(dst + 4 * i, &o, 4);                                             \
+    }                                                                         \
+    break;
+  ARROW_CVT_DICT(ARROW_CVT_DICT_I8, int8_t, 1)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_U8, uint8_t, 1)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_I16, int16_t, 2)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_U16, uint16_t, 2)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_I32, int32_t, 4)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_U32, uint32_t, 4)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_I64, int64_t, 8)
+  ARROW_CVT_DICT(ARROW_CVT_DICT_U64, uint64_t, 8)
+#undef ARROW_CVT_DICT
+  ARROW_CVT_WIDEN(ARROW_CVT_DATE, int32_t, 4, double, 8, (double) v)
+  ARROW_CVT_WIDEN(ARROW_CVT_TS_S, int64_t, 8, double, 8, (double) v * 1.0)
+  ARROW_CVT_WIDEN(ARROW_CVT_TS_MS, int64_t, 8, double, 8, (double) v * 1e-3)
+  ARROW_CVT_WIDEN(ARROW_CVT_TS_US, int64_t, 8, double, 8, (double) v * 1e-6)
+  ARROW_CVT_WIDEN(ARROW_CVT_TS_NS, int64_t, 8, double, 8, (double) v * 1e-9)
   case MIZU_CVT_BOOL8_LGL:
     for (size_t i = 0; i < n; i++) {
       int32_t o = src[i] != 0;
@@ -260,6 +289,14 @@ static void cvt_fill_na(uint8_t *dst, size_t n, int wire) {
   }
 }
 
+static void cvt_fill(uint8_t *dst, size_t n, const mizu_cvt_row *row) {
+  if (row->cvt >= ARROW_CVT_DATE && row->cvt <= ARROW_CVT_TS_NS) {
+    for (size_t i = 0; i < n; i++) arrow_store_na_r(dst + 8 * i);
+  } else {
+    cvt_fill_na(dst, n, row->wire);
+  }
+}
+
 /* All-ones over `lanes` lanes (the shift alone is UB at 64). */
 static uint64_t arrow_lanes_mask(size_t lanes) {
   return lanes == 64 ? UINT64_MAX : ((uint64_t) 1 << lanes) - 1;
@@ -286,17 +323,51 @@ static uint64_t bitmap_word(const uint8_t *bm, uint64_t pos, size_t lanes) {
   return w;
 }
 
+static unsigned arrow_popcount64(uint64_t x) {
+  x -= (x >> 1) & UINT64_C(0x5555555555555555);
+  x = (x & UINT64_C(0x3333333333333333)) +
+    ((x >> 2) & UINT64_C(0x3333333333333333));
+  x = (x + (x >> 4)) & UINT64_C(0x0F0F0F0F0F0F0F0F);
+  return (unsigned) ((x * UINT64_C(0x0101010101010101)) >> 56);
+}
+
+/* x is nonzero. */
+static unsigned arrow_ctz64(uint64_t x) {
+#if defined(__clang__) || defined(__GNUC__)
+  return (unsigned) __builtin_ctzll(x);
+#else
+  unsigned n = 0;
+  while ((x & 1) == 0) {
+    x >>= 1;
+    n++;
+  }
+  return n;
+#endif
+}
+
+/* A batch's exact null count (Arrow's -1 "not computed" resolved), counted
+   a word at a time. bitmap_word masks the tail and absorbs the bit offset. */
+static int64_t arrow_batch_nulls(const ArrowArray *a) {
+  if (a->null_count == 0 || a->buffers[0] == NULL) return 0;
+  if (a->null_count > 0) return a->null_count;
+  const uint8_t *bm = (const uint8_t *) a->buffers[0];
+  int64_t n = 0;
+  for (int64_t k = 0; k < a->length;) {
+    const size_t lanes = a->length - k < 64 ? (size_t) (a->length - k) : 64;
+    const uint64_t w = bitmap_word(bm, (uint64_t) (a->offset + k), lanes);
+    n += (int64_t) lanes - (int64_t) arrow_popcount64(w);
+    k += (int64_t) lanes;
+  }
+  return n;
+}
+
 /* The masked variant (Arrow nulls): word-wise over the validity bitmap,
    run-coalesced — consecutive all-ones words accumulate into one convert,
-   consecutive zero words into one sentinel fill, and the per-lane select
-   survives only at mixed words. A 64-lane-at-a-time convert caps the copy
-   width at 512 bytes, which loses memcpy's non-temporal path on multi-MB
-   columns (an all-valid masked column is the common shape: Arrow null_count
-   "unknown" forces the masked path with no nulls in it). off is the
-   element offset: a bit offset into the bitmap (the word reads absorb
-   it). Genuine sentinel values are counted on the int32 and int64
-   identity rows (they read as NA_integer_ / NA_integer64_ in R) inside
-   cvt_run's fused copy; the other rows cannot produce one. */
+   consecutive zero words into one sentinel fill. A mixed word converts all
+   64 lanes in one pass, then patches its null lanes. Genuine int32/int64
+   sentinels on those lanes are subtracted from cvt_run's fused count (their
+   values are undefined); the uint64 range row keeps its per-lane select so
+   its warning counts valid lanes only. off is the bit offset into validity. */
 static void convert_masked(uint8_t *dst, const uint8_t *src,
                            const uint8_t *valid, uint64_t off, size_t n,
                            const mizu_cvt_row *row, mizu_arrow_warn *warn) {
@@ -317,15 +388,35 @@ static void convert_masked(uint8_t *dst, const uint8_t *src,
       if (is_valid)
         cvt_run(dst + i * wo, src + i * wi, run, row, warn);
       else
-        cvt_fill_na(dst + i * wo, run, row->wire);
+        cvt_fill(dst + i * wo, run, row);
       i += run;
-    } else {
+    } else if (row->cvt == MIZU_CVT_U64_INT64) {
       for (size_t j = 0; j < lanes; j++) {
-        if ((w >> j) & 1) {
+        if ((w >> j) & 1)
           cvt_run(dst + (i + j) * wo, src + (i + j) * wi, 1, row, warn);
-        } else {
-          cvt_fill_na(dst + (i + j) * wo, 1, row->wire);
+        else
+          cvt_fill(dst + (i + j) * wo, 1, row);
+      }
+      i += lanes;
+    } else {
+      cvt_run(dst + i * wo, src + i * wi, lanes, row, warn);
+      uint64_t nulls = ~w & arrow_lanes_mask(lanes);
+      while (nulls != 0) {
+        const size_t j = arrow_ctz64(nulls);
+        nulls &= nulls - 1;
+        if (warn != NULL && row->cvt == MIZU_CVT_COPY &&
+            row != &CVT_ROW_I64_V) {
+          if (row->wire == MIZU_TYPE_INT) {
+            int32_t v;
+            memcpy(&v, src + (i + j) * wi, 4);
+            warn->n_intmin -= v == INT32_MIN;
+          } else if (row->wire == MIZU_TYPE_INT64) {
+            int64_t v;
+            memcpy(&v, src + (i + j) * wi, 8);
+            warn->n_int64 -= v == INT64_MIN;
+          }
         }
+        cvt_fill(dst + (i + j) * wo, 1, row);
       }
       i += lanes;
     }
@@ -599,7 +690,6 @@ typedef struct {
   int kind;              /* MIZU_ARROW_* */
   const mizu_cvt_row *row;   /* CVT */
   int str_form;         /* STR/DICT: 1 utf8, 2 large_utf8, 3 view */
-  double ts_scale;      /* TS/TD */
   char unit;            /* TS/TD: the Arrow unit s/m/u/n */
   int ts_verbatim;      /* TS/TD: the ns INT64 leaf verdict (unit n and the
                            peer reads MIZU_CAP_MIZL_TSN), resolved at
@@ -617,10 +707,9 @@ typedef struct {
                            resolved at classify */
 } arrow_pcol;
 
-/* The shared TS/TD unit decode: scale, unit char, and the ns-verbatim
-   verdict (unit n and a peer advertising MIZU_CAP_MIZL_TSN). */
+/* The shared TS/TD unit decode: unit char and the ns-verbatim verdict
+   (unit n and a peer advertising MIZU_CAP_MIZL_TSN). */
 static void arrow_ts_unit(char u, uint32_t caps, arrow_pcol *pc) {
-  pc->ts_scale = u == 's' ? 1.0 : u == 'm' ? 1e-3 : u == 'u' ? 1e-6 : 1e-9;
   pc->unit = u;
   pc->ts_verbatim = u == 'n' && (caps & MIZU_CAP_MIZL_TSN) != 0;
 }
@@ -652,6 +741,7 @@ struct mizu_arrow {
   arrow_scol *scols;
   arrow_remote *remotes;
   int64_t *tab;          /* the validity table scratch (2 * ncols) */
+  int64_t *batch_nulls;  /* resolved counts, column-major [col * nb + b] */
   const void *root_blob; /* the root-blob override (borrowed) */
   size_t root_blob_len;
   int any_str;
@@ -660,6 +750,10 @@ struct mizu_arrow {
   size_t root_size;      /* the root blob's byte count */
   size_t total;
 };
+
+static int64_t arrow_nulls(const mizu_arrow *a, int col, size_t b) {
+  return a->batch_nulls[(size_t) col * a->nb + b];
+}
 
 
 /* The factor dict {levels, class} — the inline attr shape's form exactly:
@@ -966,41 +1060,59 @@ static int arrow_levels_check(mizu_arrow *a, int col) {
   return 0;
 }
 
-/* One signed/unsigned pair of dictionary-index arms. */
-#define ARROW_IDX_ARM(W, ST, UT)                                             \
-  case W: {                                                                  \
-    if (is_signed) {                                                         \
-      ST v;                                                                  \
-      memcpy(&v, idx + (W) * i, (W));                                        \
-      return v;                                                              \
-    }                                                                        \
-    UT v;                                                                    \
-    memcpy(&v, idx + (W) * i, (W));                                          \
-    return v;                                                                \
+/* Per-width min/max over the valid indices. The unsigned 64-bit arm reads
+   the bits as int64 exactly as the former per-lane helper did, so values
+   past INT64_MAX decline as negative. Null-only batches leave lo > hi. */
+static void arrow_dict_bounds(const ArrowArray *ba, const arrow_pcol *pc,
+                              int64_t nulls, int64_t *lo, int64_t *hi) {
+  const uint8_t *idx = (const uint8_t *) ba->buffers[1];
+  int64_t mn = INT64_MAX, mx = INT64_MIN;
+#define ARROW_DICT_BOUNDS_RUN(ST, W, MASKED)                                   \
+  for (int64_t k = 0; k < ba->length; k++) {                                   \
+    if ((MASKED) && !mizu_arrow_valid(ba, k)) continue;                        \
+    ST v;                                                                      \
+    memcpy(&v, idx + (W) * (ba->offset + k), (W));                             \
+    const int64_t c = (int64_t) v;                                             \
+    if (c < mn) mn = c;                                                        \
+    if (c > mx) mx = c;                                                        \
   }
-
-/* One dictionary index element: per-element memcpy, the file's alignment
-   discipline (the buffer can be element-misaligned). An unsigned index
-   past int64 reads negative — the bounds check declines it. */
-static int64_t arrow_idx_at(const uint8_t *idx, int64_t i, int w,
-                            int is_signed) {
-  switch (w) {
-  case 1: {
-    if (!is_signed) return idx[i];
-    int8_t v;
-    memcpy(&v, idx + i, 1);
-    return v;
+#define ARROW_DICT_BOUNDS(ST, W)                                               \
+  if (nulls == 0) {                                                            \
+    ARROW_DICT_BOUNDS_RUN(ST, W, 0)                                            \
+  } else {                                                                     \
+    ARROW_DICT_BOUNDS_RUN(ST, W, 1)                                            \
   }
-  ARROW_IDX_ARM(2, int16_t, uint16_t)
-  ARROW_IDX_ARM(4, int32_t, uint32_t)
-  default: {
-    int64_t v;
-    memcpy(&v, idx + 8 * i, 8);
-    return v;
+  switch (pc->idx_w) {
+  case 1:
+    if (pc->idx_signed) {
+      ARROW_DICT_BOUNDS(int8_t, 1)
+    } else {
+      ARROW_DICT_BOUNDS(uint8_t, 1)
+    }
+    break;
+  case 2:
+    if (pc->idx_signed) {
+      ARROW_DICT_BOUNDS(int16_t, 2)
+    } else {
+      ARROW_DICT_BOUNDS(uint16_t, 2)
+    }
+    break;
+  case 4:
+    if (pc->idx_signed) {
+      ARROW_DICT_BOUNDS(int32_t, 4)
+    } else {
+      ARROW_DICT_BOUNDS(uint32_t, 4)
+    }
+    break;
+  default:
+    ARROW_DICT_BOUNDS(int64_t, 8)
+    break;
   }
-  }
+#undef ARROW_DICT_BOUNDS
+#undef ARROW_DICT_BOUNDS_RUN
+  *lo = mn;
+  *hi = mx;
 }
-#undef ARROW_IDX_ARM
 
 /* A later batch's dictionary must equal batch 0's canonical set. */
 static int arrow_levels_match(mizu_arrow *a, int col,
@@ -1046,17 +1158,13 @@ static int arrow_validate_dicts(mizu_arrow *a) {
                             "differ across batches", nm);
         return -1;
       }
-      const uint8_t *idx = (const uint8_t *) ba->buffers[1];
-      for (int64_t k = 0; k < ba->length; k++) {
-        if (!mizu_arrow_valid(ba, k)) continue;
-        int64_t c = arrow_idx_at(idx, ba->offset + k, pc->idx_w,
-                                 pc->idx_signed);
-        if (c < 0 || c >= pc->nlev) {
-          mizu_err_record_tls(MIZU_ERRCAT_OTHER,
-                              "column '%s': a dictionary index outside the "
-                              "levels", nm);
-          return -1;
-        }
+      int64_t lo, hi;
+      arrow_dict_bounds(ba, pc, arrow_nulls(a, i, b), &lo, &hi);
+      if (lo < 0 || hi >= pc->nlev) {
+        mizu_err_record_tls(MIZU_ERRCAT_OTHER,
+                            "column '%s': a dictionary index outside the "
+                            "levels", nm);
+        return -1;
       }
     }
   }
@@ -1092,7 +1200,7 @@ static int arrow_size_str(mizu_arrow *a, int col) {
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
     if (ba->length == 0) continue;
-    if (pc->str_form != 3 && arrow_batch_nulls(ba) == 0) {
+    if (pc->str_form != 3 && arrow_nulls(a, col, b) == 0) {
       /* the null-free span: the endpoints alone don't prove the
          intermediate offsets — the writer rebases per element, so a
          non-monotonic interior (or an i64 span past the int32 element
@@ -1154,7 +1262,7 @@ static void arrow_size_col(mizu_arrow *a, int col, arrow_scol *c) {
     break;
   }
   for (size_t b = 0; b < a->nb; b++)
-    c->nulls += arrow_batch_nulls(a->batches[b]->children[col]);
+    c->nulls += arrow_nulls(a, col, b);
 }
 
 /* The size pass: per-column bodies and blobs, the root blob, the tail.
@@ -1206,7 +1314,7 @@ static void arrow_write_cvt(uint8_t *dst, const mizu_arrow *a, int col,
     size_t n = (size_t) ba->length;
     if (n == 0) continue;
     const uint8_t *data = (const uint8_t *) ba->buffers[1];
-    const uint8_t *valid = ba->null_count != 0 ?
+    const uint8_t *valid = arrow_nulls(a, col, b) != 0 ?
       (const uint8_t *) ba->buffers[0] : NULL;
     uint64_t off = (uint64_t) ba->offset;
     if (row->cvt == MIZU_CVT_BIT_LGL) {
@@ -1292,67 +1400,56 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
 }
 #undef ARROW_STR_COPY_SPAN
 
-/* A dictionary column: the INT32 leaf of 1-based R codes (NA = INT_MIN). */
+/* A dictionary column: the INT32 leaf of 1-based R codes (NA = INT_MIN).
+   Open validated every valid index, so the widening rows can add one without
+   a range check; their unsigned arithmetic also tolerates arbitrary null
+   lanes when a mixed validity word converts all 64 lanes at once. */
 static void arrow_write_dict(uint8_t *dst, const mizu_arrow *a, int col) {
   const arrow_pcol *pc = &a->cols[col];
+  mizu_cvt_row row = { MIZU_TYPE_INT, 0, (uint8_t) pc->idx_w, 4 };
+  switch (pc->idx_w) {
+  case 1:
+    row.cvt = pc->idx_signed ? ARROW_CVT_DICT_I8 : ARROW_CVT_DICT_U8;
+    break;
+  case 2:
+    row.cvt = pc->idx_signed ? ARROW_CVT_DICT_I16 : ARROW_CVT_DICT_U16;
+    break;
+  case 4:
+    row.cvt = pc->idx_signed ? ARROW_CVT_DICT_I32 : ARROW_CVT_DICT_U32;
+    break;
+  default:
+    row.cvt = pc->idx_signed ? ARROW_CVT_DICT_I64 : ARROW_CVT_DICT_U64;
+    break;
+  }
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
     const uint8_t *idx = (const uint8_t *) ba->buffers[1];
-    for (int64_t k = 0; k < ba->length; k++) {
-      int32_t v;
-      if (!mizu_arrow_valid(ba, k)) {
-        v = MIZU_NA_INT32;
-      } else {
-        int64_t c = arrow_idx_at(idx, ba->offset + k, pc->idx_w,
-                                 pc->idx_signed);
-        v = (int32_t) (c + 1);
-      }
-      memcpy(dst + 4 * (done + k), &v, 4);
-    }
+    const uint8_t *valid = arrow_nulls(a, col, b) != 0 ?
+      (const uint8_t *) ba->buffers[0] : NULL;
+    const uint64_t off = (uint64_t) ba->offset;
+    mizu_cvt_convert(dst + 4 * done, idx + off * row.w_in, valid, off,
+                     (size_t) ba->length, &row, NULL);
     done += ba->length;
   }
 }
 
 /* A date32 column: the REAL leaf of epoch-day doubles (NaT = NA payload). */
 static void arrow_write_date(uint8_t *dst, const mizu_arrow *a, int col) {
-  int64_t done = 0;
-  for (size_t b = 0; b < a->nb; b++) {
-    const ArrowArray *ba = a->batches[b]->children[col];
-    const uint8_t *days = (const uint8_t *) ba->buffers[1];
-    for (int64_t k = 0; k < ba->length; k++) {
-      if (!mizu_arrow_valid(ba, k)) {
-        arrow_store_na_r(dst + 8 * (done + k));
-      } else {
-        int32_t d;
-        memcpy(&d, days + 4 * (ba->offset + k), 4);
-        double v = (double) d;
-        memcpy(dst + 8 * (done + k), &v, 8);
-      }
-    }
-    done += ba->length;
-  }
+  static const mizu_cvt_row row = {
+    MIZU_TYPE_REAL, ARROW_CVT_DATE, 4, 8
+  };
+  arrow_write_cvt(dst, a, col, &row, NULL);
 }
 
 /* A timestamp column: the REAL leaf of epoch-second doubles. */
 static void arrow_write_ts(uint8_t *dst, const mizu_arrow *a, int col) {
   const arrow_pcol *pc = &a->cols[col];
-  int64_t done = 0;
-  for (size_t b = 0; b < a->nb; b++) {
-    const ArrowArray *ba = a->batches[b]->children[col];
-    const uint8_t *counts = (const uint8_t *) ba->buffers[1];
-    for (int64_t k = 0; k < ba->length; k++) {
-      if (!mizu_arrow_valid(ba, k)) {
-        arrow_store_na_r(dst + 8 * (done + k));
-      } else {
-        int64_t ct;
-        memcpy(&ct, counts + 8 * (ba->offset + k), 8);
-        double v = (double) ct * pc->ts_scale;
-        memcpy(dst + 8 * (done + k), &v, 8);
-      }
-    }
-    done += ba->length;
-  }
+  const int cvt = pc->unit == 's' ? ARROW_CVT_TS_S :
+    pc->unit == 'm' ? ARROW_CVT_TS_MS :
+    pc->unit == 'u' ? ARROW_CVT_TS_US : ARROW_CVT_TS_NS;
+  const mizu_cvt_row row = { MIZU_TYPE_REAL, cvt, 8, 8 };
+  arrow_write_cvt(dst, a, col, &row, NULL);
 }
 
 /* One leaf's validity bitmap into the section: verbatim for a single
@@ -1371,7 +1468,7 @@ static void arrow_bitmap_write(uint8_t *dst, mizu_arrow *a, int col,
   int64_t done = 0;
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
-    if (ba->null_count != 0 && ba->buffers[0] != NULL) {
+    if (arrow_nulls(a, col, b) != 0) {
       for (int64_t k = 0; k < ba->length; k++) {
         if (!mizu_arrow_valid(ba, k)) {
           int64_t i = done + k;
@@ -1570,6 +1667,59 @@ static uint64_t arrow_name_hash(const char *s) {
   return h;
 }
 
+/* Every column named, no duplicates. Narrow frames use the stack; wide ones
+   keep the open-addressed hash table (strcmp on a hash hit only). */
+static mizu_status arrow_names_check(mizu_arrow *a) {
+  enum { NARROW = 8, STACK_CAP = 16 };
+  int32_t local_slots[STACK_CAP] = { 0 };
+  uint64_t local_hash[NARROW];
+  const size_t ncols = (size_t) a->ncols;
+  size_t ncap = STACK_CAP;
+  while (ncap < ncols * 2) ncap *= 2;
+  const int heap = ncols > NARROW;
+  int32_t *nslots = local_slots;
+  uint64_t *nhash = local_hash;
+  if (heap) {
+    nslots = calloc(ncap, sizeof(*nslots));
+    nhash = malloc(ncols * sizeof(*nhash));
+    if (nslots == NULL || nhash == NULL) {
+      free(nslots);
+      free(nhash);
+      mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
+      return MIZU_ERR;
+    }
+  }
+  mizu_status st = MIZU_OK;
+  for (int i = 0; i < a->ncols; i++) {
+    const char *nm = a->schema->children[i] != NULL ?
+      a->schema->children[i]->name : NULL;
+    if (nm == NULL) {
+      st = arrow_decline("an unnamed Arrow column has no portable home "
+                         "(an R data.frame needs names)");
+      break;
+    }
+    const uint64_t h = arrow_name_hash(nm);
+    nhash[i] = h;
+    size_t s = (size_t) h & (ncap - 1);
+    while (nslots[s] != 0) {
+      const int j = nslots[s] - 1;
+      if (nhash[j] == h &&
+          strcmp(a->schema->children[j]->name, nm) == 0) {
+        st = arrow_decline("an Arrow frame with duplicate column names");
+        goto done;
+      }
+      s = (s + 1) & (ncap - 1);
+    }
+    nslots[s] = i + 1;
+  }
+done:
+  if (heap) {
+    free(nslots);
+    free(nhash);
+  }
+  return st;
+}
+
 static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                               const ArrowArray *const *batches,
                               size_t n_batches, uint32_t peer_caps, int frame) {
@@ -1580,79 +1730,50 @@ static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                          "(a table, not an array)");
   if (schema->n_children < 1 || schema->children == NULL)
     return arrow_decline("a zero-column Arrow frame has no portable home");
-  mizu_arrow *a = calloc(1, sizeof(*a));
-  if (a == NULL) {
+  if (schema->n_children > INT32_MAX)
+    return arrow_decline("an Arrow frame past the int32 column range has no "
+                         "portable home");
+  const size_t ncols = (size_t) schema->n_children;
+  const size_t stride = sizeof(arrow_pcol) + sizeof(arrow_scol) +
+    sizeof(arrow_remote) + 2 * sizeof(int64_t);
+  if (ncols > (SIZE_MAX - sizeof(mizu_arrow)) / stride) {
     mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
     return MIZU_ERR;
   }
+  size_t block = sizeof(mizu_arrow) + ncols * stride;
+  if (n_batches != 0 &&
+      ncols > (SIZE_MAX - block) / sizeof(int64_t) / n_batches) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
+    return MIZU_ERR;
+  }
+  block += ncols * n_batches * sizeof(int64_t);
+  /* One allocation: the handle, the per-column plans/sizes/remotes, the
+     validity-table scratch, and the resolved per-batch null counts. Every
+     member is 8-aligned by construction. */
+  uint8_t *blk = calloc(1, block);
+  if (blk == NULL) {
+    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
+    return MIZU_ERR;
+  }
+  mizu_arrow *a = (mizu_arrow *) blk;
   a->schema = schema;
   a->batches = batches;
   a->nb = n_batches;
   a->peer_caps = peer_caps;
   a->ncols = (int) schema->n_children;
-  /* one block (cols is the base, freed at close): the per-column plans and
-     sizes, the remote-leaf overrides, the validity-table scratch — every
-     member 8-aligned by construction (the structs pad to 8, tab is i64) */
-  const size_t ncolsa = (size_t) a->ncols;
-  uint8_t *blk = calloc(ncolsa, sizeof(*a->cols) + sizeof(*a->scols) +
-                        sizeof(*a->remotes) + 2 * sizeof(*a->tab));
-  if (blk == NULL) {
-    mizu_arrow_close(a);
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
-    return MIZU_ERR;
-  }
-  a->cols = (arrow_pcol *) blk;
-  a->scols = (arrow_scol *) (blk + ncolsa * sizeof(*a->cols));
-  a->remotes = (arrow_remote *) (blk + ncolsa * (sizeof(*a->cols) +
-                                                 sizeof(*a->scols)));
-  a->tab = (int64_t *) (blk + ncolsa * (sizeof(*a->cols) +
-                                        sizeof(*a->scols) +
-                                        sizeof(*a->remotes)));
-  /* the names: every column named, no duplicates — an open-addressed
-     table over the name hashes (strcmp on a hash hit only), not the
-     quadratic pair scan a wide frame would pay per send */
-  size_t ncap = 16;
-  while (ncap < ncolsa * 2) ncap *= 2;
-  int32_t *nslots = calloc(ncap, sizeof(*nslots));
-  uint64_t *nhash = malloc(ncolsa * sizeof(*nhash));
-  if (nslots == NULL || nhash == NULL) {
-    free(nslots);
-    free(nhash);
-    mizu_arrow_close(a);
-    mizu_err_record_tls(MIZU_ERRCAT_OTHER, "out of memory");
-    return MIZU_ERR;
-  }
-  for (int i = 0; i < a->ncols; i++) {
-    const char *nm = schema->children[i] != NULL ?
-      schema->children[i]->name : NULL;
-    if (nm == NULL) {
-      free(nslots);
-      free(nhash);
-      mizu_arrow_close(a);
-      return arrow_decline("an unnamed Arrow column has no portable home "
-                           "(an R data.frame needs names)");
-    }
-    const uint64_t h = arrow_name_hash(nm);
-    nhash[i] = h;
-    size_t s = (size_t) h & (ncap - 1);
-    while (nslots[s] != 0) {
-      const int j = nslots[s] - 1;
-      if (nhash[j] == h && strcmp(schema->children[j]->name, nm) == 0) {
-        free(nslots);
-        free(nhash);
-        mizu_arrow_close(a);
-        return arrow_decline("an Arrow frame with duplicate column names");
-      }
-      s = (s + 1) & (ncap - 1);
-    }
-    nslots[s] = i + 1;
-  }
-  free(nslots);
-  free(nhash);
+  a->cols = (arrow_pcol *) (blk + sizeof(*a));
+  a->scols = (arrow_scol *)
+    ((uint8_t *) a->cols + ncols * sizeof(*a->cols));
+  a->remotes = (arrow_remote *)
+    ((uint8_t *) a->scols + ncols * sizeof(*a->scols));
+  a->tab = (int64_t *)
+    ((uint8_t *) a->remotes + ncols * sizeof(*a->remotes));
+  a->batch_nulls = a->tab + 2 * ncols;
+  if (arrow_names_check(a) != MIZU_OK) goto fail;
   for (int i = 0; i < a->ncols; i++)
     if (schema->children[i] == NULL ||
         arrow_classify(a, i, schema->children[i]) < 0)
-      goto fail_classify;
+      goto fail;
   for (size_t b = 0; b < n_batches; b++) {
     const ArrowArray *ba = batches[b];
     if (ba == NULL || ba->n_children != schema->n_children ||
@@ -1662,6 +1783,9 @@ static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                            "from the schema");
     }
     if (arrow_check_batch(a, ba) < 0) goto fail;
+    for (int i = 0; i < a->ncols; i++)
+      a->batch_nulls[(size_t) i * n_batches + b] =
+        arrow_batch_nulls(ba->children[i]);
     a->rows += ba->length;
   }
   /* the root dict's automatic row.names are the compact c(NA, -n) int32
@@ -1682,7 +1806,6 @@ static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
   }
   *out = a;
   return MIZU_OK;
-fail_classify:
 fail:
   mizu_arrow_close(a);
   return MIZU_ERR;
@@ -1901,7 +2024,5 @@ mizu_status mizu_arrow_stage(mizu_handle *h, mizu_arrow *a,
 }
 
 void mizu_arrow_close(mizu_arrow *a) {
-  if (a == NULL) return;
-  free(a->cols);   /* the one block: scols / remotes / tab ride it */
-  free(a);
+  free(a);   /* the plans, sizes, remotes, tab and null counts ride it */
 }
