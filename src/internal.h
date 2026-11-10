@@ -406,6 +406,11 @@ mizu_status mizu_token_from_name(const char *name, char *buf, size_t cap);
 const char *mizu_pool_hdr_validate(const void *region, size_t region_size,
                                   mizu_pool_hdr *out);
 
+/* Unit seam for stop's status-scan / park interleaving: stage 0 runs after
+   a non-clean scan, stage 1 immediately before park with its snapshot and
+   the current epoch. NULL outside the deterministic regression test. */
+extern void (*mizu_pool_stop_test_hook)(mizu_pool *, uint32_t, uint32_t, int);
+
 // Payload-policy helpers ------------------------------------------------------------
 
 /* Whether a staged payload created no keeper record, so the collect-side

@@ -1451,6 +1451,7 @@ mizu_status mizu_pool_leave(mizu_pool *p) {
   /* our slot reads FREE or REAPING now, never LIVE — so this exit runs
      the drainer-free finalize whenever no other worker stays behind */
   pool_reaping_sweep(p);
+  mizu_unpark(pool_sub_pk(p, 0));   /* the controller's stop wait */
   /* the slot's own lock releases now, so the slot reads properly departed
      to any prober; the full release is deferred while kept results anchor
      region lifetimes — the retiree's lame-duck loop drives it. The sweep
@@ -4838,6 +4839,8 @@ int mizu_pool_deque_pull(mizu_pool *p, uint32_t n) {
 
 // Stop ---------------------------------------------------------------------------------
 
+void (*mizu_pool_stop_test_hook)(mizu_pool *, uint32_t, uint32_t, int) = NULL;
+
 mizu_status mizu_pool_stop(mizu_pool *p, double timeout_ms) {
   if (p == NULL || p->released) return MIZU_OK;   /* stop is idempotent */
   if (p->self_pid != mizu_self_pid()) {
@@ -4859,6 +4862,7 @@ mizu_status mizu_pool_stop(mizu_pool *p, double timeout_ms) {
   int clean;
   int interrupted = 0;
   for (;;) {
+    uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, 0));
     clean = 1;
     for (uint32_t i = 0; i < p->hdr.max_workers; i++) {
       int32_t st = atomic_load_explicit(&p->wk[i].status,
@@ -4867,10 +4871,14 @@ mizu_status mizu_pool_stop(mizu_pool *p, double timeout_ms) {
           st == MIZU_WK_CLAIMING)
         clean = 0;
     }
+    if (!clean && mizu_pool_stop_test_hook != NULL)
+      mizu_pool_stop_test_hook(p, 0, 0, 0);
     if (clean || (deadline >= 0 && mizu_now() >= deadline)) break;
     for (uint32_t i = 0; i < p->hdr.max_workers; i++)
       mizu_unpark(pool_wk_pk(p, i));
-    uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, 0));
+    if (mizu_pool_stop_test_hook != NULL)
+      mizu_pool_stop_test_hook(p, e,
+                               mizu_parker_snapshot(pool_sub_pk(p, 0)), 1);
     mizu_park_bracket(&p->h.binding, 1);
     mizu_park(pool_sub_pk(p, 0), e, 50);
     mizu_park_bracket(&p->h.binding, 0);

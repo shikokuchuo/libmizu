@@ -29,6 +29,8 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ### Fixed
 
+- `mizu_pool_stop()` could wait an extra 50 ms after the last worker exited
+  cleanly.
 - An event-driven pool consumer could miss the wake for a task result
   published immediately after submission and wait indefinitely.
 

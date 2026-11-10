@@ -526,6 +526,48 @@ static void test_stop(void) {
   puts("ok stop");
 }
 
+static int stop_scan_calls, stop_park_calls;
+static uint32_t stop_snapshot, stop_current;
+
+static void stop_clean_leave_hook(mizu_pool *p, uint32_t snapshot,
+                                  uint32_t current, int stage) {
+  assert(p == ctrl);
+  if (stage == 0) {
+    stop_scan_calls++;
+    assert(mizu_pool_leave(wk) == MIZU_OK);   /* the last live worker */
+  } else {
+    assert(stage == 1);
+    stop_park_calls++;
+    stop_snapshot = snapshot;
+    stop_current = current;
+  }
+}
+
+/* The final clean leave lands after stop's LIVE scan but before its park.
+   The pre-scan snapshot must observe the leave's epoch increment; the old
+   post-leave snapshot compares equal and sleeps out its 50 ms slice. */
+static void test_stop_clean_leave_wake(void) {
+  for (int rep = 0; rep < 12; rep++) {
+    pool_pair(2, 2, 8, 64, 64, 64, 512);
+    assert(mizu_pool_leave(wk2) == MIZU_OK);
+    stop_scan_calls = stop_park_calls = 0;
+    stop_snapshot = stop_current = 0;
+    mizu_pool_stop_test_hook = stop_clean_leave_hook;
+    assert(mizu_pool_stop(ctrl, 1000) == MIZU_OK);
+    mizu_pool_stop_test_hook = NULL;
+    assert(stop_scan_calls == 1);
+    assert(stop_park_calls == 1);
+    assert(stop_snapshot != stop_current);
+    mizu_pool_destroy(wk2);
+    wk2 = NULL;
+    mizu_pool_destroy(wk);
+    wk = NULL;
+    mizu_pool_destroy(ctrl);
+    ctrl = NULL;
+  }
+  puts("ok stop_clean_leave_wake");
+}
+
 /* Steal: a nested submit queues on the worker's own deque; a peer's step
    steals and executes it. */
 static void test_steal(void) {
@@ -4737,6 +4779,7 @@ int main(void) {
   test_cancel();
   test_attach();
   test_stop();
+  test_stop_clean_leave_wake();
   test_steal();
   test_nested();
   test_err_publish();
