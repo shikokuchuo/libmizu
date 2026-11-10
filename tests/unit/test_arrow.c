@@ -3059,6 +3059,136 @@ static void test_col_writers(void) {
   mizu_arrow_close(a);
 }
 
+/* The binding-side concats: mizu_arrow_col_validity against a per-bit
+   reference over bit-unaligned chunked batches (and the all-present fill
+   on a null-free column), mizu_arrow_col_utf8 against the per-element
+   gather, with its declines. */
+static void test_col_concat(void) {
+  enum { NB = 3, CAP = 400 };
+  static const int64_t lens[NB] = { 131, 0, 197 };
+  static const int64_t offs[NB] = { 3, 5, 13 };
+  ArrowSchema ci, cs, root;
+  ArrowSchema *kids[2] = { &ci, &cs };
+  mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+  static int32_t x[CAP];
+  static int32_t so[NB][CAP + 1];
+  static char sb[NB][CAP * 3];
+  for (int form = 0; form < 3; form++) {
+    /* form 0: random nulls; 1: a bitmap with a zero count; 2: no bitmap */
+    uint8_t valid[NB][CAP / 8];
+    const void *ib[NB][2], *sbuf[NB][3];
+    ArrowArray ai[NB], as[NB], bat[NB];
+    ArrowArray *bk[NB][2];
+    const ArrowArray *batches[NB];
+    uint64_t rng = UINT64_C(0x9E3779B97F4A7C15) + (uint64_t) form;
+    int64_t rows = 0;
+    for (int b = 0; b < NB; b++) {
+      for (size_t i = 0; i < sizeof valid[b]; i++)
+        valid[b][i] = (uint8_t) test_rng(&rng);
+      /* strings of length 0..2 from a nonzero first offset */
+      so[b][0] = 7 * b;
+      for (int i = 0; i < CAP; i++) {
+        const int len = (int) (test_rng(&rng) % 3);
+        for (int j = 0; j < len; j++)
+          sb[b][so[b][i] + j] = (char) ('a' + test_rng(&rng) % 26);
+        so[b][i + 1] = so[b][i] + len;
+      }
+      ib[b][0] = form == 2 ? NULL : valid[b];
+      ib[b][1] = x;
+      sbuf[b][0] = NULL;
+      sbuf[b][1] = so[b];
+      sbuf[b][2] = sb[b];
+      bk[b][0] = &ai[b];
+      bk[b][1] = &as[b];
+      mk_array(&ai[b], lens[b], form == 0 ? -1 : 0, offs[b], 2, ib[b], NULL,
+               NULL);
+      mk_array(&as[b], lens[b], 0, offs[b], 3, sbuf[b], NULL, NULL);
+      mk_array(&bat[b], lens[b], 0, 0, 1, NULL, bk[b], NULL);
+      bat[b].n_children = 2;
+      batches[b] = &bat[b];
+      rows += lens[b];
+    }
+    mizu_arrow *a = NULL;
+    assert(mizu_arrow_open(&a, &root, batches, NB, 0) == MIZU_OK);
+
+    uint8_t got[(2 * CAP + 7) / 8];
+    memset(got, 0, sizeof got);
+    int64_t i = 0, nulls = 0;
+    const int64_t n = mizu_arrow_col_validity(a, 0, got);
+    assert(mizu_arrow_col_validity(a, 0, NULL) == n);
+    for (int b = 0; b < NB; b++)
+      for (int64_t k = 0; k < lens[b]; k++, i++) {
+        const int v = form != 0 ||
+          test_bit(valid[b], (size_t) (offs[b] + k));
+        assert(test_bit(got, (size_t) i) == v);
+        nulls += !v;
+      }
+    assert(i == rows && n == nulls);
+    assert(form == 0 ? n > 0 : n == 0);
+    assert(mizu_arrow_col_validity(a, 2, got) == 0);
+
+    /* the string column: the sizing call, then offsets and bytes against
+       the per-element accessor */
+    const int64_t total = mizu_arrow_col_utf8(a, 1, NULL, NULL);
+    assert(total >= 0);
+    int32_t *o32 = malloc(((size_t) rows + 1) * 4);
+    uint8_t *data = malloc((size_t) total + 1);
+    assert(mizu_arrow_col_utf8(a, 1, o32, data) == total);
+    assert(o32[0] == 0 && o32[rows] == total);
+    i = 0;
+    for (int b = 0; b < NB; b++)
+      for (int64_t k = 0; k < lens[b]; k++, i++) {
+        const uint8_t *s = NULL;
+        int32_t len = 0;
+        assert(mizu_arrow_str_at(&as[b], k, 1, &s, &len) == 1);
+        assert(o32[i + 1] - o32[i] == len);
+        assert(memcmp(data + o32[i], s, (size_t) len) == 0);
+      }
+    /* not a utf8 column, out of range */
+    assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+    assert(mizu_arrow_col_utf8(a, 2, NULL, NULL) == -1);
+    free(o32);
+    free(data);
+    mizu_arrow_close(a);
+  }
+
+  /* the string declines: a batch with nulls, large_utf8 */
+  ArrowSchema r1;
+  ArrowSchema *k1[1] = { &cs };
+  mk_schema(&r1, "+s", NULL, k1, 1, NULL, 0);
+  const int32_t no[3] = { 0, 1, 1 };
+  const uint8_t nv[1] = { 0x01 };
+  const void *nbuf[3] = { nv, no, "a" };
+  ArrowArray an, b1;
+  ArrowArray *bk1[1] = { &an };
+  mk_array(&an, 2, 1, 0, 3, nbuf, NULL, NULL);
+  mk_array(&b1, 2, 0, 0, 1, NULL, bk1, NULL);
+  b1.n_children = 1;
+  const ArrowArray *bs1[1] = { &b1 };
+  mizu_arrow *a = NULL;
+  assert(mizu_arrow_open(&a, &r1, bs1, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+  uint8_t bm[1] = { 0 };
+  assert(mizu_arrow_col_validity(a, 0, bm) == 1);
+  assert(test_bit(bm, 0) == 1 && test_bit(bm, 1) == 0);
+  mizu_arrow_close(a);
+
+  ArrowSchema cl, r2;
+  ArrowSchema *k2[1] = { &cl };
+  mk_schema(&cl, "U", "s", NULL, 0, NULL, 0);
+  mk_schema(&r2, "+s", NULL, k2, 1, NULL, 0);
+  const int64_t lo[2] = { 0, 1 };
+  const void *lbuf[3] = { NULL, lo, "a" };
+  mk_array(&an, 1, 0, 0, 3, lbuf, NULL, NULL);
+  mk_array(&b1, 1, 0, 0, 1, NULL, bk1, NULL);
+  b1.n_children = 1;
+  assert(mizu_arrow_open(&a, &r2, bs1, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+  mizu_arrow_close(a);
+}
+
 // The inline small-table form (mizu_arrow_write_ix) -----------------------------
 
 /* Frame A ("x" int32 {1, NA, 999}, "s" utf8 {"a", NA, "bc"}) as the
@@ -3399,6 +3529,7 @@ int main(void) {
   test_stage();
   test_col_info();
   test_col_writers();
+  test_col_concat();
   test_write_ix();
   test_write_ix_kinds();
   printf("test_arrow: OK\n");

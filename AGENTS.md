@@ -76,7 +76,8 @@ RngStreams, doxygen-awesome-css).
   `_stage` / `_close` / `_col_info` plus the `mizu_cvt_*` conversion
   kernels, the inline small-table form `mizu_arrow_write_ix` /
   `_write_ix_col` (one complete 'I' stream off the Arrow buffers), the
-  per-column ext writers `mizu_arrow_col_body` / `_col_blob`, and the
+  per-column ext writers `mizu_arrow_col_body` / `_col_blob`, the
+  binding-side concats `mizu_arrow_col_validity` / `_col_utf8`, and the
   dual-form accessors `mizu_arrow_valid` / `mizu_arrow_str_at`; the ABI
   structs live in `mizu_ext.h` under the spec's two include guards. The
   writer borrows the caller's ArrowArray structs

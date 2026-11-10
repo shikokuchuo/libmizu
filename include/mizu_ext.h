@@ -2389,7 +2389,8 @@ MIZU_API const mizu_cvt_row *mizu_cvt_for_arrow(const char *fmt);
    applies the element offset); off is the bit offset into data and
    validity for the bit-packed forms, and into validity for the masked
    forms. valid NULL converts every lane. The warning counts accumulate
-   into warn. */
+   into warn; warn NULL skips the counting (MIZU_CVT_U64_INT64 needs it
+   non-NULL). */
 MIZU_API void mizu_cvt_convert(uint8_t *dst, const uint8_t *src,
                                const uint8_t *valid, uint64_t off, size_t n,
                                const mizu_cvt_row *row,
@@ -2474,6 +2475,25 @@ MIZU_API size_t mizu_arrow_col_body(const mizu_arrow *, int64_t col,
    the MIZL-only marker pairs (tscale, u64) never appear here. */
 MIZU_API size_t mizu_arrow_col_blob(const mizu_arrow *, int64_t col,
                                     uint8_t *dst);
+
+/** One column's validity over every batch, concatenated from bit 0 into
+   dst ((rows + 7) / 8 bytes, Arrow LSB-first; all present when the column
+   has no nulls; the padding bits past the rows are unspecified). Returns
+   the column's null count; dst NULL counts only. For a binding building
+   its own bitmap-carrying column. col shall be in range (0 returned
+   otherwise). */
+MIZU_API int64_t mizu_arrow_col_validity(const mizu_arrow *, int64_t col,
+                                         uint8_t *dst);
+
+/** A null-free utf8 (int32-offset) column's strings over every batch,
+   concatenated for a binding's own string column: offs takes rows + 1
+   rebased int32 offsets from 0, data the packed bytes, one memcpy per
+   batch. Returns the packed byte count; offs NULL sizes. -1 (nothing
+   written) when the column is another kind or string form, a batch
+   carries nulls, or the bytes pass INT32_MAX: the caller keeps its
+   per-element gather (mizu_arrow_str_at). */
+MIZU_API int64_t mizu_arrow_col_utf8(const mizu_arrow *, int64_t col,
+                                     int32_t *offs, uint8_t *data);
 
 /** One column's 'I' value form (the inline small-table path): the plain
    vectors bare (the cvt tag off the row's wire type; the strv form over

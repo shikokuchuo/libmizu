@@ -2,6 +2,8 @@ mizu_arrow_close
 mizu_arrow_col_blob
 mizu_arrow_col_body
 mizu_arrow_col_info
+mizu_arrow_col_utf8
+mizu_arrow_col_validity
 mizu_arrow_open
 mizu_arrow_open_vector
 mizu_arrow_remote

@@ -279,6 +279,21 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       free(ix);
     }
   }
+  /* the binding-side concats into exactly-sized destinations */
+  const int64_t rows = (int64_t) len * nb;
+  for (int i = 0; rows > 0 && i < ncols; i++) {
+    uint8_t *bm = malloc((size_t) (rows + 7) / 8);
+    if (bm != NULL) (void) mizu_arrow_col_validity(a, i, bm);
+    free(bm);
+    const int64_t sn = mizu_arrow_col_utf8(a, i, NULL, NULL);
+    if (sn > 0 && sn < 1 << 20) {
+      int32_t *so = malloc(((size_t) rows + 1) * 4);
+      uint8_t *sd = malloc((size_t) sn);
+      if (so != NULL && sd != NULL) (void) mizu_arrow_col_utf8(a, i, so, sd);
+      free(so);
+      free(sd);
+    }
+  }
   mizu_arrow_close(a);
   return 0;
 }

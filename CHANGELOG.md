@@ -15,6 +15,10 @@ Versions carry an ABI contract: any wire-format change bumps
 - `mizu_arrow_open_vector` (binding-author tier): open a bare Arrow vector
   without applying the frame's automatic-row.names row limit.
 
+- `mizu_arrow_col_validity` and `mizu_arrow_col_utf8` (binding-author
+  tier): concatenate a chunked Arrow column's validity bitmap, and a
+  null-free utf8 column's offsets and bytes, into a binding's own buffers.
+
 ### Changed
 
 - Much faster conversions of large nullable Arrow columns.

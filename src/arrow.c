@@ -1403,7 +1403,7 @@ static void arrow_write_cvt(uint8_t *dst, const mizu_arrow *a, int col,
 
 /* One offsets-width batch copy (the null-free path: rebase the offsets
    per batch, the bytes one memcpy). */
-#define ARROW_STR_COPY_SPAN(otype, ow)                                       \
+#define ARROW_STR_COPY_SPAN(otype, ow, dtype)                                \
   {                                                                          \
     const uint8_t *so = (const uint8_t *) ba->buffers[1];                    \
     otype base0;                                                             \
@@ -1411,7 +1411,7 @@ static void arrow_write_cvt(uint8_t *dst, const mizu_arrow *a, int col,
     for (int64_t k = 0; k < ba->length; k++) {                               \
       otype o;                                                               \
       memcpy(&o, so + (ow) * (ba->offset + k + 1), (ow));                    \
-      offs[done + k + 1] = run + (o - base0);                                \
+      offs[done + k + 1] = (dtype) (run + (o - base0));                      \
     }                                                                        \
     otype oend;                                                              \
     memcpy(&oend, so + (ow) * (ba->offset + ba->length), (ow));              \
@@ -1443,9 +1443,9 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
       const ArrowArray *ba = a->batches[b]->children[col];
       if (ba->length == 0) continue;
       if (pc->str_form == 1)
-        ARROW_STR_COPY_SPAN(int32_t, 4)
+        ARROW_STR_COPY_SPAN(int32_t, 4, int64_t)
       else
-        ARROW_STR_COPY_SPAN(int64_t, 8)
+        ARROW_STR_COPY_SPAN(int64_t, 8, int64_t)
       done += ba->length;
     }
     return;
@@ -1471,6 +1471,30 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
     }
     done += ba->length;
   }
+}
+
+/* The null-free utf8 concat at int32 offsets (the binding-side column
+   layout). The open's walk proved every span monotone and holds the byte
+   total, so the write only rebases. */
+int64_t mizu_arrow_col_utf8(const mizu_arrow *a, int64_t col, int32_t *offs,
+                            uint8_t *data) {
+  if (col < 0 || col >= a->ncols) return -1;
+  const arrow_pcol *pc = &a->cols[col];
+  if (pc->kind != MIZU_ARROW_STR || pc->str_form != 1 ||
+      pc->str_bytes > INT32_MAX)
+    return -1;
+  for (size_t b = 0; b < a->nb; b++)
+    if (arrow_nulls(a, (int) col, b) != 0) return -1;
+  if (offs == NULL) return pc->str_bytes;
+  int64_t done = 0, run = 0;
+  offs[0] = 0;
+  for (size_t b = 0; b < a->nb; b++) {
+    const ArrowArray *ba = a->batches[b]->children[col];
+    if (ba->length == 0) continue;
+    ARROW_STR_COPY_SPAN(int32_t, 4, int32_t)
+    done += ba->length;
+  }
+  return pc->str_bytes;
 }
 #undef ARROW_STR_COPY_SPAN
 
@@ -1546,7 +1570,7 @@ static void arrow_bitmap_clear(uint8_t *dst, uint64_t pos, uint64_t nulls,
    there its whole bytes are the batch's own, so they store directly (one
    memcpy when the source is byte-aligned there too, else shifted words),
    and the tail lanes clear. */
-static void arrow_bitmap_write(uint8_t *dst, mizu_arrow *a, int col,
+static void arrow_bitmap_write(uint8_t *dst, const mizu_arrow *a, int col,
                                int64_t rows) {
   const size_t nb = ((size_t) rows + 7) / 8;
   if (a->nb == 1) {
@@ -1593,6 +1617,20 @@ static void arrow_bitmap_write(uint8_t *dst, mizu_arrow *a, int col,
     }
     done += ba->length;
   }
+}
+
+int64_t mizu_arrow_col_validity(const mizu_arrow *a, int64_t col,
+                                uint8_t *dst) {
+  if (col < 0 || col >= a->ncols) return 0;
+  int64_t nulls = 0;
+  for (size_t b = 0; b < a->nb; b++) nulls += arrow_nulls(a, (int) col, b);
+  if (dst != NULL) {
+    if (nulls != 0)
+      arrow_bitmap_write(dst, a, (int) col, a->rows);
+    else
+      memset(dst, 0xFF, ((size_t) a->rows + 7) / 8);
+  }
+  return nulls;
 }
 
 /* The MIZL directory entry (mizu.h's wire format). */
