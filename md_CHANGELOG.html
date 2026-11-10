@@ -104,6 +104,7 @@ Added</h2>
 <ul>
 <li><span class="tt"><a class="el" href="mizu__ext_8h.html#a09976e0b2b02c8c71151c489b61c5ae1" title="The event-driven drain&#39;s batch collect: mizu_pool_collect&#39;s claim half over a task set,...">mizu_pool_collect_terminal</a></span> (binding-author tier): collect every terminal task in a set in one call, never parking.</li>
 <li><span class="tt"><a class="el" href="mizu__ext_8h.html#ad048f53e3a2f08fec8390e2efb227bfd" title="The bare-vector counterpart, for a binding&#39;s per-column writers over a one-column struct wrapper.">mizu_arrow_open_vector</a></span> (binding-author tier): open a bare Arrow vector without applying the frame's automatic-row.names row limit.</li>
+<li><span class="tt"><a class="el" href="mizu__ext_8h.html#af3245f376d36ff9e312bec156042d59d" title="One column&#39;s validity over every batch, concatenated from bit 0 into dst ((rows + 7) / 8 bytes,...">mizu_arrow_col_validity</a></span> and <span class="tt"><a class="el" href="mizu__ext_8h.html#a1f9d5027f855f2e05b26065d18459800" title="A null-free utf8 (int32-offset) column&#39;s strings over every batch, concatenated for a binding&#39;s own s...">mizu_arrow_col_utf8</a></span> (binding-author tier): concatenate a chunked Arrow column's validity bitmap, and a null-free utf8 column's offsets and bytes, into a binding's own buffers.</li>
 </ul>
 <h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
 Changed</h2>

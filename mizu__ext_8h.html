@@ -811,6 +811,10 @@ const mizu_cvt_row *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_
 <tr class="memdesc:a9c46ba239dd95115bf0ac7752cd564da"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's by-value body bytes over every batch: the cvt lanes, a dictionary's 1-based codes, date / timestamp / duration doubles; the same loops the MIZL writer's leaves use, for a binding's own 'I' emitters.  <br /></td></tr>
 <tr class="memitem:aaffb92799dbde8f5c4341013ecc2b806" id="r_aaffb92799dbde8f5c4341013ecc2b806"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aaffb92799dbde8f5c4341013ecc2b806">mizu_arrow_col_blob</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst)</td></tr>
 <tr class="memdesc:aaffb92799dbde8f5c4341013ecc2b806"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's attribute dict as a bare 0x0d dict value (the §3.5 blob without its stream header, which a binding splices into its own 'I' attr form).  <br /></td></tr>
+<tr class="memitem:af3245f376d36ff9e312bec156042d59d" id="r_af3245f376d36ff9e312bec156042d59d"><td class="memItemLeft" align="right" valign="top">int64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#af3245f376d36ff9e312bec156042d59d">mizu_arrow_col_validity</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst)</td></tr>
+<tr class="memdesc:af3245f376d36ff9e312bec156042d59d"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's validity over every batch, concatenated from bit 0 into dst ((rows + 7) / 8 bytes, Arrow LSB-first; all present when the column has no nulls; the padding bits past the rows are unspecified).  <br /></td></tr>
+<tr class="memitem:a1f9d5027f855f2e05b26065d18459800" id="r_a1f9d5027f855f2e05b26065d18459800"><td class="memItemLeft" align="right" valign="top">int64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a1f9d5027f855f2e05b26065d18459800">mizu_arrow_col_utf8</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, int32_t *offs, uint8_t *data)</td></tr>
+<tr class="memdesc:a1f9d5027f855f2e05b26065d18459800"><td class="mdescLeft">&#160;</td><td class="mdescRight">A null-free utf8 (int32-offset) column's strings over every batch, concatenated for a binding's own string column: offs takes rows + 1 rebased int32 offsets from 0, data the packed bytes, one memcpy per batch.  <br /></td></tr>
 <tr class="memitem:a7927b5212da7eaf76ac2544ad14a1d1c" id="r_a7927b5212da7eaf76ac2544ad14a1d1c"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7927b5212da7eaf76ac2544ad14a1d1c">mizu_arrow_write_ix_col</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst, <a class="el" href="#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
 <tr class="memdesc:a7927b5212da7eaf76ac2544ad14a1d1c"><td class="mdescLeft">&#160;</td><td class="mdescRight">One column's 'I' value form (the inline small-table path): the plain vectors bare (the cvt tag off the row's wire type; the strv form over mizu_arrow_str_at, a malformed record put as NA like a null), the attr-marked forms splicing mizu_arrow_col_blob's bare dict.  <br /></td></tr>
 <tr class="memitem:a87a9744e7df6506871ea9d287e59eaf9" id="r_a87a9744e7df6506871ea9d287e59eaf9"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a87a9744e7df6506871ea9d287e59eaf9">mizu_arrow_write_ix</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, uint8_t *dst, <a class="el" href="#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
@@ -3496,7 +3500,7 @@ newer format", never a bare corrupt-stream error). </p>
 </div><div class="memdoc">
 
 <p>One run's convert into a reserved destination: the BIT_LGL / masked / plain dispatch. </p>
-<p>src points at the first source element (the caller applies the element offset); off is the bit offset into data and validity for the bit-packed forms, and into validity for the masked forms. valid NULL converts every lane. The warning counts accumulate into warn. </p>
+<p>src points at the first source element (the caller applies the element offset); off is the bit offset into data and validity for the bit-packed forms, and into validity for the masked forms. valid NULL converts every lane. The warning counts accumulate into warn; warn NULL skips the counting (MIZU_CVT_U64_INT64 needs it non-NULL). </p>
 
 </div>
 </div>
@@ -3667,6 +3671,69 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>One column's attribute dict as a bare 0x0d dict value (the §3.5 blob without its stream header, which a binding splices into its own 'I' attr form). </p>
 <p>Returns the byte count; dst NULL sizes. 0 for a plain column (CVT, STR): the by-value tiers carry no attribute dict on them, and the MIZL-only marker pairs (tscale, u64) never appear here. </p>
+
+</div>
+</div>
+<a id="af3245f376d36ff9e312bec156042d59d" name="af3245f376d36ff9e312bec156042d59d"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#af3245f376d36ff9e312bec156042d59d">&#9670;&#160;</a></span>mizu_arrow_col_validity()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int64_t mizu_arrow_col_validity </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t</td>          <td class="paramname"><span class="paramname"><em>col</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint8_t *</td>          <td class="paramname"><span class="paramname"><em>dst</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>One column's validity over every batch, concatenated from bit 0 into dst ((rows + 7) / 8 bytes, Arrow LSB-first; all present when the column has no nulls; the padding bits past the rows are unspecified). </p>
+<p>Returns the column's null count; dst NULL counts only. For a binding building its own bitmap-carrying column. col shall be in range (0 returned otherwise). </p>
+
+</div>
+</div>
+<a id="a1f9d5027f855f2e05b26065d18459800" name="a1f9d5027f855f2e05b26065d18459800"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1f9d5027f855f2e05b26065d18459800">&#9670;&#160;</a></span>mizu_arrow_col_utf8()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int64_t mizu_arrow_col_utf8 </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t</td>          <td class="paramname"><span class="paramname"><em>col</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int32_t *</td>          <td class="paramname"><span class="paramname"><em>offs</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint8_t *</td>          <td class="paramname"><span class="paramname"><em>data</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>A null-free utf8 (int32-offset) column's strings over every batch, concatenated for a binding's own string column: offs takes rows + 1 rebased int32 offsets from 0, data the packed bytes, one memcpy per batch. </p>
+<p>Returns the packed byte count; offs NULL sizes. -1 (nothing written) when the column is another kind or string form, a batch carries nulls, or the bytes pass INT32_MAX: the caller keeps its per-element gather (mizu_arrow_str_at). </p>
 
 </div>
 </div>

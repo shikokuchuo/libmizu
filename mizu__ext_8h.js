@@ -157,6 +157,8 @@ var mizu__ext_8h =
     [ "mizu_arrow_col_info", "mizu__ext_8h.html#a9ff09cfb0678b2391f06c0ef7e921b6f", null ],
     [ "mizu_arrow_col_body", "mizu__ext_8h.html#a9c46ba239dd95115bf0ac7752cd564da", null ],
     [ "mizu_arrow_col_blob", "mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806", null ],
+    [ "mizu_arrow_col_validity", "mizu__ext_8h.html#af3245f376d36ff9e312bec156042d59d", null ],
+    [ "mizu_arrow_col_utf8", "mizu__ext_8h.html#a1f9d5027f855f2e05b26065d18459800", null ],
     [ "mizu_arrow_write_ix_col", "mizu__ext_8h.html#a7927b5212da7eaf76ac2544ad14a1d1c", null ],
     [ "mizu_arrow_write_ix", "mizu__ext_8h.html#a87a9744e7df6506871ea9d287e59eaf9", null ],
     [ "mizu_arrow_remote", "mizu__ext_8h.html#af2be1285ffcde97080f54dfb74ba01ec", null ],
