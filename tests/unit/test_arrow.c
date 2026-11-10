@@ -627,17 +627,25 @@ static void test_chunked_and_offsets(void) {
 
 /* The rebuilt validity tail against a per-bit reference: three batches at
    bit-unaligned offsets and lengths, sparse and dense nulls, one batch
-   null-free. Padding bits past the rows stay set. */
+   null-free. The shapes cover a source bit-shifted against the
+   destination, one byte-congruent with it, and a batch shorter than the
+   lanes to the next destination byte. Padding bits past the rows stay
+   set. */
 static void test_bitmap_differential(void) {
   enum { NB = 3, CAP = 400 };
-  const int64_t lens[NB] = { 131, 64, 197 };
-  const int64_t offs[NB] = { 3, 0, 13 };
+  static const int64_t shape_lens[3][NB] = {
+    { 131, 64, 197 }, { 131, 64, 197 }, { 3, 2, 300 }
+  };
+  static const int64_t shape_offs[3][NB] = {
+    { 3, 0, 13 }, { 8, 11, 3 }, { 1, 6, 9 }
+  };
   ArrowSchema ci, root;
   ArrowSchema *kids[1] = { &ci };
   mk_schema(&ci, "i", "x", NULL, 0, NULL, 0);
   mk_schema(&root, "+s", NULL, kids, 1, NULL, 0);
   static int32_t x[CAP];
-  for (int form = 0; form < 3; form++) {
+  for (int form = 0; form < 9; form++) {
+    const int64_t *lens = shape_lens[form / 3], *offs = shape_offs[form / 3];
     uint8_t valid[NB][CAP / 8];
     const void *bufs[NB][2];
     ArrowArray arr[NB], bat[NB];
@@ -647,12 +655,13 @@ static void test_bitmap_differential(void) {
     int64_t rows = 0;
     for (int b = 0; b < NB; b++) {
       for (size_t i = 0; i < sizeof valid[b]; i++)
-        valid[b][i] = form == 0 ? (uint8_t) test_rng(&rng) : 0xFF;
-      if (form == 1) {
+        valid[b][i] = form % 3 == 0 ? (uint8_t) test_rng(&rng) : 0xFF;
+      if (form % 3 == 1) {
         test_set_bit(valid[b], (size_t) offs[b], 0);
         test_set_bit(valid[b], (size_t) (offs[b] + lens[b] - 1), 0);
       }
-      if (form == 2 && b != 1) test_set_bit(valid[b], (size_t) offs[b] + 60, 0);
+      if (form % 3 == 2 && b != 1)
+        test_set_bit(valid[b], (size_t) (offs[b] + lens[b] / 2), 0);
       bufs[b][0] = valid[b];
       bufs[b][1] = x;
       bk[b][0] = &arr[b];
