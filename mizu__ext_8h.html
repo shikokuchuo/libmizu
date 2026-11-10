@@ -803,6 +803,8 @@ const mizu_cvt_row *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_
 <tr class="memdesc:a55e9d55ac7db710049c5342df962b8f5"><td class="mdescLeft">&#160;</td><td class="mdescRight">One run's convert into a reserved destination: the BIT_LGL / masked / plain dispatch.  <br /></td></tr>
 <tr class="memitem:a7cf55414f80ba696ffe0abf15b538c36" id="r_a7cf55414f80ba696ffe0abf15b538c36"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7cf55414f80ba696ffe0abf15b538c36">mizu_arrow_open</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
 <tr class="memdesc:a7cf55414f80ba696ffe0abf15b538c36"><td class="mdescLeft">&#160;</td><td class="mdescRight">Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked).  <br /></td></tr>
+<tr class="memitem:ad048f53e3a2f08fec8390e2efb227bfd" id="r_ad048f53e3a2f08fec8390e2efb227bfd"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ad048f53e3a2f08fec8390e2efb227bfd">mizu_arrow_open_vector</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
+<tr class="memdesc:ad048f53e3a2f08fec8390e2efb227bfd"><td class="mdescLeft">&#160;</td><td class="mdescRight">The bare-vector counterpart, for a binding's per-column writers over a one-column struct wrapper.  <br /></td></tr>
 <tr class="memitem:a9ff09cfb0678b2391f06c0ef7e921b6f" id="r_a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a9ff09cfb0678b2391f06c0ef7e921b6f">mizu_arrow_col_info</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, mizu_arrow_col *out)</td></tr>
 <tr class="memdesc:a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="mdescLeft">&#160;</td><td class="mdescRight">The per-column classification, for a binding's own emitters over the same batches (pymizu's inline frame forms).  <br /></td></tr>
 <tr class="memitem:a9c46ba239dd95115bf0ac7752cd564da" id="r_a9c46ba239dd95115bf0ac7752cd564da"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a9c46ba239dd95115bf0ac7752cd564da">mizu_arrow_col_body</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, uint8_t *dst, <a class="el" href="#ac702c55dbf774692ccc596d1da4b7626">mizu_arrow_warn</a> *warn)</td></tr>
@@ -3534,6 +3536,45 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked). </p>
 <p>batches are caller-owned and must outlive the handle; the writer reads them only inside mizu_arrow_write. peer_caps is the peer's capability mask: the stage's capability conjunction and the per-column leaf choices key off it. MIZU_OK, or MIZU_ERR with the decline in the thread-local slot (mizu_last_error_message) naming the column, its format and the remedy. </p>
+
+</div>
+</div>
+<a id="ad048f53e3a2f08fec8390e2efb227bfd" name="ad048f53e3a2f08fec8390e2efb227bfd"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ad048f53e3a2f08fec8390e2efb227bfd">&#9670;&#160;</a></span>mizu_arrow_open_vector()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_arrow_open_vector </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **</td>          <td class="paramname"><span class="paramname"><em>out</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *</td>          <td class="paramname"><span class="paramname"><em>schema</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *</td>          <td class="paramname"><span class="paramname"><em>batches</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t</td>          <td class="paramname"><span class="paramname"><em>n_batches</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint32_t</td>          <td class="paramname"><span class="paramname"><em>peer_caps</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The bare-vector counterpart, for a binding's per-column writers over a one-column struct wrapper. </p>
+<p>Classification and batch vetting are identical to mizu_arrow_open, but the automatic frame row.names limit does not apply. Use mizu_arrow_open for the whole-frame writers. </p>
 
 </div>
 </div>

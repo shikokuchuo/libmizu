@@ -153,6 +153,7 @@ var mizu__ext_8h =
     [ "mizu_cvt_for_arrow", "mizu__ext_8h.html#ae171af0099fc0e65bfb73dabd3bd3542", null ],
     [ "mizu_cvt_convert", "mizu__ext_8h.html#a55e9d55ac7db710049c5342df962b8f5", null ],
     [ "mizu_arrow_open", "mizu__ext_8h.html#a7cf55414f80ba696ffe0abf15b538c36", null ],
+    [ "mizu_arrow_open_vector", "mizu__ext_8h.html#ad048f53e3a2f08fec8390e2efb227bfd", null ],
     [ "mizu_arrow_col_info", "mizu__ext_8h.html#a9ff09cfb0678b2391f06c0ef7e921b6f", null ],
     [ "mizu_arrow_col_body", "mizu__ext_8h.html#a9c46ba239dd95115bf0ac7752cd564da", null ],
     [ "mizu_arrow_col_blob", "mizu__ext_8h.html#aaffb92799dbde8f5c4341013ecc2b806", null ],
