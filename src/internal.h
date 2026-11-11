@@ -79,6 +79,11 @@ mizu_shm *mizu_shm_open_rw_heap(const char *name, int populate);
    that shm_open/shm_unlink would introduce; macOS has them in libc. */
 #ifndef _WIN32
 int mizu_shm_os_open(const char *name, int flags, mode_t mode);
+/* The consumer opens' shared half (shm.c, POSIX only): stamp the name,
+   open with oflag, size by fstat, map the whole object. 0 with addr and
+   size set, -1 otherwise; each open form adds its own post-map advice. */
+int mizu_shm_map_named(mizu_shm *shm, const char *name, int oflag, int prot,
+                      int mapflags);
 #endif
 /* Unmaps only (never frees the struct); unlink != 0 also removes the
    name. The public mizu_shm_close wraps this + free. */
@@ -329,6 +334,11 @@ intptr_t mizu_notify_ep_handle(const mizu_notify_ep *ep);
 /* Drop queued signals (the arm path: a datagram that landed while
    disarmed costs one empty drain, never a spurious fresh signal). */
 void mizu_notify_ep_drain(mizu_notify_ep *ep);
+/* The arm / disarm of a consumer's announce word (the channel and pool
+   arms share it): the arm-time stale-datagram drain, then announce ->
+   fence. The caller re-checks its data after an arm. */
+void mizu_notify_arm_word(mizu_notify_ep *ep, _Atomic int *armed,
+                         _Atomic uint32_t *word, int on);
 /* Close; unlink_path != 0 also removes the macOS socket path. */
 void mizu_notify_ep_close(mizu_notify_ep *ep, int unlink_path);
 /* The survivor's half of that unlink, for a holder that died without a

@@ -4129,6 +4129,123 @@ static mizu_status pool_collect_resolve(mizu_pool *p, const mizu_task *tasks,
   return MIZU_OK;
 }
 
+/* The collect_any / collect_all wait: loop until the set's predicate
+   holds — any slot terminal (found / st report the first, input order),
+   or with `all` every slot terminal. MIZU_OK leaves the announcements
+   standing for the caller to withdraw and rss the caller's; any other
+   status has withdrawn them and freed rss. `all` is a constant at both
+   call sites, so the forced inline folds the predicate choice away.
+   deadline and t_wait persist across a caller's take-back retry. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((always_inline))
+#endif
+static inline mizu_status pool_wait_set(mizu_pool *p, mizu_rs_hdr **rss,
+                                       size_t n, const int all,
+                                       double timeout_ms, double *deadline,
+                                       double *t_wait, size_t *found,
+                                       int32_t *st) {
+#define POOL_SET_DONE() \
+  (all ? pool_all_terminal(rss, n) : pool_any_terminal(rss, n, found, st))
+  for (;;) {
+    if (atomic_load_explicit(&p->owner_dead, memory_order_acquire) != 0)
+      pool_orphan_teardown_try(p);   /* its cancel sweep ends this wait */
+    if (POOL_SET_DONE()) break;
+
+    /* Help mode, as in collect: a worker blocked on its own subtree must
+       make progress on runnable work, not park. */
+    if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
+        p->h.binding.exec != NULL) {
+      int helped = pool_help_beat(p);
+      if (helped < 0) {
+        pool_any_unannounce(rss, n);
+        free(rss);
+        return MIZU_ERR;
+      }
+      if (helped > 0) continue;
+    }
+
+    if (timeout_ms == 0) {
+      free(rss);
+      return MIZU_TIMEOUT;
+    }
+
+    /* hoisted above the spin so the first episode's `until` is clamped
+       too — a finite timeout's clock covers the whole wait. One read
+       serves the deadline compute and the bound. */
+    double now = mizu_now();
+    if (*t_wait < 0) *t_wait = now;
+    if (*deadline < 0 && timeout_ms > 0)
+      *deadline = now + timeout_ms / 1000;
+
+    /* time-boxed spin before the park announce, as in collect: a fast
+       result caught here costs neither side a syscall, waiter_slot
+       staying unannounced through the spin. The predicate is O(n), so
+       the light stride applies only to the common small-n case */
+    uint64_t budget = p->collect_budget_ns;
+    double until = now + (double) budget / 1e9;
+    if (*deadline >= 0 && *deadline < until) until = *deadline;
+    int caught;
+    MIZU_SPIN_WAIT(POOL_SET_DONE(), until,
+                  n <= 4 ? MIZU_SPIN_CLOCK_EVERY_LIGHT :
+                           MIZU_SPIN_CLOCK_EVERY, caught);
+    if (caught) {
+      pool_collect_learn(p, *t_wait, budget);
+      break;
+    }
+
+    /* announce on every slot (the all form: every pending slot) -> fence
+       -> re-check -> park bounded; each publishing worker reads its
+       slot's waiter_slot after the publish CAS and unparks this
+       submitter's one parker */
+    uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, (uint32_t) p->sub_slot));
+    for (size_t i = 0; i < n; i++)
+      if (!all || mizu_rs_live(mizu_rs_st(rs_load(rss[i]))))
+        atomic_store_explicit(&rss[i]->waiter_slot, p->sub_slot,
+                              memory_order_relaxed);
+    atomic_thread_fence(memory_order_seq_cst);
+    if (POOL_SET_DONE()) {
+      pool_collect_learn(p, *t_wait, budget);
+      break;
+    }
+    long ms = mizu_wait_ms(*deadline);
+    if (ms < 0) {
+      pool_any_unannounce(rss, n);
+      free(rss);
+      return MIZU_TIMEOUT;
+    }
+    mizu_park_bracket(&p->h.binding, 1);
+    mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
+    mizu_park_bracket(&p->h.binding, 0);
+    p->st_collect_parks++;
+    if (mizu_check_interrupt(&p->h.binding)) {
+      pool_any_unannounce(rss, n);
+      free(rss);
+      return pool_intr(p);
+    }
+    if (POOL_SET_DONE()) {
+      pool_collect_learn(p, *t_wait, budget);
+      break;
+    }
+    /* backstop for a missed death notification, piggybacked on a wake
+       that happened regardless — never a wakeup of its own */
+    for (size_t i = 0; i < n; i++) {
+      int32_t claimant = mizu_rs_wk(rs_load(rss[i]));
+      if (claimant >= 0 && (uint32_t) claimant < p->hdr.max_workers &&
+          pool_probe_worker(p, (uint32_t) claimant) &&
+          !pool_split_waiter(p))
+        pool_force_drain(p);   /* the verdict's force, same thread */
+    }
+    if (*deadline >= 0 && mizu_now() >= *deadline &&
+        !POOL_SET_DONE()) {
+      pool_any_unannounce(rss, n);
+      free(rss);
+      return MIZU_TIMEOUT;
+    }
+  }
+#undef POOL_SET_DONE
+  return MIZU_OK;
+}
+
 /* Wait on any of a submitter's outstanding tasks, on the existing slot
    mechanics: the wait predicate is the whole slot set — announce on every
    slot, park once on the submitter's one parker (every publish's directed
@@ -4155,99 +4272,10 @@ mizu_status mizu_pool_collect_any(mizu_pool *p, const mizu_task *tasks,
   int taken_back;
 
 again:
-  for (;;) {
-    if (atomic_load_explicit(&p->owner_dead, memory_order_acquire) != 0)
-      pool_orphan_teardown_try(p);   /* its cancel sweep ends this wait */
-    if (pool_any_terminal(rss, n, &found, &st)) break;
-
-    /* Help mode, as in collect: a worker blocked on its own subtree must
-       make progress on runnable work, not park. */
-    if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
-        p->h.binding.exec != NULL) {
-      int helped = pool_help_beat(p);
-      if (helped < 0) {
-        pool_any_unannounce(rss, n);
-        free(rss);
-        return MIZU_ERR;
-      }
-      if (helped > 0) continue;
-    }
-
-    if (timeout_ms == 0) {
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
-
-    /* hoisted above the spin so the first episode's `until` is clamped
-       too — a finite timeout's clock covers the whole wait. One read
-       serves the deadline compute and the bound. */
-    double now = mizu_now();
-    if (t_wait < 0) t_wait = now;
-    if (deadline < 0 && timeout_ms > 0)
-      deadline = now + timeout_ms / 1000;
-
-    /* time-boxed spin before the park announce, as in collect: a fast
-       result caught here costs neither side a syscall, waiter_slot
-       staying unannounced through the spin. The predicate is O(n), so
-       the light stride applies only to the common small-n case */
-    uint64_t budget = p->collect_budget_ns;
-    double until = now + (double) budget / 1e9;
-    if (deadline >= 0 && deadline < until) until = deadline;
-    int caught;
-    MIZU_SPIN_WAIT(pool_any_terminal(rss, n, &found, &st), until,
-                  n <= 4 ? MIZU_SPIN_CLOCK_EVERY_LIGHT :
-                           MIZU_SPIN_CLOCK_EVERY, caught);
-    if (caught) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-
-    /* announce on every slot -> fence -> re-check -> park bounded; each
-       publishing worker reads its slot's waiter_slot after the publish
-       CAS and unparks this submitter's one parker */
-    uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, (uint32_t) p->sub_slot));
-    for (size_t i = 0; i < n; i++)
-      atomic_store_explicit(&rss[i]->waiter_slot, p->sub_slot,
-                            memory_order_relaxed);
-    atomic_thread_fence(memory_order_seq_cst);
-    if (pool_any_terminal(rss, n, &found, &st)) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-    long ms = mizu_wait_ms(deadline);
-    if (ms < 0) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
-    mizu_park_bracket(&p->h.binding, 1);
-    mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
-    mizu_park_bracket(&p->h.binding, 0);
-    p->st_collect_parks++;
-    if (mizu_check_interrupt(&p->h.binding)) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return pool_intr(p);
-    }
-    if (pool_any_terminal(rss, n, &found, &st)) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-    /* backstop for a missed death notification, piggybacked on a wake
-       that happened regardless — never a wakeup of its own */
-    for (size_t i = 0; i < n; i++) {
-      int32_t claimant = mizu_rs_wk(rs_load(rss[i]));
-      if (claimant >= 0 && (uint32_t) claimant < p->hdr.max_workers &&
-          pool_probe_worker(p, (uint32_t) claimant) &&
-          !pool_split_waiter(p))
-        pool_force_drain(p);   /* the verdict's force, same thread */
-    }
-    if (deadline >= 0 && mizu_now() >= deadline &&
-        !pool_any_terminal(rss, n, &found, &st)) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
+  {
+    mizu_status ws = pool_wait_set(p, rss, n, 0, timeout_ms, &deadline,
+                                  &t_wait, &found, &st);
+    if (ws != MIZU_OK) return ws;
   }
 
   pool_any_unannounce(rss, n);
@@ -4290,96 +4318,10 @@ static mizu_status pool_collect_all_impl(mizu_pool *p, const mizu_task *tasks,
   int taken_back;
 
 again:
-  for (;;) {
-    if (atomic_load_explicit(&p->owner_dead, memory_order_acquire) != 0)
-      pool_orphan_teardown_try(p);   /* its cancel sweep ends this wait */
-    if (pool_all_terminal(rss, n)) break;
-
-    /* Help mode, as in collect: a worker blocked on its own subtree must
-       make progress on runnable work, not park. */
-    if (p->role == MIZU_ROLE_WORKER && p->wk_slot >= 0 &&
-        p->h.binding.exec != NULL) {
-      int helped = pool_help_beat(p);
-      if (helped < 0) {
-        pool_any_unannounce(rss, n);
-        free(rss);
-        return MIZU_ERR;
-      }
-      if (helped > 0) continue;
-    }
-
-    if (timeout_ms == 0) {
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
-
-    double now = mizu_now();
-    if (t_wait < 0) t_wait = now;
-    if (deadline < 0 && timeout_ms > 0)
-      deadline = now + timeout_ms / 1000;
-
-    /* time-boxed spin before the park announce, as in collect_any: a
-       fast completion caught here costs neither side a syscall,
-       waiter_slot staying unannounced through the spin */
-    uint64_t budget = p->collect_budget_ns;
-    double until = now + (double) budget / 1e9;
-    if (deadline >= 0 && deadline < until) until = deadline;
-    int caught;
-    MIZU_SPIN_WAIT(pool_all_terminal(rss, n), until,
-                  n <= 4 ? MIZU_SPIN_CLOCK_EVERY_LIGHT :
-                           MIZU_SPIN_CLOCK_EVERY, caught);
-    if (caught) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-
-    /* announce on every pending slot -> fence -> re-check -> park
-       bounded; each publishing worker reads its slot's waiter_slot after
-       the publish CAS and unparks this submitter's one parker */
-    uint32_t e = mizu_parker_snapshot(pool_sub_pk(p, (uint32_t) p->sub_slot));
-    for (size_t i = 0; i < n; i++)
-      if (mizu_rs_live(mizu_rs_st(rs_load(rss[i]))))
-        atomic_store_explicit(&rss[i]->waiter_slot, p->sub_slot,
-                              memory_order_relaxed);
-    atomic_thread_fence(memory_order_seq_cst);
-    if (pool_all_terminal(rss, n)) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-    long ms = mizu_wait_ms(deadline);
-    if (ms < 0) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
-    mizu_park_bracket(&p->h.binding, 1);
-    mizu_park(pool_sub_pk(p, (uint32_t) p->sub_slot), e, ms);
-    mizu_park_bracket(&p->h.binding, 0);
-    p->st_collect_parks++;
-    if (mizu_check_interrupt(&p->h.binding)) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return pool_intr(p);
-    }
-    if (pool_all_terminal(rss, n)) {
-      pool_collect_learn(p, t_wait, budget);
-      break;
-    }
-    /* backstop for a missed death notification, piggybacked on a wake
-       that happened regardless — never a wakeup of its own */
-    for (size_t i = 0; i < n; i++) {
-      int32_t claimant = mizu_rs_wk(rs_load(rss[i]));
-      if (claimant >= 0 && (uint32_t) claimant < p->hdr.max_workers &&
-          pool_probe_worker(p, (uint32_t) claimant) &&
-          !pool_split_waiter(p))
-        pool_force_drain(p);   /* the verdict's force, same thread */
-    }
-    if (deadline >= 0 && mizu_now() >= deadline &&
-        !pool_all_terminal(rss, n)) {
-      pool_any_unannounce(rss, n);
-      free(rss);
-      return MIZU_TIMEOUT;
-    }
+  {
+    mizu_status ws = pool_wait_set(p, rss, n, 1, timeout_ms, &deadline,
+                                  &t_wait, NULL, NULL);
+    if (ws != MIZU_OK) return ws;
   }
 
   pool_any_unannounce(rss, n);
@@ -4461,34 +4403,11 @@ mizu_status mizu_pool_notify_arm(mizu_pool *p, int on) {
     return MIZU_ERR;
   }
   mizu_sub_slot *s = &p->sub[p->sub_slot];
-  if (!on) {
-    atomic_fetch_and_explicit(&s->notify, ~MIZU_WAIT_NOTIFY,
-                              memory_order_seq_cst);
-    atomic_store_explicit(&p->ntfy_armed, 0, memory_order_relaxed);
-    return MIZU_OK;
-  }
-  if (pool_notify_ep(p) == NULL) return MIZU_ERR;
-  if (!atomic_load_explicit(&p->ntfy_armed, memory_order_relaxed)) {
-    /* the disarmed -> armed transition, the only point where a queued
-       datagram is known stale: drop it (one spared empty drain, and a
-       watch installed later never fires for it). Never on a re-arm:
-       under a standing arm a clear word is a publish's signal in
-       flight, and draining it loses the wake for whatever else the
-       caller announced. The word's observed state cannot tell
-       "disarmed" from "a publish cleared it"; only this flag can. */
-    mizu_notify_ep_drain(p->ntfy_ep);
-    atomic_store_explicit(&p->ntfy_armed, 1, memory_order_relaxed);
-  }
   /* the task-slot announces are already in place (mizu_pool_task_notify
      goes first): announce the coalescing word -> fence, and let the
-     caller's terminal scan see whatever was already published. A re-arm
-     skips the RMW while the announce stands and re-stores it when a
-     publish cleared it. */
-  if ((atomic_load_explicit(&s->notify, memory_order_seq_cst) &
-       MIZU_WAIT_NOTIFY) == 0)
-    atomic_fetch_or_explicit(&s->notify, MIZU_WAIT_NOTIFY,
-                             memory_order_seq_cst);
-  atomic_thread_fence(memory_order_seq_cst);
+     caller's terminal scan see whatever was already published */
+  if (on && pool_notify_ep(p) == NULL) return MIZU_ERR;
+  mizu_notify_arm_word(p->ntfy_ep, &p->ntfy_armed, &s->notify, on);
   return MIZU_OK;
 }
 

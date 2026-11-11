@@ -748,15 +748,15 @@ int mizu_shm_create_stack(mizu_shm *shm, size_t size) {
   return MIZU_ERRCAT_NONE;
 }
 
-int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
-
+int mizu_shm_map_named(mizu_shm *shm, const char *name, int oflag, int prot,
+                      int mapflags) {
   shm->addr = NULL;
   shm->size = 0;
   shm->collapsed = 0;
   if (mizu_shm_set_name(shm, name) != 0) return -1;
   shm->pid = 0;                      /* consumer: never the creator */
 
-  int fd = mizu_shm_os_open(name, O_RDONLY, 0);
+  int fd = mizu_shm_os_open(name, oflag, 0);
   if (fd < 0) return -1;
 
   struct stat st;
@@ -765,28 +765,32 @@ int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
     return -1;
   }
   size_t size = (size_t) st.st_size;
-
-  /* No MAP_POPULATE on the consumer: pages already exist (host wrote
-     them), so populating only installs PTEs eagerly and defeats lazy
-     access (reading 1 of 10 list elements would prefault the unread 9).
-     Pages fault in on first touch. */
-  void *addr = mizu_mmap_aligned(fd, size, PROT_READ, MAP_SHARED);
+  void *addr = mizu_mmap_aligned(fd, size, prot, mapflags);
   if (addr == MAP_FAILED) {
     close(fd);
     return -1;
   }
-
   close(fd);
-
-#ifdef MADV_HUGEPAGE
-  if (size >= MIZU_HUGE_EXTENT)
-    (void) madvise(addr, size, MADV_HUGEPAGE);
-#endif
-  /* No MADV_WILLNEED on macOS: the same eager PTE install MAP_POPULATE
-     is omitted to avoid. */
 
   shm->addr = addr;
   shm->size = size;
+  return 0;
+}
+
+int mizu_shm_open_stack(mizu_shm *shm, const char *name) {
+  /* No MAP_POPULATE on the consumer: pages already exist (host wrote
+     them), so populating only installs PTEs eagerly and defeats lazy
+     access (reading 1 of 10 list elements would prefault the unread 9).
+     Pages fault in on first touch. */
+  if (mizu_shm_map_named(shm, name, O_RDONLY, PROT_READ, MAP_SHARED) != 0)
+    return -1;
+
+#ifdef MADV_HUGEPAGE
+  if (shm->size >= MIZU_HUGE_EXTENT)
+    (void) madvise(shm->addr, shm->size, MADV_HUGEPAGE);
+#endif
+  /* No MADV_WILLNEED on macOS: the same eager PTE install MAP_POPULATE
+     is omitted to avoid. */
   return 0;
 }
 
