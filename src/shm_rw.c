@@ -84,35 +84,15 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 
 /* The OS open is shm.c's mizu_shm_os_open (internal.h). */
 int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
-
-  shm->addr = NULL;
-  shm->size = 0;
-  shm->collapsed = 0;
-  if (mizu_shm_set_name(shm, name) != 0) return -1;
-  shm->pid = 0;                      /* consumer: never the creator */
-
-  int fd = mizu_shm_os_open(name, O_RDWR, 0);
-  if (fd < 0) return -1;
-
-  struct stat st;
-  if (fstat(fd, &st) != 0) {
-    close(fd);
-    return -1;
-  }
-  size_t size = (size_t) st.st_size;
-
   /* Pre-fault when asked, unlike the plain read-only consumer open: the
      whole ring is hot on the peer, so one populate beats faulting on the
      hot path. Lazy attaches (map contexts) opt out. */
-  void *addr = mizu_mmap_aligned(fd, size, PROT_READ | PROT_WRITE,
-                                 /* NOLINTNEXTLINE(bugprone-branch-clone) */
-                                 MAP_SHARED | (populate ? MAP_POPULATE : 0));
-  if (addr == MAP_FAILED) {
-    close(fd);
+  if (mizu_shm_map_named(shm, name, O_RDWR, PROT_READ | PROT_WRITE,
+                         /* NOLINTNEXTLINE(bugprone-branch-clone) */
+                         MAP_SHARED | (populate ? MAP_POPULATE : 0)) != 0)
     return -1;
-  }
-
-  close(fd);
+  void *addr = shm->addr;
+  const size_t size = shm->size;
 
 #ifndef __linux__
   /* No MAP_POPULATE here: read-touch is the pre-fault. Reads only — the
@@ -134,9 +114,6 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
   if (populate && size >= MIZU_HUGE_EXTENT)
     (void) madvise(addr, size & ~(MIZU_HUGE_EXTENT - 1), MADV_COLLAPSE);
 #endif
-
-  shm->addr = addr;
-  shm->size = size;
   return 0;
 }
 
@@ -150,41 +127,15 @@ int mizu_shm_open_rw_stack(mizu_shm *shm, const char *name, int populate) {
 mizu_shm *mizu_shm_open_ro_heap(const char *name) {
   mizu_shm *shm = malloc(sizeof(mizu_shm));
   if (shm == NULL) return NULL;
-  shm->addr = NULL;
-  shm->size = 0;
-  shm->collapsed = 0;
-  if (mizu_shm_set_name(shm, name) != 0) {
+  if (mizu_shm_map_named(shm, name, O_RDONLY, PROT_READ,
+                         MAP_SHARED | MAP_POPULATE) != 0) {
     free(shm);
     return NULL;
   }
-  shm->pid = 0;                      /* consumer: never the creator */
-
-  int fd = mizu_shm_os_open(name, O_RDONLY, 0);
-  if (fd < 0) {
-    free(shm);
-    return NULL;
-  }
-  struct stat st;
-  if (fstat(fd, &st) != 0) {
-    close(fd);
-    free(shm);
-    return NULL;
-  }
-  size_t size = (size_t) st.st_size;
-  void *addr = mizu_mmap_aligned(fd, size, PROT_READ,
-                                 MAP_SHARED | MAP_POPULATE);
-  if (addr == MAP_FAILED) {
-    close(fd);
-    free(shm);
-    return NULL;
-  }
-  close(fd);
 #ifdef MADV_HUGEPAGE
-  if (size >= MIZU_HUGE_EXTENT)
-    (void) madvise(addr, size, MADV_HUGEPAGE);
+  if (shm->size >= MIZU_HUGE_EXTENT)
+    (void) madvise(shm->addr, shm->size, MADV_HUGEPAGE);
 #endif
-  shm->addr = addr;
-  shm->size = size;
   return shm;
 }
 #endif /* __linux__ */

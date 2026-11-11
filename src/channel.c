@@ -103,8 +103,6 @@ struct mizu_channel_s {
                                   calls are externally synchronized) */
   mizu_notify_watch *ntfy_watch;
   mizu_death_watch *ntfy_dwatch;
-  void (*ntfy_cb)(void *);
-  void *ntfy_cb_ctx;
   mizu_notify_tx *ntfy_tx;
   uint64_t stat_notify_sends;
 
@@ -1327,34 +1325,12 @@ mizu_status mizu_channel_notify_arm(mizu_channel *c, int on, int *avail_out) {
   if (chan_get(c) == NULL) return MIZU_ERR;
   if (c->spin) return chan_notify_spin_err(c);
   if (avail_out != NULL) *avail_out = 0;
-  if (!on) {
-    atomic_fetch_and_explicit(c->self_parked, ~MIZU_WAIT_NOTIFY,
-                              memory_order_seq_cst);
-    atomic_store_explicit(&c->ntfy_armed, 0, memory_order_relaxed);
-    return MIZU_OK;
-  }
-  if (chan_notify_ep(c) == NULL) return MIZU_ERR;
-  if (!atomic_load_explicit(&c->ntfy_armed, memory_order_relaxed)) {
-    /* the disarmed -> armed transition, the only point where a queued
-       datagram is known stale: drop it (one spared empty drain, and a
-       watch installed later never fires for it). Never on a re-arm:
-       under a standing arm a clear word is a publish's — or a close's —
-       signal in flight, and draining it loses the wake. The word's
-       observed state cannot tell "disarmed" from "a publish cleared it";
-       only this flag can. */
-    mizu_notify_ep_drain(c->ntfy_ep);
-    atomic_store_explicit(&c->ntfy_armed, 1, memory_order_relaxed);
-  }
+  if (on && chan_notify_ep(c) == NULL) return MIZU_ERR;
+  mizu_notify_arm_word(c->ntfy_ep, &c->ntfy_armed, c->self_parked, on);
+  if (!on) return MIZU_OK;
   /* announce -> fence -> report: either the peer's publish sees the bit
      or this report sees the data — the parker protocol's announce /
-     re-check, transplanted. A re-arm skips the RMW while the announce
-     stands and re-stores it when a publish cleared it. */
-  if ((atomic_load_explicit(c->self_parked, memory_order_seq_cst) &
-       MIZU_WAIT_NOTIFY) == 0)
-    atomic_fetch_or_explicit(c->self_parked, MIZU_WAIT_NOTIFY,
-                             memory_order_seq_cst);
-  atomic_thread_fence(memory_order_seq_cst);
-  /* the report is what a zero-timeout recv would return: data in the
+     re-check, transplanted. The report is what a zero-timeout recv would return: data in the
      ring, or the terminal verdict (closed, peer gone). The caller's
      synchronous drain reads data first and the terminal last, as the
      recv orders them. A terminal already present at the arm signals
@@ -1392,8 +1368,6 @@ mizu_status mizu_channel_notify_watch(mizu_channel *c, void (*cb)(void *),
     mizu_err_record(&c->h, MIZU_ERRCAT_OTHER, "cannot start notify watch");
     return MIZU_ERR;
   }
-  c->ntfy_cb = cb;
-  c->ntfy_cb_ctx = ctx;
   /* chain the peer's death onto the same callback: a dead peer publishes
      nothing, so without this the drain would never run. The flag store
      precedes the callback, so the callback's drain reads the verdict. */
@@ -1402,8 +1376,6 @@ mizu_status mizu_channel_notify_watch(mizu_channel *c, void (*cb)(void *),
   if (c->ntfy_dwatch == NULL) {
     mizu_notify_watch_stop(c->ntfy_watch);
     c->ntfy_watch = NULL;
-    c->ntfy_cb = NULL;
-    c->ntfy_cb_ctx = NULL;
     mizu_err_record(&c->h, MIZU_ERRCAT_OTHER,
                    "cannot watch peer process %llu",
                    (unsigned long long) pid);
@@ -1422,8 +1394,6 @@ mizu_status mizu_channel_notify_unwatch(mizu_channel *c) {
     mizu_death_watch_stop(c->ntfy_dwatch);
     c->ntfy_dwatch = NULL;
   }
-  c->ntfy_cb = NULL;
-  c->ntfy_cb_ctx = NULL;
   return MIZU_OK;
 }
 

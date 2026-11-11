@@ -256,3 +256,31 @@ void mizu_notify_tx_close(mizu_notify_tx *tx) {
 }
 
 #endif /* _WIN32 */
+
+/* The arm word's transition, shared by the channel and pool arms. Off:
+   clear the announce bit and the handle's arm-cycle flag. On: at the
+   disarmed -> armed transition — the only point where a queued datagram
+   is known stale — drop it (one spared empty drain, and a watch
+   installed later never fires for it). Never on a re-arm: under a
+   standing arm a clear word is a publish's (or a close's) signal in
+   flight, and draining it loses the wake; the word's observed state
+   cannot tell "disarmed" from "a publish cleared it", only the flag can.
+   Then announce -> fence, the caller's re-check following: a re-arm
+   skips the RMW while the announce stands and re-stores it when a
+   publish cleared it. */
+void mizu_notify_arm_word(mizu_notify_ep *ep, _Atomic int *armed,
+                         _Atomic uint32_t *word, int on) {
+  if (!on) {
+    atomic_fetch_and_explicit(word, ~MIZU_WAIT_NOTIFY, memory_order_seq_cst);
+    atomic_store_explicit(armed, 0, memory_order_relaxed);
+    return;
+  }
+  if (!atomic_load_explicit(armed, memory_order_relaxed)) {
+    mizu_notify_ep_drain(ep);
+    atomic_store_explicit(armed, 1, memory_order_relaxed);
+  }
+  if ((atomic_load_explicit(word, memory_order_seq_cst) &
+       MIZU_WAIT_NOTIFY) == 0)
+    atomic_fetch_or_explicit(word, MIZU_WAIT_NOTIFY, memory_order_seq_cst);
+  atomic_thread_fence(memory_order_seq_cst);
+}
