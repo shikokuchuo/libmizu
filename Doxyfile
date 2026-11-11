@@ -6,7 +6,7 @@
 # doxygen-XML-to-markdown bridge; this config carries over unchanged.
 
 PROJECT_NAME           = libmizu
-PROJECT_BRIEF          = "Thread-speed, lock-free shared memory IPC in C11"
+PROJECT_BRIEF          = "Lock-free shared-memory IPC at thread speed in C11"
 PROJECT_NUMBER         = $(MIZU_VERSION)
 PROJECT_LOGO           = docs/assets/logo-icon.svg
 PROJECT_ICON           = docs/assets/logo-icon.svg

@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shikokuchuo/libmizu/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-api-blue.svg)](https://shikokuchuo.net/libmizu/)
 
-Thread-speed, lock-free shared memory IPC in C11.
+Lock-free shared-memory IPC at thread speed in C11.
 
 libmizu is for runtimes that parallelize with processes rather than threads. A message round trip drops from tens of microseconds over sockets to < 1 µs, so you can divide work as finely as you would with threads (see the Performance section below).
 

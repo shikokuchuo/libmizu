@@ -4,7 +4,7 @@ libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: libmizu
-Description: Thread-speed, lock-free shared memory IPC in C11
+Description: Lock-free shared-memory IPC at thread speed in C11
 URL: https://github.com/shikokuchuo/libmizu
 Version: @VERSION@
 Libs: -L${libdir} -lmizu
