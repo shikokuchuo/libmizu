@@ -2,6 +2,7 @@
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo-dark.svg"><img src="https://raw.githubusercontent.com/shikokuchuo/libmizu/main/docs/assets/logo.svg" align="right" width="240" alt="libmizu logo"/></picture>
 
+[![Release](https://img.shields.io/github/v/release/shikokuchuo/libmizu?sort=semver)](https://github.com/shikokuchuo/libmizu/releases)
 [![CI](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml/badge.svg)](https://github.com/shikokuchuo/libmizu/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/shikokuchuo/libmizu/graph/badge.svg)](https://codecov.io/gh/shikokuchuo/libmizu)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shikokuchuo/libmizu/blob/main/LICENSE)
