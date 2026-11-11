@@ -8,7 +8,14 @@ permissions:
   contents: write
 
 jobs:
+  # The tag names the exact SHA under test; no assets publish without every
+  # CI leg, including the platform matrix, fuzzers and sanitizers.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   amalgamation:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,7 +48,10 @@ jobs:
           ./public_only
 
       - name: checksums
-        run: cd dist && sha256sum mizu.c mizu.h mizu_ext.h mizu_ext.c > SHA256SUMS.txt
+        run: |
+          cd dist
+          sha256sum mizu.c mizu.h mizu_ext.h mizu_ext.c LICENSE LICENSE.note \
+            > SHA256SUMS.txt
 
       - name: attach to the release
         env:
@@ -51,4 +61,4 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" --clobber \
             dist/mizu.c dist/mizu.h dist/mizu_ext.h dist/mizu_ext.c \
-            dist/SHA256SUMS.txt
+            dist/LICENSE dist/LICENSE.note dist/SHA256SUMS.txt
