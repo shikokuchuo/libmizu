@@ -11,9 +11,9 @@
 # static inlines mizu_ext.h already gives that TU), so it ships verbatim
 # as mizu_ext.c: a C consumer compiles mizu.c alone (the inlines serve
 # it); a shared library for FFI consumers compiles mizu.c + mizu_ext.c
-# with -DMIZU_SHARED and exports the full surface. All banners carry the
-# version/SHA stamp and the license notices, so the set ships
-# self-contained (bare release assets). Idempotent.
+# with -DMIZU_SHARED and exports the full surface. LICENSE and LICENSE.note
+# ship alongside the sources, so the bare release assets are self-contained.
+# Idempotent.
 
 set -euo pipefail
 
@@ -21,6 +21,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT}"
 
 mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
 
 # Version from the header's MIZU_VERSION_* macros (the single source of
 # truth); the SHA stamps provenance (-dirty on uncommitted changes,
@@ -123,5 +124,13 @@ done
   echo
   cat "$ROOT/src/ext.c"
 } > "$OUT/mizu_ext.c"
+
+# Links in the banners are attribution, not license distribution: the bare
+# release assets must carry both full texts alongside the sources.
+for notice in LICENSE LICENSE.note; do
+  if [ "$OUT/$notice" != "$ROOT/$notice" ]; then
+    cp "$ROOT/$notice" "$OUT/$notice"
+  fi
+done
 
 echo "wrote $OUT/mizu.c, $OUT/mizu.h, $OUT/mizu_ext.h and $OUT/mizu_ext.c"
