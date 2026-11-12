@@ -61,7 +61,7 @@ var NAVTREE =
       [ "ABI discipline", "md_DESIGN.html#autotoc_md31", null ]
     ] ],
     [ "Changelog", "md_CHANGELOG.html", [
-      [ "[Unreleased]", "md_CHANGELOG.html#autotoc_md33", [
+      [ "[0.2.0] - 2026-11-12", "md_CHANGELOG.html#autotoc_md33", [
         [ "Added", "md_CHANGELOG.html#autotoc_md34", null ],
         [ "Changed", "md_CHANGELOG.html#autotoc_md35", null ],
         [ "Fixed", "md_CHANGELOG.html#autotoc_md36", null ]
