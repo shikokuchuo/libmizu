@@ -106,7 +106,7 @@ extern "C" {
 #endif
 
 #define MIZU_VERSION_MAJOR 0
-#define MIZU_VERSION_MINOR 1
+#define MIZU_VERSION_MINOR 2
 #define MIZU_VERSION_PATCH 0
 
 /** Library version, "major.minor.patch". Static storage; never freed. */

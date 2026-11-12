@@ -6,7 +6,7 @@ Versions carry an ABI contract: any wire-format change bumps
 `MIZU_ABI_VERSION` in `include/mizu.h`, and the soname tracks
 `MIZU_VERSION_MAJOR`.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-12
 
 ### Added
 
