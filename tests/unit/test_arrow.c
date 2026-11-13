@@ -2608,6 +2608,78 @@ static void test_remote(void) {
   free(ref);
 }
 
+/* The lazy open: the string walks wait for mizu_arrow_validate, and a
+   column registered remote in between is never walked. */
+static void test_lazy_open(void) {
+  ArrowSchema cs, cx, root;
+  ArrowSchema *kids[2] = { &cs, &cx };
+  mk_schema(&cs, "u", "s", NULL, 0, NULL, 0);
+  mk_schema(&cx, "i", "x", NULL, 0, NULL, 0);
+  mk_schema(&root, "+s", NULL, kids, 2, NULL, 0);
+  const char sb[8] = "abcdefg";
+  const int32_t good[4] = { 0, 2, 5, 7 };
+  const int32_t bad[4] = { 0, 5, 2, 7 };   /* a non-monotonic interior */
+  const int32_t x[3] = { 1, 2, 3 };
+  const void *sbv[3] = { NULL, good, sb };
+  const void *xb[2] = { NULL, x };
+  ArrowArray as, ax, batch;
+  ArrowArray *bk[2] = { &as, &ax };
+  mk_array(&as, 3, 0, 0, 3, sbv, NULL, NULL);
+  mk_array(&ax, 3, 0, 0, 2, xb, NULL, NULL);
+  mk_array(&batch, 3, 0, 0, 1, NULL, bk, NULL);
+  batch.n_children = 2;
+  const ArrowArray *batches[1] = { &batch };
+
+  /* well-formed: lazy + validate sizes as the eager open does, the floor
+     under it; the utf8 concat declines until the walk ran */
+  mizu_arrow *a = NULL, *e = NULL;
+  assert(mizu_arrow_open(&e, &root, batches, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_open_lazy(&a, &root, batches, 1, 0) == MIZU_OK);
+  const size_t floor = mizu_arrow_size_floor(a);
+  assert(floor == mizu_arrow_size_floor(e));
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+  assert(mizu_arrow_validate(a) == MIZU_OK);
+  assert(mizu_arrow_validate(a) == MIZU_OK);   /* idempotent */
+  assert(mizu_arrow_validate(e) == MIZU_OK);   /* a no-op past an eager open */
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == 7);
+  assert(mizu_arrow_size(a) == mizu_arrow_size(e));
+  assert(floor > MIZU_HEADER_SIZE && floor <= mizu_arrow_size(a));
+  mizu_arrow_close(e);
+  mizu_arrow_close(a);
+
+  /* malformed: the lazy open passes, the validate declines */
+  sbv[1] = bad;
+  assert(mizu_arrow_open(&a, &root, batches, 1, 0) == MIZU_ERR);
+  assert(mizu_arrow_open_lazy(&a, &root, batches, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_validate(a) == MIZU_ERR);
+  assert(strstr(mizu_last_error_message(), "invalid Arrow string") != NULL);
+  mizu_arrow_close(a);
+
+  /* the same column registered remote ahead of the validate is skipped:
+     the frame writes with the remote leaf, its buffers never read */
+  size_t reftotal;
+  uint8_t *ref = ref_region(0, 3, &reftotal);
+  const char *ident = "/mizu_testref";
+  assert(mizu_arrow_open_lazy(&a, &root, batches, 1, 0) == MIZU_OK);
+  assert(mizu_arrow_remote(a, 0, ident, strlen(ident), ref, reftotal,
+                           0) == 0);
+  assert(mizu_arrow_validate(a) == MIZU_OK);
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+  const size_t total = mizu_arrow_size(a);
+  uint8_t *buf = calloc(1, total);
+  assert(buf != NULL);
+  mizu_arrow_warn warn;
+  memset(&warn, 0, sizeof warn);
+  mizu_arrow_write(a, buf, &warn);
+  mizu_mizl_entry en;
+  assert(mizu_mizl_elem(buf, total, 0, &en) == 0 && en.sexptype == 33);
+  assert(mizu_mizl_elem(buf, total, 1, &en) == 0 &&
+         en.sexptype == MIZU_TYPE_INT);
+  free(buf);
+  free(ref);
+  mizu_arrow_close(a);
+}
+
 // The overrides ----------------------------------------------------------------------
 
 static void test_root_blob_override(void) {
@@ -3523,6 +3595,7 @@ int main(void) {
   test_dict_strview_inline();
   test_remote_decline();
   test_remote();
+  test_lazy_open();
   test_root_blob_override();
   test_tz_override();
   test_override_after_size();

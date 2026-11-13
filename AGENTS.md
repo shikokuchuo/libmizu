@@ -72,7 +72,8 @@ RngStreams, doxygen-awesome-css).
   `mizu_pool_notify_arm` / `_watch` / `_unwatch`,
   `mizu_pool_task_notify`), and the Arrow frame writer (`arrow.c` — the
   Arrow C Data Interface → MIZL writer, promoted from pymizu's shmframe.c:
-  `mizu_arrow_open` / `_remote` / `_root_blob` / `_tz` / `_size` /
+  `mizu_arrow_open` / `_open_lazy` + `_validate` + `_size_floor` (the
+  string walks deferred past the remote overrides) / `_remote` / `_root_blob` / `_tz` / `_size` /
   `_stage` / `_close` / `_col_info` plus the `mizu_cvt_*` conversion
   kernels, the inline small-table form `mizu_arrow_write_ix` /
   `_write_ix_col` (one complete 'I' stream off the Arrow buffers), the

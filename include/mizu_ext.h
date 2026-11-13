@@ -2451,6 +2451,37 @@ MIZU_API mizu_status mizu_arrow_open(mizu_arrow **out,
                                      const ArrowArray *const *batches,
                                      size_t n_batches, uint32_t peer_caps);
 
+/** The open without the string walks, for a binding that registers remote
+   overrides (mizu_arrow_remote) before paying for them: a string column's
+   offsets walk (the packed byte total and the malformed-record check) is
+   O(rows), and a column crossing as a remote leaf never needs it.
+   Otherwise identical to mizu_arrow_open. Between this open and
+   mizu_arrow_validate only mizu_arrow_remote, mizu_arrow_col_info,
+   mizu_arrow_size_floor and mizu_arrow_close are valid on the handle. */
+MIZU_API mizu_status mizu_arrow_open_lazy(mizu_arrow **out,
+                                          const ArrowSchema *schema,
+                                          const ArrowArray *const *batches,
+                                          size_t n_batches,
+                                          uint32_t peer_caps);
+
+/** The string walks a lazy open deferred: every string column not yet
+   walked and not registered remote. MIZU_OK, or MIZU_ERR with the
+   malformed-record decline in the thread-local slot; the handle stays
+   open either way (the caller closes it). Idempotent, and a no-op past
+   mizu_arrow_open; mizu_arrow_stage runs it itself. A remote column
+   stays unwalked: the region writer never reads its buffers, the 'I'
+   writers read them per element through mizu_arrow_str_at (a malformed
+   record put as NA), and mizu_arrow_col_utf8 declines it. */
+MIZU_API mizu_status mizu_arrow_validate(mizu_arrow *);
+
+/** A lower bound on the fully local region span (every remote override
+   ignored), O(columns) and valid straight after a lazy open: the header,
+   the directory, the fixed-width bodies and each string column's
+   validity and offsets — the string bytes, the blobs, the tail and the
+   alignment are what it leaves out. A floor past the binding's region
+   gate proves the frame takes the region tier before any walk. */
+MIZU_API size_t mizu_arrow_size_floor(const mizu_arrow *);
+
 /** The bare-vector counterpart, for a binding's per-column writers over a
    one-column struct wrapper. Classification and batch vetting are identical
    to mizu_arrow_open, but the automatic frame row.names limit does not apply.
