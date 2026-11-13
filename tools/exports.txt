@@ -5,14 +5,17 @@ mizu_arrow_col_info
 mizu_arrow_col_utf8
 mizu_arrow_col_validity
 mizu_arrow_open
+mizu_arrow_open_lazy
 mizu_arrow_open_vector
 mizu_arrow_remote
 mizu_arrow_root_blob
 mizu_arrow_size
+mizu_arrow_size_floor
 mizu_arrow_stage
 mizu_arrow_str_at
 mizu_arrow_tz
 mizu_arrow_valid
+mizu_arrow_validate
 mizu_arrow_write_ix
 mizu_arrow_write_ix_col
 mizu_aux_hi

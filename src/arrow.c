@@ -763,7 +763,9 @@ typedef struct {
                            resolved at classify (a cap-less peer declined
                            there, so this is never a strip) */
   int64_t nlev;         /* DICT: the canonical level count (batch 0's) */
-  int64_t str_bytes;    /* STR: the packed byte total (the open's walk) */
+  int64_t str_bytes;    /* STR: the packed byte total (the string walk) */
+  int str_walked;       /* STR: the walk ran (at open, or at the lazy
+                           open's mizu_arrow_validate) */
   int u64_verbatim;     /* CVT 'L': the MIZU_CAP_MIZL_U64V verdict,
                            resolved at classify */
 } arrow_pcol;
@@ -1267,7 +1269,8 @@ static int arrow_validate_dicts(mizu_arrow *a) {
 
 /* The packed string byte total: per batch the offset span when no nulls
    (a null's span must collapse, so a batch with nulls walks). Runs at
-   open: a malformed record declines there, ahead of any emit. */
+   open, or at mizu_arrow_validate after a lazy one: a malformed record
+   declines there, ahead of any emit. */
 static int arrow_size_str(mizu_arrow *a, int col) {
   arrow_pcol *pc = &a->cols[col];
   int64_t bytes = 0;
@@ -1294,6 +1297,7 @@ static int arrow_size_str(mizu_arrow *a, int col) {
     }
   }
   pc->str_bytes = bytes;
+  pc->str_walked = 1;
   return 0;
 malformed:
   mizu_err_record_tls(MIZU_ERRCAT_OTHER,
@@ -1481,7 +1485,7 @@ int64_t mizu_arrow_col_utf8(const mizu_arrow *a, int64_t col, int32_t *offs,
   if (col < 0 || col >= a->ncols) return -1;
   const arrow_pcol *pc = &a->cols[col];
   if (pc->kind != MIZU_ARROW_STR || pc->str_form != 1 ||
-      pc->str_bytes > INT32_MAX)
+      !pc->str_walked || pc->str_bytes > INT32_MAX)
     return -1;
   for (size_t b = 0; b < a->nb; b++)
     if (arrow_nulls(a, (int) col, b) != 0) return -1;
@@ -1875,7 +1879,8 @@ done:
 
 static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                               const ArrowArray *const *batches,
-                              size_t n_batches, uint32_t peer_caps, int frame) {
+                              size_t n_batches, uint32_t peer_caps, int frame,
+                              int lazy) {
   *out = NULL;
   if (schema == NULL || schema->format == NULL ||
       strcmp(schema->format, "+s") != 0)
@@ -1951,10 +1956,12 @@ static mizu_status arrow_open(mizu_arrow **out, const ArrowSchema *schema,
   }
   if (arrow_validate_dicts(a) < 0) goto fail;
   /* the string walks: the packed byte totals, and the one malformed-
-     record check ahead of any emit */
+     record check ahead of any emit (a lazy open leaves them to
+     mizu_arrow_validate, past the caller's remote overrides) */
   for (int i = 0; i < a->ncols; i++) {
     a->any_str |= a->cols[i].kind == MIZU_ARROW_STR;
-    if (a->cols[i].kind == MIZU_ARROW_STR && arrow_size_str(a, i) < 0)
+    if (!lazy && a->cols[i].kind == MIZU_ARROW_STR &&
+        arrow_size_str(a, i) < 0)
       goto fail;
   }
   *out = a;
@@ -1967,13 +1974,53 @@ fail:
 mizu_status mizu_arrow_open(mizu_arrow **out, const ArrowSchema *schema,
                             const ArrowArray *const *batches,
                             size_t n_batches, uint32_t peer_caps) {
-  return arrow_open(out, schema, batches, n_batches, peer_caps, 1);
+  return arrow_open(out, schema, batches, n_batches, peer_caps, 1, 0);
+}
+
+mizu_status mizu_arrow_open_lazy(mizu_arrow **out, const ArrowSchema *schema,
+                                 const ArrowArray *const *batches,
+                                 size_t n_batches, uint32_t peer_caps) {
+  return arrow_open(out, schema, batches, n_batches, peer_caps, 1, 1);
+}
+
+mizu_status mizu_arrow_validate(mizu_arrow *a) {
+  for (int i = 0; i < a->ncols; i++) {
+    const arrow_pcol *pc = &a->cols[i];
+    if (pc->kind != MIZU_ARROW_STR || pc->str_walked || a->remotes[i].used)
+      continue;
+    if (arrow_size_str(a, i) < 0) return MIZU_ERR;
+    a->sized = 0;
+  }
+  return MIZU_OK;
+}
+
+size_t mizu_arrow_size_floor(const mizu_arrow *a) {
+  const size_t rows = (size_t) a->rows;
+  size_t cur = MIZU_HEADER_SIZE + 32 * (size_t) a->ncols;
+  for (int i = 0; i < a->ncols; i++) {
+    const arrow_pcol *pc = &a->cols[i];
+    switch (pc->kind) {
+    case MIZU_ARROW_CVT:
+      cur += rows * (size_t) pc->row->w_out;
+      break;
+    case MIZU_ARROW_STR:
+      cur += (size_t) mizu_mizs_geometry(a->rows).data;
+      break;
+    case MIZU_ARROW_DICT:
+      cur += rows * 4;
+      break;
+    default:
+      cur += rows * 8;
+      break;
+    }
+  }
+  return cur;
 }
 
 mizu_status mizu_arrow_open_vector(mizu_arrow **out, const ArrowSchema *schema,
                                    const ArrowArray *const *batches,
                                    size_t n_batches, uint32_t peer_caps) {
-  return arrow_open(out, schema, batches, n_batches, peer_caps, 0);
+  return arrow_open(out, schema, batches, n_batches, peer_caps, 0, 0);
 }
 
 void mizu_arrow_col_info(const mizu_arrow *a, int64_t col,
@@ -2161,6 +2208,9 @@ mizu_status mizu_arrow_stage(mizu_handle *h, mizu_arrow *a,
                         "the spill churn signal is raised");
     return MIZU_ERR;
   }
+  /* a lazy open's pending string walks (a no-op past an eager open or an
+     explicit validate): the size pass needs every local byte total */
+  if (mizu_arrow_validate(a) != MIZU_OK) return MIZU_ERR;
   if (!a->sized) arrow_size_pass(a);
   mizu_stage_reap(h);
   mizu_shm *shm;

@@ -13,6 +13,9 @@ Versions carry an ABI contract: any wire-format change bumps
 - `mizu_pool_submit_wake` (binding-author tier): the batch submit's
   closing worker wake, for a binding that abandons a batch midway and keeps
   the tasks already accepted.
+- `mizu_arrow_open_lazy`, `mizu_arrow_validate` and `mizu_arrow_size_floor`
+  (binding-author tier): open an Arrow frame without walking its string
+  columns, so a column registered as a remote leaf is never walked.
 
 ### Changed
 
