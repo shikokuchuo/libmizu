@@ -773,6 +773,16 @@ MIZU_API int mizu_pool_map_caps(mizu_pool *, uint32_t *free_rs,
 MIZU_API mizu_status mizu_pool_submit_flags(mizu_pool *, void *task_obj,
                                          uint16_t flags, mizu_task *out,
                                          double timeout_ms);
+/** The batch submit's protocol wake, for a binding that abandons
+   mizu_pool_submit_batch_fn mid-burst (a longjmp out of the supply,
+   stage_fn or trace hook) and keeps the `done` handles already accepted
+   instead of releasing them: the abandon skips the core's own wake after
+   the last publish, and without it a worker that lost the park race can
+   stay parked on those tasks. One parked-mask sweep, waking at most a
+   worker per accepted task. A NULL, released or non-submitter handle
+   is a no-op; never fails, never allocates. Not needed after a normal
+   return. */
+MIZU_API void mizu_pool_submit_wake(mizu_pool *, size_t done);
 
 // Map morsel protocol (morsel.c) -------------------------------------------------
 

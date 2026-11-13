@@ -154,6 +154,7 @@ mizu_pool_submit
 mizu_pool_submit_batch
 mizu_pool_submit_batch_fn
 mizu_pool_submit_flags
+mizu_pool_submit_wake
 mizu_pool_task_notify
 mizu_pool_task_release
 mizu_pool_task_state

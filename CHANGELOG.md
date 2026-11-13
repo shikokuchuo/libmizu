@@ -6,6 +6,20 @@ Versions carry an ABI contract: any wire-format change bumps
 `MIZU_ABI_VERSION` in `include/mizu.h`, and the soname tracks
 `MIZU_VERSION_MAJOR`.
 
+## [Unreleased]
+
+### Added
+
+- `mizu_pool_submit_wake` (binding-author tier): the batch submit's
+  closing worker wake, for a binding that abandons a batch midway and keeps
+  the tasks already accepted.
+
+### Changed
+
+- A batch submit wakes at most one idle worker per task: a short batch no
+  longer wakes every idle worker in the pool, and no worker is woken twice
+  for the same batch.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

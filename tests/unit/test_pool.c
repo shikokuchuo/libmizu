@@ -2076,6 +2076,7 @@ static void test_handle_guards(void) {
   assert(mizu_pool_signals(NULL) == NULL);
   assert(mizu_pool_help_once(NULL) == -1);
   assert(mizu_pool_deque_pull(NULL, 1) == -1);
+  mizu_pool_submit_wake(NULL, 1);   /* total: a no-op */
   assert(mizu_pool_leave(NULL) == MIZU_OK);
   assert(mizu_pool_stop(NULL, 0) == MIZU_OK);
   assert(mizu_pool_retire(NULL, 0) == MIZU_ERR);
@@ -4676,6 +4677,24 @@ static void test_batch_abandon(void) {
   assert(ps.tasks_by_state[MIZU_RS_PENDING] == 0 &&
          ps.tasks_by_state[MIZU_RS_RUNNING] == 0 &&
          ps.tasks_by_state[MIZU_RS_CANCEL] == 0);
+  /* a binding that keeps the accepted handles instead owes the burst's
+     protocol wake; the tasks then run and collect */
+  stage_count = 0;
+  stage_jmp_at = 2;
+  n_out = 99;
+  if (setjmp(stage_jmp) == 0) {
+    (void) mizu_pool_submit_batch_fn(sub, supply_bytes, objs, 8, ts,
+                                     (size_t *) &n_out, 1000);
+    assert(0);
+  }
+  stage_jmp_at = -1;
+  assert(n_out == 2);
+  mizu_pool_submit_wake(sub, n_out);
+  mizu_pool_submit_wake(sub, 0);
+  mizu_pool_submit_wake(wk, n_out);   /* a worker handle: a no-op */
+  while (mizu_pool_step(wk, 0) == MIZU_STEP_TASK) { }
+  for (size_t i = 0; i < n_out; i++)
+    collect_bytes(sub, &ts[i], "x", 1);
   pool_end();
   puts("ok batch_abandon");
 }
