@@ -3226,7 +3226,7 @@ static void test_col_concat(void) {
     mizu_arrow_close(a);
   }
 
-  /* the string declines: a batch with nulls, large_utf8 */
+  /* a batch with nulls declines; large_utf8 narrows */
   ArrowSchema r1;
   ArrowSchema *k1[1] = { &cs };
   mk_schema(&r1, "+s", NULL, k1, 1, NULL, 0);
@@ -3251,13 +3251,24 @@ static void test_col_concat(void) {
   ArrowSchema *k2[1] = { &cl };
   mk_schema(&cl, "U", "s", NULL, 0, NULL, 0);
   mk_schema(&r2, "+s", NULL, k2, 1, NULL, 0);
-  const int64_t lo[2] = { 0, 1 };
-  const void *lbuf[3] = { NULL, lo, "a" };
-  mk_array(&an, 1, 0, 0, 3, lbuf, NULL, NULL);
-  mk_array(&b1, 1, 0, 0, 1, NULL, bk1, NULL);
+  const int64_t lo[4] = { 0, 1, 2, 4 };
+  const void *lbuf[3] = { NULL, lo, "xabc" };
+  ArrowArray an2, b2;
+  ArrowArray *bk2[1] = { &an2 };
+  mk_array(&an, 2, 0, 1, 3, lbuf, NULL, NULL);
+  mk_array(&b1, 2, 0, 0, 1, NULL, bk1, NULL);
   b1.n_children = 1;
-  assert(mizu_arrow_open(&a, &r2, bs1, 1, 0) == MIZU_OK);
-  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == -1);
+  mk_array(&an2, 1, 0, 0, 3, lbuf, NULL, NULL);
+  mk_array(&b2, 1, 0, 0, 1, NULL, bk2, NULL);
+  b2.n_children = 1;
+  const ArrowArray *bs2[2] = { &b1, &b2 };
+  assert(mizu_arrow_open(&a, &r2, bs2, 2, 0) == MIZU_OK);
+  int32_t lo32[4];
+  uint8_t ld[4];
+  assert(mizu_arrow_col_utf8(a, 0, NULL, NULL) == 4);
+  assert(mizu_arrow_col_utf8(a, 0, lo32, ld) == 4);
+  assert(lo32[0] == 0 && lo32[1] == 1 && lo32[2] == 3 && lo32[3] == 4);
+  assert(memcmp(ld, "abcx", 4) == 0);
   mizu_arrow_close(a);
 }
 

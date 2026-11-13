@@ -1477,14 +1477,15 @@ static void arrow_write_str(uint8_t *block, mizu_arrow *a, int col,
   }
 }
 
-/* The null-free utf8 concat at int32 offsets (the binding-side column
-   layout). The open's walk proved every span monotone and holds the byte
-   total, so the write only rebases. */
+/* The null-free utf8 / large_utf8 concat at int32 offsets (the
+   binding-side column layout). The open's walk proved every span monotone
+   and holds the byte total (gated to int32 here), so the write only
+   rebases, a large_utf8 column's offsets narrowing as they go. */
 int64_t mizu_arrow_col_utf8(const mizu_arrow *a, int64_t col, int32_t *offs,
                             uint8_t *data) {
   if (col < 0 || col >= a->ncols) return -1;
   const arrow_pcol *pc = &a->cols[col];
-  if (pc->kind != MIZU_ARROW_STR || pc->str_form != 1 ||
+  if (pc->kind != MIZU_ARROW_STR || pc->str_form == 3 ||
       !pc->str_walked || pc->str_bytes > INT32_MAX)
     return -1;
   for (size_t b = 0; b < a->nb; b++)
@@ -1495,7 +1496,10 @@ int64_t mizu_arrow_col_utf8(const mizu_arrow *a, int64_t col, int32_t *offs,
   for (size_t b = 0; b < a->nb; b++) {
     const ArrowArray *ba = a->batches[b]->children[col];
     if (ba->length == 0) continue;
-    ARROW_STR_COPY_SPAN(int32_t, 4, int32_t)
+    if (pc->str_form == 1)
+      ARROW_STR_COPY_SPAN(int32_t, 4, int32_t)
+    else
+      ARROW_STR_COPY_SPAN(int64_t, 8, int32_t)
     done += ba->length;
   }
   return pc->str_bytes;
