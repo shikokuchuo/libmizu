@@ -34,13 +34,13 @@ Representative figures from the C bench suite (`make bench`), measured on an App
 
 | Benchmark | Best observed |
 | --- | --- |
-| Channel round trip (nil / 64 B payload) | 0.3–0.4 µs |
+| Channel round trip (nil / 64 B payload) | 0.2–0.3 µs |
 | Channel round trip (64 KiB, arena tier) | 4.0 µs |
 | Channel round trip (1 MiB, spill tier) | 50 µs |
 | Channel batch throughput (64 B, batches of 32) | 52.8 M msgs/s |
-| Pool submit + collect (nil payload) | 0.4 µs |
-| Pool submit + collect (4 KiB payload) | 1.0 µs |
-| Pool task throughput (tiny echo tasks) | ~11 M tasks/s |
+| Pool submit + collect (nil payload) | 0.2 µs |
+| Pool submit + collect (4 KiB payload) | 0.8 µs |
+| Pool task throughput (tiny echo tasks) | ~18 M tasks/s |
 
 See [`bench/notes.md`](https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md) for the full dated records, including parker wake latency and spill-region costs.
 

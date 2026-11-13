@@ -43,19 +43,19 @@ compute-scaling curve.
 
 | row | best | measured |
 |---|---|---|
-| `channel_roundtrip_NIL` | 0.37 us (n=50k) | 2026-08-22 |
+| `channel_roundtrip_NIL` | 0.21 us (n=50k) | 2026-11-13 |
 | `channel_roundtrip_64B` | 0.33 us (n=50k) | 2026-08-22 |
 | `channel_roundtrip_64KiB` | 4.04 us (n=10k; ARENA tier) | 2026-10-01 |
-| `channel_roundtrip_1MiB` | 50.4 us (n=3k; SHM_RAW spill tier) | 2026-10-01 |
+| `channel_roundtrip_1MiB` | 50.1 us (n=3k; SHM_RAW spill tier) | 2026-11-13 |
 | `channel_batch_64B` | 52.8 Mmsg/s (1M msgs, batches of 32) | 2026-10-01 |
 | `parker_wake` | 16.7 us (n=2k) | 2026-08-22 |
-| `spill_fresh_1MiB` | 10.70 us per create+close (n=300) | 2026-08-23 |
+| `spill_fresh_1MiB` | 7.44 us per create+close (n=300) | 2026-11-13 |
 | `spill_recycle_1MiB` | 0.03 us per free-list pop+insert (n=100k) | 2026-08-22 |
-| `pool_submit_collect_NIL` | 0.37 us (n=20k) | 2026-08-22 |
-| `pool_submit_collect_4KiB` | 1.04 us (n=10k; SHM_RAW both ways) | 2026-08-22 |
-| `pool_steal_w1` | 10.3M tasks/s | 2026-10-01 |
-| `pool_steal_w2` | 11.4M tasks/s | 2026-08-22 |
-| `pool_steal_w4` | 7.7M tasks/s | 2026-10-01 |
+| `pool_submit_collect_NIL` | 0.21 us (n=20k) | 2026-11-13 |
+| `pool_submit_collect_4KiB` | 0.79 us (n=10k; SHM_RAW both ways) | 2026-11-13 |
+| `pool_steal_w1` | 18.4M tasks/s | 2026-11-13 |
+| `pool_steal_w2` | 12.5M tasks/s | 2026-11-13 |
+| `pool_steal_w4` | 9.9M tasks/s | 2026-11-13 |
 
 ## Run log
 
@@ -244,3 +244,35 @@ run (5-20% slower on most masked rows), and a branchless select for dense
 Status: all other rows within run-to-run noise (±5%). Unit + ext +
 integration + fuzz (100k runs per harness, fuzzer+UBSan) green; unit
 test_arrow also green under ASan+UBSan; export surface unchanged.
+
+## 2026-11-13 — best-known refresh on 0.2.0 (6e55711)
+
+A re-measure, no code change: ten runs of `bench_channel` and `bench_pool`
+on the release commit, best per row against the table. The bests sit at
+the edge of wide bands — the two NIL rows read 0.21 us in two runs of ten
+each and 0.33 us typically, and `spill_fresh_1MiB` swings sixfold — so
+read a regression against the bands below, not the table.
+
+Results (min – max over the ten runs):
+
+| row | band | previous best |
+|---|---|---|
+| `channel_roundtrip_NIL` | 0.21 – 0.38 us | 0.37 us |
+| `channel_roundtrip_64B` | 0.37 – 0.42 us | 0.33 us |
+| `channel_roundtrip_64KiB` | 4.29 – 4.92 us | 4.04 us |
+| `channel_roundtrip_1MiB` | 50.1 – 55.4 us | 50.4 us |
+| `channel_batch_64B` | 42.7 – 49.2 Mmsg/s | 52.8 Mmsg/s |
+| `parker_wake` | 16.8 – 25.5 us | 16.7 us |
+| `spill_fresh_1MiB` | 7.44 – 44.65 us | 10.70 us |
+| `spill_recycle_1MiB` | 0.03 – 0.07 us | 0.03 us |
+| `pool_submit_collect_NIL` | 0.21 – 0.46 us | 0.37 us |
+| `pool_submit_collect_4KiB` | 0.79 – 1.21 us | 1.04 us |
+| `pool_steal_w1` | 10.0M – 18.4M tasks/s | 10.3M tasks/s |
+| `pool_steal_w2` | 10.3M – 12.5M tasks/s | 11.4M tasks/s |
+| `pool_steal_w4` | 7.7M – 9.9M tasks/s | 7.7M tasks/s |
+
+Best-known swaps: `channel_roundtrip_NIL` 0.37 -> 0.21,
+`channel_roundtrip_1MiB` 50.4 -> 50.1, `spill_fresh_1MiB` 10.70 -> 7.44,
+`pool_submit_collect_NIL` 0.37 -> 0.21, `pool_submit_collect_4KiB` 1.04 ->
+0.79, `pool_steal_w1` / `w2` / `w4` 10.3M / 11.4M / 7.7M -> 18.4M / 12.5M /
+9.9M. `bench_arrow` ran three times and is unchanged from its last entry.
