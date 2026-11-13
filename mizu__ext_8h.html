@@ -805,6 +805,12 @@ const mizu_cvt_row *&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_
 <tr class="memdesc:a55e9d55ac7db710049c5342df962b8f5"><td class="mdescLeft">&#160;</td><td class="mdescRight">One run's convert into a reserved destination: the BIT_LGL / masked / plain dispatch.  <br /></td></tr>
 <tr class="memitem:a7cf55414f80ba696ffe0abf15b538c36" id="r_a7cf55414f80ba696ffe0abf15b538c36"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7cf55414f80ba696ffe0abf15b538c36">mizu_arrow_open</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
 <tr class="memdesc:a7cf55414f80ba696ffe0abf15b538c36"><td class="mdescLeft">&#160;</td><td class="mdescRight">Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked).  <br /></td></tr>
+<tr class="memitem:a05a7feddd4602d4268f9bfc09a7e50b7" id="r_a05a7feddd4602d4268f9bfc09a7e50b7"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a05a7feddd4602d4268f9bfc09a7e50b7">mizu_arrow_open_lazy</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
+<tr class="memdesc:a05a7feddd4602d4268f9bfc09a7e50b7"><td class="mdescLeft">&#160;</td><td class="mdescRight">The open without the string walks, for a binding that registers remote overrides (mizu_arrow_remote) before paying for them: a string column's offsets walk (the packed byte total and the malformed-record check) is O(rows), and a column crossing as a remote leaf never needs it.  <br /></td></tr>
+<tr class="memitem:a6468da07754ce502f92e42e6ac216279" id="r_a6468da07754ce502f92e42e6ac216279"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a6468da07754ce502f92e42e6ac216279">mizu_arrow_validate</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *)</td></tr>
+<tr class="memdesc:a6468da07754ce502f92e42e6ac216279"><td class="mdescLeft">&#160;</td><td class="mdescRight">The string walks a lazy open deferred: every string column not yet walked and not registered remote.  <br /></td></tr>
+<tr class="memitem:a3297c3f7cffa51c08522da84ed59425f" id="r_a3297c3f7cffa51c08522da84ed59425f"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a3297c3f7cffa51c08522da84ed59425f">mizu_arrow_size_floor</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *)</td></tr>
+<tr class="memdesc:a3297c3f7cffa51c08522da84ed59425f"><td class="mdescLeft">&#160;</td><td class="mdescRight">A lower bound on the fully local region span (every remote override ignored), O(columns) and valid straight after a lazy open: the header, the directory, the fixed-width bodies and each string column's validity and offsets — the string bytes, the blobs, the tail and the alignment are what it leaves out.  <br /></td></tr>
 <tr class="memitem:ad048f53e3a2f08fec8390e2efb227bfd" id="r_ad048f53e3a2f08fec8390e2efb227bfd"><td class="memItemLeft" align="right" valign="top"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ad048f53e3a2f08fec8390e2efb227bfd">mizu_arrow_open_vector</a> (<a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **out, const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *schema, const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *batches, size_t n_batches, uint32_t peer_caps)</td></tr>
 <tr class="memdesc:ad048f53e3a2f08fec8390e2efb227bfd"><td class="mdescLeft">&#160;</td><td class="mdescRight">The bare-vector counterpart, for a binding's per-column writers over a one-column struct wrapper.  <br /></td></tr>
 <tr class="memitem:a9ff09cfb0678b2391f06c0ef7e921b6f" id="r_a9ff09cfb0678b2391f06c0ef7e921b6f"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a9ff09cfb0678b2391f06c0ef7e921b6f">mizu_arrow_col_info</a> (const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *, int64_t col, mizu_arrow_col *out)</td></tr>
@@ -3566,6 +3572,85 @@ newer format", never a bare corrupt-stream error). </p>
 
 <p>Classify every column off the schema (a struct schema; the type map of DESIGN.md's frame section), vet every batch (buffer counts, offsets, null_count range, column lengths, a uint8 column's nulls, unnamed / duplicate names, a zero-column frame) and validate the dictionaries (batch 0's levels canonical, a null level or a level set that differs across batches declines, every index range-checked). </p>
 <p>batches are caller-owned and must outlive the handle; the writer reads them only inside mizu_arrow_write. peer_caps is the peer's capability mask: the stage's capability conjunction and the per-column leaf choices key off it. MIZU_OK, or MIZU_ERR with the decline in the thread-local slot (mizu_last_error_message) naming the column, its format and the remedy. </p>
+
+</div>
+</div>
+<a id="a05a7feddd4602d4268f9bfc09a7e50b7" name="a05a7feddd4602d4268f9bfc09a7e50b7"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a05a7feddd4602d4268f9bfc09a7e50b7">&#9670;&#160;</a></span>mizu_arrow_open_lazy()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_arrow_open_lazy </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> **</td>          <td class="paramname"><span class="paramname"><em>out</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowSchema.html">ArrowSchema</a> *</td>          <td class="paramname"><span class="paramname"><em>schema</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const <a class="el" href="structArrowArray.html">ArrowArray</a> *const *</td>          <td class="paramname"><span class="paramname"><em>batches</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t</td>          <td class="paramname"><span class="paramname"><em>n_batches</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">uint32_t</td>          <td class="paramname"><span class="paramname"><em>peer_caps</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The open without the string walks, for a binding that registers remote overrides (mizu_arrow_remote) before paying for them: a string column's offsets walk (the packed byte total and the malformed-record check) is O(rows), and a column crossing as a remote leaf never needs it. </p>
+<p>Otherwise identical to mizu_arrow_open. Between this open and mizu_arrow_validate only mizu_arrow_remote, mizu_arrow_col_info, mizu_arrow_size_floor and mizu_arrow_close are valid on the handle. </p>
+
+</div>
+</div>
+<a id="a6468da07754ce502f92e42e6ac216279" name="a6468da07754ce502f92e42e6ac216279"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a6468da07754ce502f92e42e6ac216279">&#9670;&#160;</a></span>mizu_arrow_validate()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a> mizu_arrow_validate </td>
+          <td>(</td>
+          <td class="paramtype"><a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *</td>          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The string walks a lazy open deferred: every string column not yet walked and not registered remote. </p>
+<p>MIZU_OK, or MIZU_ERR with the malformed-record decline in the thread-local slot; the handle stays open either way (the caller closes it). Idempotent, and a no-op past mizu_arrow_open; mizu_arrow_stage runs it itself. A remote column stays unwalked: the region writer never reads its buffers, the 'I' writers read them per element through mizu_arrow_str_at (a malformed record put as NA), and mizu_arrow_col_utf8 declines it. </p>
+
+</div>
+</div>
+<a id="a3297c3f7cffa51c08522da84ed59425f" name="a3297c3f7cffa51c08522da84ed59425f"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a3297c3f7cffa51c08522da84ed59425f">&#9670;&#160;</a></span>mizu_arrow_size_floor()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t mizu_arrow_size_floor </td>
+          <td>(</td>
+          <td class="paramtype">const <a class="el" href="#a6062d72c93653f952fc9d52fe0788658">mizu_arrow</a> *</td>          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>A lower bound on the fully local region span (every remote override ignored), O(columns) and valid straight after a lazy open: the header, the directory, the fixed-width bodies and each string column's validity and offsets — the string bytes, the blobs, the tail and the alignment are what it leaves out. </p>
+<p>A floor past the binding's region gate proves the frame takes the region tier before any walk. </p>
 
 </div>
 </div>

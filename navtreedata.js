@@ -99,7 +99,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "annotated.html",
-"mizu__ext_8h.html#aa220b786021a70600d2438824b30d4b0"
+"mizu__ext_8h.html#a9f66dfa9fa63f4531ba830765edeecb9"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';
