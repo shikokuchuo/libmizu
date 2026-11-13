@@ -98,15 +98,27 @@ $(function(){initNavTree('md_CHANGELOG.html','',''); });
 <div class="textblock"><p><a class="anchor" id="autotoc_md32"></a></p>
 <p>All notable changes to libmizu are documented here. The format follows <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>. Versions carry an ABI contract: any wire-format change bumps <span class="tt">MIZU_ABI_VERSION</span> in <span class="tt"><a class="el" href="mizu_8h.html" title="libmizu public API: SPSC channels and work-stealing task pools between processes on one machine.">include/mizu.h</a></span>, and the soname tracks <span class="tt">MIZU_VERSION_MAJOR</span>.</p>
 <h1 class="doxsection"><a class="anchor" id="autotoc_md33"></a>
-[0.2.0] - 2026-11-12</h1>
+[Unreleased]</h1>
 <h2 class="doxsection"><a class="anchor" id="autotoc_md34"></a>
+Added</h2>
+<ul>
+<li><span class="tt"><a class="el" href="mizu__ext_8h.html#a531c96254e30d5faa0c21cdaf00da7fa" title="The batch submit&#39;s protocol wake, for a binding that abandons mizu_pool_submit_batch_fn mid-burst (a ...">mizu_pool_submit_wake</a></span> (binding-author tier): the batch submit's closing worker wake, for a binding that abandons a batch midway and keeps the tasks already accepted.</li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
+Changed</h2>
+<ul>
+<li>A batch submit wakes at most one idle worker per task: a short batch no longer wakes every idle worker in the pool, and no worker is woken twice for the same batch.</li>
+</ul>
+<h1 class="doxsection"><a class="anchor" id="autotoc_md36"></a>
+[0.2.0] - 2026-11-12</h1>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md37"></a>
 Added</h2>
 <ul>
 <li><span class="tt"><a class="el" href="mizu__ext_8h.html#a09976e0b2b02c8c71151c489b61c5ae1" title="The event-driven drain&#39;s batch collect: mizu_pool_collect&#39;s claim half over a task set,...">mizu_pool_collect_terminal</a></span> (binding-author tier): collect every terminal task in a set in one call, never parking.</li>
 <li><span class="tt"><a class="el" href="mizu__ext_8h.html#ad048f53e3a2f08fec8390e2efb227bfd" title="The bare-vector counterpart, for a binding&#39;s per-column writers over a one-column struct wrapper.">mizu_arrow_open_vector</a></span> (binding-author tier): open a bare Arrow vector without applying the frame's automatic-row.names row limit.</li>
 <li><span class="tt"><a class="el" href="mizu__ext_8h.html#af3245f376d36ff9e312bec156042d59d" title="One column&#39;s validity over every batch, concatenated from bit 0 into dst ((rows + 7) / 8 bytes,...">mizu_arrow_col_validity</a></span> and <span class="tt"><a class="el" href="mizu__ext_8h.html#a1f9d5027f855f2e05b26065d18459800" title="A null-free utf8 (int32-offset) column&#39;s strings over every batch, concatenated for a binding&#39;s own s...">mizu_arrow_col_utf8</a></span> (binding-author tier): concatenate a chunked Arrow column's validity bitmap, and a null-free utf8 column's offsets and bytes, into a binding's own buffers.</li>
 </ul>
-<h2 class="doxsection"><a class="anchor" id="autotoc_md35"></a>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md38"></a>
 Changed</h2>
 <ul>
 <li>Much faster conversions of large nullable Arrow columns.</li>
@@ -114,15 +126,15 @@ Changed</h2>
 <li>Faster first reads of large zero-copy views on Linux.</li>
 <li>Repeated sends of a payload larger than 64 MB no longer create a fresh shared-memory region per send.</li>
 </ul>
-<h2 class="doxsection"><a class="anchor" id="autotoc_md36"></a>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md39"></a>
 Fixed</h2>
 <ul>
 <li><span class="tt"><a class="el" href="mizu_8h.html#a895a9771867e8a7e96bdc4580ba669b4" title="Orderly shutdown, controller only: broadcasts shutdown, wakes every parked participant,...">mizu_pool_stop()</a></span> could wait an extra 50 ms after the last worker exited cleanly.</li>
 <li>An event-driven pool consumer could miss the wake for a task result published immediately after submission and wait indefinitely.</li>
 </ul>
-<h1 class="doxsection"><a class="anchor" id="autotoc_md37"></a>
+<h1 class="doxsection"><a class="anchor" id="autotoc_md40"></a>
 [0.1.0] - 2026-11-04</h1>
-<h2 class="doxsection"><a class="anchor" id="autotoc_md38"></a>
+<h2 class="doxsection"><a class="anchor" id="autotoc_md41"></a>
 Added</h2>
 <p>First public release.</p>
 <ul>

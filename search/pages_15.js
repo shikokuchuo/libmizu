@@ -1,7 +1,6 @@
 var searchData=
 [
-  ['wire_20format_0',['Wire format',['../md_DESIGN.html#autotoc_md9',1,'']]],
-  ['word_1',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
-  ['writer_2',['The Arrow frame writer',['../md_DESIGN.html#autotoc_md21',1,'']]],
-  ['writing_20a_20binding_3',['Writing a binding',['../index.html#autotoc_md3',1,'']]]
+  ['validity_20as_20data_0',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
+  ['verdict_1',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
+  ['views_2',['Zero-copy views',['../md_DESIGN.html#autotoc_md27',1,'']]]
 ];

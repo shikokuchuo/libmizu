@@ -90,6 +90,7 @@ var mizu__ext_8h =
     [ "mizu_pool_help_once", "mizu__ext_8h.html#a2a13266b5756027d1f83ced8677936b5", null ],
     [ "mizu_pool_map_caps", "mizu__ext_8h.html#ac0180e91c00e2d31bd546b7e39335003", null ],
     [ "mizu_pool_submit_flags", "mizu__ext_8h.html#a281b2bf26ed4b73d031f7f2acbdceeea", null ],
+    [ "mizu_pool_submit_wake", "mizu__ext_8h.html#a531c96254e30d5faa0c21cdaf00da7fa", null ],
     [ "mizu_morsel_layout", "mizu__ext_8h.html#a962a33c01eb923d346dab0cdc848a67e", null ],
     [ "mizu_morsel_hdr_check", "mizu__ext_8h.html#a64f4e5322104ad371b14e1073d3f7ef0", null ],
     [ "mizu_morsel_next", "mizu__ext_8h.html#ab83e2471a47dcc2cbac3653ecde4787c", null ],

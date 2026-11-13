@@ -1,7 +1,7 @@
 var searchData=
 [
   ['capabilities_20and_20the_20identity_20word_0',['Languages, capabilities and the identity word',['../md_DESIGN.html#autotoc_md18',1,'']]],
-  ['changed_1',['Changed',['../md_CHANGELOG.html#autotoc_md35',1,'']]],
+  ['changed_1',['Changed',['../md_CHANGELOG.html#autotoc_md35',1,'Changed'],['../md_CHANGELOG.html#autotoc_md38',1,'Changed']]],
   ['changelog_2',['Changelog',['../md_CHANGELOG.html',1,'']]],
   ['claim_3',['The keeperless claim',['../md_DESIGN.html#autotoc_md16',1,'']]],
   ['codec_4',['Interchange codec',['../md_DESIGN.html#autotoc_md17',1,'']]],

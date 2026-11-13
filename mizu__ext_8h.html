@@ -570,6 +570,8 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_deque_pull</
 <tr class="memitem:a281b2bf26ed4b73d031f7f2acbdceeea" id="r_a281b2bf26ed4b73d031f7f2acbdceeea"><td class="memItemLeft" align="right" valign="top"><a id="a281b2bf26ed4b73d031f7f2acbdceeea" name="a281b2bf26ed4b73d031f7f2acbdceeea"></a>
 <a class="el" href="mizu_8h.html#a857c484ab3e51fa410aaf9c3725da578">mizu_status</a>&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_pool_submit_flags</b> (mizu_pool *, void *task_obj, uint16_t flags, <a class="el" href="mizu_8h.html#a7a937da3734c874fd127a27e7c1c45d2">mizu_task</a> *out, double timeout_ms)</td></tr>
 <tr class="memdesc:a281b2bf26ed4b73d031f7f2acbdceeea"><td class="mdescLeft">&#160;</td><td class="mdescRight">The map runner's submit: mizu_pool_submit plus the entry flags (MIZU_ENTRY_RUNNER marks a map's join ticket, which a doorbell help beat re-homes onto the helper's own deque instead of executing). <br /></td></tr>
+<tr class="memitem:a531c96254e30d5faa0c21cdaf00da7fa" id="r_a531c96254e30d5faa0c21cdaf00da7fa"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a531c96254e30d5faa0c21cdaf00da7fa">mizu_pool_submit_wake</a> (mizu_pool *, size_t done)</td></tr>
+<tr class="memdesc:a531c96254e30d5faa0c21cdaf00da7fa"><td class="mdescLeft">&#160;</td><td class="mdescRight">The batch submit's protocol wake, for a binding that abandons mizu_pool_submit_batch_fn mid-burst (a longjmp out of the supply, stage_fn or trace hook) and keeps the <span class="tt">done</span> handles already accepted instead of releasing them: the abandon skips the core's own wake after the last publish, and without it a worker that lost the park race can stay parked on those tasks.  <br /></td></tr>
 <tr class="memitem:a962a33c01eb923d346dab0cdc848a67e" id="r_a962a33c01eb923d346dab0cdc848a67e"><td class="memItemLeft" align="right" valign="top">uint64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a962a33c01eb923d346dab0cdc848a67e">mizu_morsel_layout</a> (<a class="el" href="#adb5dbd6cab522615aa1fd18bd092485a">mizu_morsel_hdr</a> *h, uint64_t n, uint64_t morsel_size, uint64_t desc_len, uint32_t x_type, uint64_t x_len, uint32_t out_type, uint64_t out_m, uint32_t claim_n)</td></tr>
 <tr class="memdesc:a962a33c01eb923d346dab0cdc848a67e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Fill *h with the section layout for a map of n elements (morsel_size the geometry input, desc_len the descriptor stream size, x_type/x_len the optional raw x section (x_len must be exactly n elements), out_type/out_m the optional template output area, claim_n the CLAIM word count).  <br /></td></tr>
 <tr class="memitem:a64f4e5322104ad371b14e1073d3f7ef0" id="r_a64f4e5322104ad371b14e1073d3f7ef0"><td class="memItemLeft" align="right" valign="top">const char *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a64f4e5322104ad371b14e1073d3f7ef0">mizu_morsel_hdr_check</a> (const void *base, size_t size, <a class="el" href="#adb5dbd6cab522615aa1fd18bd092485a">mizu_morsel_hdr</a> *out)</td></tr>
@@ -2067,6 +2069,30 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>mizu_tune</b> (void)<
 
 <p>A map's batch-sizing inputs: claims the worker's nested-submitter slot when unclaimed (as a first nested submit does), then reports the caller's FREE result slots, the injection cap, and the entry inline budget. </p>
 <p>Only this process allocates from its own subrange, so the FREE count can only grow under it. Returns -1 on a claim failure (the handle error slot holds it). </p>
+
+</div>
+</div>
+<a id="a531c96254e30d5faa0c21cdaf00da7fa" name="a531c96254e30d5faa0c21cdaf00da7fa"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a531c96254e30d5faa0c21cdaf00da7fa">&#9670;&#160;</a></span>mizu_pool_submit_wake()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void mizu_pool_submit_wake </td>
+          <td>(</td>
+          <td class="paramtype">mizu_pool *</td>          <td class="paramname"><span class="paramname"><em></em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t</td>          <td class="paramname"><span class="paramname"><em>done</em></span>&#160;)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The batch submit's protocol wake, for a binding that abandons mizu_pool_submit_batch_fn mid-burst (a longjmp out of the supply, stage_fn or trace hook) and keeps the <span class="tt">done</span> handles already accepted instead of releasing them: the abandon skips the core's own wake after the last publish, and without it a worker that lost the park race can stay parked on those tasks. </p>
+<p>One parked-mask sweep, waking at most a worker per accepted task. A NULL, released or non-submitter handle is a no-op; never fails, never allocates. Not needed after a normal return. </p>
 
 </div>
 </div>

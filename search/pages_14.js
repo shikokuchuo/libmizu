@@ -1,6 +1,4 @@
 var searchData=
 [
-  ['validity_20as_20data_0',['Validity as data',['../md_DESIGN.html#autotoc_md22',1,'']]],
-  ['verdict_1',['Liveness lock is the death verdict',['../md_DESIGN.html#autotoc_md11',1,'']]],
-  ['views_2',['Zero-copy views',['../md_DESIGN.html#autotoc_md27',1,'']]]
+  ['unreleased_0',['[Unreleased]',['../md_CHANGELOG.html#autotoc_md33',1,'']]]
 ];
