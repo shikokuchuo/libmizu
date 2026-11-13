@@ -2137,6 +2137,23 @@ mizu_status mizu_pool_submit(mizu_pool *p, void *task_obj, mizu_task *out,
    deadline mid-burst ends the batch early (MIZU_OK, *n_out < n); fatal
    outcomes raise, with the tasks already submitted staying valid and
    collectible. */
+
+/* The burst's protocol wake: pair its last publish with a parked-mask
+   check per worker, as the single submit pairs every publish — the tasks
+   published before an early end are collectible, and only this wake
+   contains the mid-burst park race. The batch entry runs it on every
+   return; a binding that abandons mid-burst (a longjmp out of the supply,
+   stage_fn or trace hook) and keeps the accepted handles owes it. Total:
+   a NULL, released or non-submitter handle is a no-op (a worker's nested
+   push pairs its own unpark). */
+void mizu_pool_submit_wake(mizu_pool *p, size_t done) {
+  if (p == NULL || p->released || p->role == MIZU_ROLE_WORKER ||
+      p->sub_slot < 0)
+    return;
+  for (size_t k = 0; k < done && k < (size_t) p->hdr.max_workers; k++)
+    pool_wake_one_worker(p);
+}
+
 mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
                                     void *ctx, size_t n,
                                     mizu_task *out, size_t *n_out,
@@ -2196,18 +2213,15 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
     *n_out = done;   /* per task, not after the loop: a stage_fn or trace
                         hook that abandons mid-burst (a binding's longjmp)
                         leaves the accepted handles reported, so the
-                        binding's unwind can release them */
+                        binding's unwind can release them — or keep them,
+                        in which case it owes mizu_pool_submit_wake */
     pool_inj_publish(p, ring);
     if ((i & (size_t) (cad - 1)) == 0)
       for (uint32_t k = 0; k < p->hdr.max_workers; k++)
         pool_wake_one_worker(p);
   }
-  /* the protocol wake: pair the burst's last publish with a parked-mask
-     check per worker, as the single submit pairs every publish — on every
-     exit, since the tasks published before an early end are collectible
-     and only this wake contains the mid-burst park race */
-  for (size_t k = 0; k < done && k < (size_t) p->hdr.max_workers; k++)
-    pool_wake_one_worker(p);
+  /* the protocol wake, on every exit */
+  mizu_pool_submit_wake(p, done);
 
   *n_out = done;
   return rc;

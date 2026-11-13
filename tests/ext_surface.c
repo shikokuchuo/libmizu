@@ -86,6 +86,7 @@ int main(void) {
   refs += sink((mizu_any_fn) &mizu_pool_deque_pull);
   refs += sink((mizu_any_fn) &mizu_pool_map_caps);
   refs += sink((mizu_any_fn) &mizu_pool_submit_flags);
+  refs += sink((mizu_any_fn) &mizu_pool_submit_wake);
   refs += sink((mizu_any_fn) &mizu_pool_eval_mark);
   refs += sink((mizu_any_fn) &mizu_pool_unwind_sink);
 
@@ -203,7 +204,7 @@ int main(void) {
   /* A taste of the stable tier: the proof links both headers' surface. */
   refs += sink((mizu_any_fn) &mizu_shm_open_view_flags);
 
-  assert(refs == 137);
+  assert(refs == 138);
 
   /* Every ext-tier type is complete here (internal.h is absent). */
   size_t sizes = sizeof(mizu_binding) + sizeof(mizu_read_ctx) +

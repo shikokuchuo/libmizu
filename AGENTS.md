@@ -42,7 +42,7 @@ RngStreams, doxygen-awesome-css).
   machinery (`spill.c`), channel transport (`channel.c`), bytes binding
   (`bytes.c`), pool transport (`pool.c` — full verb surface: vectored
   collects, introspection, map support, armed death watches,
-  `mizu_pool_task_release`, `mizu_pool_submit_batch_fn`; the deferred-release
+  `mizu_pool_task_release`, `mizu_pool_submit_batch_fn`, `mizu_pool_submit_wake`; the deferred-release
   masks — `rel_pending` per task-table slot and `force_pending` per worker
   slot, set by any thread with one fetch-or and drained by the producing
   thread at submit entry and the worker reap points — carry the collect
