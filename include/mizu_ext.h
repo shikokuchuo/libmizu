@@ -778,8 +778,8 @@ MIZU_API mizu_status mizu_pool_submit_flags(mizu_pool *, void *task_obj,
    stage_fn or trace hook) and keeps the `done` handles already accepted
    instead of releasing them: the abandon skips the core's own wake after
    the last publish, and without it a worker that lost the park race can
-   stay parked on those tasks. One parked-worker check per accepted task,
-   capped at the worker count. A NULL, released or non-submitter handle
+   stay parked on those tasks. One parked-mask sweep, waking at most a
+   worker per accepted task. A NULL, released or non-submitter handle
    is a no-op; never fails, never allocates. Not needed after a normal
    return. */
 MIZU_API void mizu_pool_submit_wake(mizu_pool *, size_t done);

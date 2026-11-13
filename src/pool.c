@@ -1536,9 +1536,9 @@ mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
 
 // Submit --------------------------------------------------------------------------------
 
-/* Directed-unpark half of the pusher wake: find a parked (or announcing)
-   worker and unpark it. Returns 0 only when the mask read empty — every
-   worker busy. Deque pushes (nested submit, help re-home, orphan drains)
+/* Directed-unpark half of the pusher wake: find up to `want` parked (or
+   announcing) workers, scanning from `start`, and unpark each once.
+   Returns 0 only when the mask read empty — every worker busy. Deque pushes (nested submit, help re-home, orphan drains)
    use this half alone: help beats scan injection rings only, so a
    doorbell rung for deque work buys nothing but one wasted no-op beat at
    some runner's next transition — idle workers reach deque work through
@@ -1546,23 +1546,28 @@ mizu_status mizu_pool_attach(mizu_pool **out, const char *token,
    nobody parks past it. The explicit-start variants exist for the reap
    paths, which run on the death listener's callback thread and must not
    touch the handle's process-local scan rotation. */
-static int pool_unpark_worker_from(mizu_pool *p, uint32_t start) {
+static int pool_unpark_workers_from(mizu_pool *p, uint32_t start,
+                                    uint32_t want, uint64_t *woke) {
   /* pusher protocol: push, fence, then the mask load — either the parking
-     worker's rescan sees the push or we see its bit */
+     worker's rescan sees the push or we see its bit. One snapshot serves
+     the whole sweep: a worker announcing after it rescans past the push */
   atomic_thread_fence(memory_order_seq_cst);
   uint64_t w = atomic_load_explicit(p->parked_workers, memory_order_relaxed);
   if (w == 0) return 0;
   uint32_t mw = p->hdr.max_workers;
-  for (uint32_t k = 0; k < mw; k++) {
-    uint32_t i = (start + k) % mw;
-    if (!(w & (1ull << i))) continue;
+  uint32_t i = start % mw;
+  for (uint32_t k = 0; k < mw && want > 0; k++, i = i + 1 == mw ? 0 : i + 1) {
+    uint64_t bit = 1ull << i;
+    if (!(w & bit)) continue;
     int32_t expected = MIZU_WPK_PARKED;
     if (atomic_compare_exchange_strong_explicit(&p->wk[i].park_state,
                                                 &expected, MIZU_WPK_WAKING,
                                                 memory_order_seq_cst,
                                                 memory_order_relaxed)) {
       mizu_unpark(pool_wk_pk(p, i));
-      return 1;
+      if (woke != NULL) *woke |= bit;
+      want--;
+      continue;
     }
     if (expected == MIZU_WPK_IDLE) {
       /* announced but not yet parked — its rescan may already have missed
@@ -1570,19 +1575,28 @@ static int pool_unpark_worker_from(mizu_pool *p, uint32_t start) {
          snapshot predates the announce, so this unpark turns the upcoming
          sleep into an immediate return; at worst one spurious wake. */
       mizu_unpark(pool_wk_pk(p, i));
-      return 1;
+      want--;
+      continue;
     }
     if (expected == MIZU_WPK_WAKING) {
       /* a pusher that died between the CAS and the unpark leaves WAKING
          sticky: treated as "another pusher claimed the wake" it would
          wedge the worker for its full sleep bound. Complete the wake — a
-         redundant unpark is a spurious wake, absorbed by the re-check. */
-      mizu_unpark(pool_wk_pk(p, i));
-      return 1;
+         redundant unpark is a spurious wake, absorbed by the re-check.
+         The exception is a worker this burst's own earlier sweep woke
+         (`woke`): that unpark was delivered, the worker is on its way to
+         the burst, and it counts toward `want` with no second syscall. */
+      if (woke == NULL || !(*woke & bit)) mizu_unpark(pool_wk_pk(p, i));
+      want--;
+      continue;
     }
     /* RUNNING: the worker transitioned away; try the next set bit */
   }
   return 1;   /* someone was mid-transition: no doorbell, as ever */
+}
+
+static int pool_unpark_worker_from(mizu_pool *p, uint32_t start) {
+  return pool_unpark_workers_from(p, start, 1, NULL);
 }
 
 /* The injection-publish wake: the unpark half, falling through to the
@@ -1600,6 +1614,21 @@ static void pool_wake_one_worker(mizu_pool *p) {
 
 static void pool_unpark_one_worker(mizu_pool *p) {
   (void) pool_unpark_worker_from(p, p->scan_start++);
+}
+
+/* The burst form of the injection-publish wake: one fence and one mask
+   snapshot for up to `want` workers (capped at the worker count), each
+   unparked at most once — against a wake per task, which re-reads the mask
+   while a woken worker's bit is still set and spends a syscall per repeat.
+   A burst passes the same `start` and `woke` to every sweep, so a later
+   sweep meets the workers already on their way first and counts them. */
+static void pool_wake_workers_from(mizu_pool *p, uint32_t start, size_t want,
+                                   uint64_t *woke) {
+  uint32_t mw = p->hdr.max_workers;
+  uint32_t n = want < (size_t) mw ? (uint32_t) want : mw;
+  if (n == 0) return;
+  if (!pool_unpark_workers_from(p, start, n, woke))
+    atomic_store_explicit(p->help_wanted, 1u, memory_order_seq_cst);
 }
 
 /* Block until the submitter's own ring has space (announce-then-rescan on
@@ -2130,28 +2159,30 @@ mizu_status mizu_pool_submit(mizu_pool *p, void *task_obj, mizu_task *out,
    the ring cannot deadlock. Wakes keep the pusher half of the parker
    handshake: a cadence of every 64 publishes (never wider than the ring,
    so a parked worker is roused long before the ring can fill and the
-   space wait always has a popper to unpark it), then one pass per worker
-   after the last publish — a worker can still lose the park race
+   space wait always has a popper to unpark it), then one sweep after the
+   last publish, each sweep waking at most a worker per task — a worker can still lose the park race
    mid-burst (its pre-park re-check read a stale tail), and only a wake
    paired with the final publish contains that race. Ring-full past the
    deadline mid-burst ends the batch early (MIZU_OK, *n_out < n); fatal
    outcomes raise, with the tasks already submitted staying valid and
    collectible. */
 
-/* The burst's protocol wake: pair its last publish with a parked-mask
-   check per worker, as the single submit pairs every publish — the tasks
-   published before an early end are collectible, and only this wake
-   contains the mid-burst park race. The batch entry runs it on every
-   return; a binding that abandons mid-burst (a longjmp out of the supply,
-   stage_fn or trace hook) and keeps the accepted handles owes it. Total:
-   a NULL, released or non-submitter handle is a no-op (a worker's nested
-   push pairs its own unpark). */
+/* The burst's protocol wake: pair its last publish with one parked-mask
+   sweep, a worker per accepted task, as the single submit pairs every
+   publish — the tasks published before an early end are collectible, and
+   only this wake contains the mid-burst park race. The batch entry runs
+   its own on every return; a binding that abandons mid-burst (a longjmp
+   out of the supply, stage_fn or trace hook) and keeps the accepted
+   handles owes it. Total: a NULL, released or non-submitter handle is a
+   no-op (a worker's nested push pairs its own unpark). */
 void mizu_pool_submit_wake(mizu_pool *p, size_t done) {
   if (p == NULL || p->released || p->role == MIZU_ROLE_WORKER ||
       p->sub_slot < 0)
     return;
-  for (size_t k = 0; k < done && k < (size_t) p->hdr.max_workers; k++)
-    pool_wake_one_worker(p);
+  uint32_t start = p->scan_start;
+  p->scan_start += done < (size_t) p->hdr.max_workers ?
+    (uint32_t) done : p->hdr.max_workers;
+  pool_wake_workers_from(p, start, done, NULL);
 }
 
 mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
@@ -2195,6 +2226,12 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
   int64_t cad = (int64_t) p->hdr.inj_cap < 64 ? (int64_t) p->hdr.inj_cap : 64;
   size_t done = 0;
   mizu_status rc = MIZU_OK;
+  /* one scan origin and one woken set for the whole burst (advanced here,
+     ahead of any abandon) */
+  uint32_t start = p->scan_start;
+  uint64_t woke = 0;
+  p->scan_start += n < (size_t) p->hdr.max_workers ?
+    (uint32_t) n : p->hdr.max_workers;
   for (size_t i = 0; i < n; i++) {
     double rem_ms = -1;
     if (deadline >= 0) {
@@ -2216,12 +2253,13 @@ mizu_status mizu_pool_submit_batch_fn(mizu_pool *p, mizu_obj_supply supply,
                         binding's unwind can release them — or keep them,
                         in which case it owes mizu_pool_submit_wake */
     pool_inj_publish(p, ring);
-    if ((i & (size_t) (cad - 1)) == 0)
-      for (uint32_t k = 0; k < p->hdr.max_workers; k++)
-        pool_wake_one_worker(p);
+    /* a worker per task still to come, never the whole pool for a short
+       burst; the last publish is the closing wake's */
+    if ((i & (size_t) (cad - 1)) == 0 && i + 1 < n)
+      pool_wake_workers_from(p, start, n - i, &woke);
   }
   /* the protocol wake, on every exit */
-  mizu_pool_submit_wake(p, done);
+  pool_wake_workers_from(p, start, done, &woke);
 
   *n_out = done;
   return rc;
