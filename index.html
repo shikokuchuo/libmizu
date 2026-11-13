@@ -121,7 +121,7 @@ Performance</h1>
 <tr class="markdownTableHead">
 <th class="markdownTableHeadNone">Benchmark  </th><th class="markdownTableHeadNone">Best observed  </th></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Channel round trip (nil / 64 B payload)  </td><td class="markdownTableBodyNone">0.3–0.4 µs  </td></tr>
+<td class="markdownTableBodyNone">Channel round trip (nil / 64 B payload)  </td><td class="markdownTableBodyNone">0.2–0.3 µs  </td></tr>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">Channel round trip (64 KiB, arena tier)  </td><td class="markdownTableBodyNone">4.0 µs  </td></tr>
 <tr class="markdownTableRowOdd">
@@ -129,11 +129,11 @@ Performance</h1>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">Channel batch throughput (64 B, batches of 32)  </td><td class="markdownTableBodyNone">52.8 M msgs/s  </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Pool submit + collect (nil payload)  </td><td class="markdownTableBodyNone">0.4 µs  </td></tr>
+<td class="markdownTableBodyNone">Pool submit + collect (nil payload)  </td><td class="markdownTableBodyNone">0.2 µs  </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">Pool submit + collect (4 KiB payload)  </td><td class="markdownTableBodyNone">1.0 µs  </td></tr>
+<td class="markdownTableBodyNone">Pool submit + collect (4 KiB payload)  </td><td class="markdownTableBodyNone">0.8 µs  </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Pool task throughput (tiny echo tasks)  </td><td class="markdownTableBodyNone">~11 M tasks/s  </td></tr>
+<td class="markdownTableBodyNone">Pool task throughput (tiny echo tasks)  </td><td class="markdownTableBodyNone">~18 M tasks/s  </td></tr>
 </table>
 <p>See <a href="https://github.com/shikokuchuo/libmizu/blob/main/bench/notes.md"><span class="tt">bench/notes.md</span></a> for the full dated records, including parker wake latency and spill-region costs.</p>
 <h1 class="doxsection"><a class="anchor" id="autotoc_md2"></a>
