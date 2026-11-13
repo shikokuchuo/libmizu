@@ -19,6 +19,8 @@ Versions carry an ABI contract: any wire-format change bumps
 
 ### Changed
 
+- `mizu_arrow_col_utf8` (binding-author tier) also concatenates a null-free
+  `large_utf8` column, narrowing its offsets, where it declined before.
 - A batch submit wakes at most one idle worker per task: a short batch no
   longer wakes every idle worker in the pool, and no worker is woken twice
   for the same batch.

@@ -2526,13 +2526,13 @@ MIZU_API size_t mizu_arrow_col_blob(const mizu_arrow *, int64_t col,
 MIZU_API int64_t mizu_arrow_col_validity(const mizu_arrow *, int64_t col,
                                          uint8_t *dst);
 
-/** A null-free utf8 (int32-offset) column's strings over every batch,
+/** A null-free utf8 or large_utf8 column's strings over every batch,
    concatenated for a binding's own string column: offs takes rows + 1
-   rebased int32 offsets from 0, data the packed bytes, one memcpy per
-   batch. Returns the packed byte count; offs NULL sizes. -1 (nothing
-   written) when the column is another kind or string form, a batch
-   carries nulls, or the bytes pass INT32_MAX: the caller keeps its
-   per-element gather (mizu_arrow_str_at). */
+   rebased int32 offsets from 0 (a large_utf8 column's narrowed), data the
+   packed bytes, one memcpy per batch. Returns the packed byte count; offs
+   NULL sizes. -1 (nothing written) when the column is another kind or a
+   string_view, a batch carries nulls, or the bytes pass INT32_MAX: the
+   caller keeps its per-element gather (mizu_arrow_str_at). */
 MIZU_API int64_t mizu_arrow_col_utf8(const mizu_arrow *, int64_t col,
                                      int32_t *offs, uint8_t *data);
 
